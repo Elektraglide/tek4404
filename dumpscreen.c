@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <errno.h>
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -28,7 +29,6 @@ struct bmpheader {
 };
 
 #define STRIDE 1024/8
-char video[STRIDE];
 
 
 int to_LE16(num)
@@ -53,23 +53,14 @@ char *argv[];
 struct bmpheader header;
 FILE *fp;
 FILE *output;
+char *fb;
 int i,x,y;
 int width = 640;
 int height = 480;
 
-fp = fopen("/dev/pmem", "r");
-if (fp == NULL)
-{
-  printf("failed to open /dev/pmem\n");
-  exit(1);
-}
+  output = fopen(argv[1], "w");
 
-/* video memory */
-fseek(fp, 0x600000,SEEK_CUR);
-
-output = fopen("output.bmp", "w");
-
-/* write an image header */		
+  /* write an image header */		
   header.bfType = to_LE16(0x4d42);
   header.bfSize = to_LE32(14+40+2*4+(width/8)*height);
   header. bfReserved1 = 0;
@@ -90,16 +81,18 @@ output = fopen("output.bmp", "w");
   header.biClrImportant = 0;
   /* must use palette */
   header.palette[0] = 0xffffffff;	/* white bg */
-  header.palette[1] = 0xff000000;	/* black fg */
+  header.palette[1] = 0x000000ff;	/* black fg */
   fwrite(&header, sizeof(header), 1, output);
 
+  fb = phys(1);
   for (y=0; y<height; y++)
   {
-    fread(video, STRIDE, 1, fp);
-    fwrite(video, width/8, 1, output);
+    fwrite(fb, width/8, 1, output);
+    fb += STRIDE;
   }
+  phys(-1);
+  
   fclose(output);
 
-  fclose(fp);
   exit(0);
 }
