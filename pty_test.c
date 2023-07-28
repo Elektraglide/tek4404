@@ -33,7 +33,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include pty_test.c
 */
 
 /***********************************/
-int ntohs(data)
+int myntohs(data)
 unsigned short data;
 {
 	return(data);
@@ -190,13 +190,13 @@ int len;
 {
   int cols,lines;
 
-  fprintf(stderr, "OPTION %d data (%d bytes)\n", option, len);
+  /* fprintf(stderr, "OPTION %d data (%d bytes)\n", option, len); */
 
   switch (option) {
     case TELOPT_NAWS:
       if (len == 4) {
-        cols = ntohs(*(unsigned short *) data);
-        lines = ntohs(*(unsigned short *) (data + 2));
+        cols = myntohs(*(unsigned short *) data);
+        lines = myntohs(*(unsigned short *) (data + 2));
         if (cols != 0) ts->term.cols = cols;
         if (lines != 0) ts->term.lines = lines;
       }
@@ -284,7 +284,8 @@ struct termstate *ts;
 
 /************************************************/
 
-main(argc,argv)
+int telnet_session(socket,argc,argv)
+int socket;
 int argc;
 char **argv;
 {
@@ -301,15 +302,19 @@ char **argv;
   char **child_av;
   int i;
 
-  /* accept a connection */
-
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
-  ts.sock = -1;
+  ts.sock = socket;
   ts.state = STATE_NORMAL;
   ts.term.type = TERM_VT100;
   ts.term.cols = 80;
   ts.term.lines = 25;
+
+  // Send initial options
+  sendopt(&ts, TELNET_WILL, TELOPT_ECHO);
+  sendopt(&ts, TELNET_WILL, TELOPT_SUPPRESS_GO_AHEAD);
+  sendopt(&ts, TELNET_WONT, TELOPT_LINEMODE);
+  sendopt(&ts, TELNET_DO, TELOPT_NAWS);
 
   /* build pty pair */
   rc = create_pty(ptfd);
@@ -334,7 +339,7 @@ char **argv;
     {
 
       FD_ZERO(&fd_in);
-      FD_SET(0, &fd_in);
+      FD_SET(socket, &fd_in);
       FD_SET(fdm, &fd_in);
 	  rc = select(fdm + 1, &fd_in, NULL, NULL, NULL);
       if (rc < 0)
@@ -343,31 +348,55 @@ char **argv;
           exit(23);
       }
 
-      /* read any stdin and send to slave input */
-      if (FD_ISSET(0, &fd_in))
+      /* read any socket input and send to slave input */
+      if (FD_ISSET(socket, &fd_in))
       {
-        n = read(0, input, sizeof(input));
-	    if (n > 0)
+	    if (ts.bi.start == ts.bi.end)
 	    {
-	      if (write(fdm, input, n) < 0)
-          {
-			/* slave gone away */
-             return(2);
-          }
-	    }
-      }
+          n = read(socket, ts.bi.data, sizeof(ts.bi.data));
+          if (n < 0)
+            return(1);
 
-      /* read any slave output and send to stdout */
+          ts.bi.start = ts.bi.data;
+          ts.bi.end = ts.bi.data + n;
+        }
+
+	    /* Parse user input for telnet options */
+	    parse(&ts);
+
+	    /* Application ready to receive */
+	    if (ts.bi.start != ts.bi.end)
+	    {
+		  n = write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
+		  if (n < 0)
+	        return(2);
+          ts.bi.start += n;
+	     }
+	   }
+
+      /* read any slave output and send to socket */
       if (FD_ISSET(fdm, &fd_in))
       {
-        n = read(fdm, input, sizeof(input));
-        if (n > 0)
+        // Data arrived from application
+        if (ts.bo.start == ts.bo.end) 
         {
-          write(1, input, n);
+	      n = read(fdm, ts.bo.data, sizeof(ts.bo.data));
+          if (n < 0)
+            return(3);
+
+	      ts.bo.start = ts.bo.data;
+          ts.bo.end = ts.bo.data + n;
+        }
+
+        if (ts.bo.start != ts.bo.end) 
+        {
+	      n = write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
+	      if (n < 0)
+	        return(4);
+	      ts.bo.start += n;
         }
       }
     }
-
   }
   else
   {
@@ -430,9 +459,69 @@ char **argv;
     return 1;
   }
 
+  fprintf(stderr, "EXIT\n");
   return 0;
 }
 
+char *
+netaddr(addr)
+unsigned long addr;
+{
+  static char ipstring[16];
 
+  sprintf(ipstring, "%02x:%02x:%02x:%02x", (int)(addr>>24)&255,(int)(addr>>16)&255,(int)(addr>>8)&255,(int)(addr>>0)&255);
+  return ipstring;
+}
+
+main(argc,argv)
+int argc;
+char **argv;
+{
+  int newsock;
+  int rc;
+  struct sockaddr_in serv_addr;
+  struct sockaddr_in cli_addr;
+  socklen_t cli_addr_len;
+
+  port = 8023;
+
+  sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock < 0) {
+    return 1;
+  }
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = htons(port);
+  rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
+  if (rc < 0) {
+    return 1;
+  }
+
+  rc = listen(sock, 5);
+  if (rc < 0) {
+    return 1;
+  }
+
+  fprintf(stderr, "telnetd started on port %d\n", port);
+  state = RUNNING;
+  while (1) {
+
+    newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
+    if (state == STOPPED) break;
+    if (newsock < 0) {
+      fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
+      return 1;
+    }
+
+    fprintf(stderr, "client connected from %s\n", netaddr(cli_addr.sin_addr.s_addr));
+
+    //setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
+
+    telnet_session(newsock, argc, argv);
+
+    fprintf(stderr, "client disconnected from %s\n", netaddr(cli_addr.sin_addr.s_addr));
+  }
+}
 
 
