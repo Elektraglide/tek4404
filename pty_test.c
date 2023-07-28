@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <errno.h> 
 #include <sys/pty.h> 
 #include <sys/sgtty.h>
@@ -7,9 +8,27 @@
 #include <net/telnet.h>
 #include <net/select.h>
 
+#ifdef __clang__
+
+#include "uniflexshim.h"
+
+#else
+
+typedef int fd_set;
+#define FD_SET(A,SET)	*SET |= (1<<A)
+#define FD_CLR(A,SET)	*SET &= ~(1<<A)
+#define FD_ZERO(SET)	*SET = 0
+#define FD_ISSET(A,SET)	(*SET & (1<<A))
+
+void setsid() {}
+
+#endif
+
 /*
 
-cc +v pty_test.c +l=netlib
+native: cc +v pty_test.c +l=netlib
+
+clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include pty_test.c 
 
 */
 
@@ -20,7 +39,7 @@ unsigned short data;
 	return(data);
 }
 
-char *strdup(s)
+char *mystrdup(s)
 char *s;
 {
   int len;
@@ -275,7 +294,7 @@ char **argv;
   char input[150];
   int n,rc;
 
-  int fd_in;
+  fd_set fd_in;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
@@ -311,29 +330,35 @@ char **argv;
     /* Close the slave side of the PTY */
     close(fds);
 
-    /* we do not want to busy wait; need to use idfd() to wait for input?
-	fcntl(0, FNOBLOCK);
-	fcntl(fdm, FNOBLOCK);
-    ***/
-
     while (1)
     {
 
-      fd_in = 0;
+      FD_ZERO(&fd_in);
+      FD_SET(0, &fd_in);
+      FD_SET(fdm, &fd_in);
 	  rc = select(fdm + 1, &fd_in, NULL, NULL, NULL);
+      if (rc < 0)
+      {
+          fprintf(stderr, "select() error %d\n", rc);
+          exit(23);
+      }
 
       /* read any stdin and send to slave input */
-      if (fd_in & (1<<0))
+      if (FD_ISSET(0, &fd_in))
       {
         n = read(0, input, sizeof(input));
 	    if (n > 0)
 	    {
-	      write(fdm, input, n);
+	      if (write(fdm, input, n) < 0)
+          {
+			/* slave gone away */
+             return(2);
+          }
 	    }
       }
 
       /* read any slave output and send to stdout */
-      if (fd_in & (1<<fdm))
+      if (FD_ISSET(fdm, &fd_in))
       {
         n = read(fdm, input, sizeof(input));
         if (n > 0)
@@ -357,8 +382,8 @@ char **argv;
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
 	new_term_settings.sg_flag |= RAW;
-	new_term_settings.sg_flag |= CBREAK;
-	new_term_settings.sg_flag |= CNTRL;
+	//new_term_settings.sg_flag |= CBREAK;
+	//new_term_settings.sg_flag |= CNTRL;
 	new_term_settings.sg_flag &= ~ECHO;
     stty(fds, &new_term_settings);
 
@@ -371,19 +396,17 @@ char **argv;
     dup(fds); /* PTY becomes standard output (1) */
     dup(fds); /* PTY becomes standard error (2) */
 
-    /* Now the original file descriptor is useless */
-    close(fds);
-
-    /* Make the current process a new session leader */
-    /* FIXME setsid(); */
-
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
     /* FIXME ioctl(0, TIOCSCTTY, 1); */
     n = control_pty(fds, PTY_INQUIRY, 0);
-    /* 
-control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
-     */
+    control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
+
+    /* Now the original file descriptor is useless */
+    close(fds);
+
+    /* Make the current process a new session leader */
+    setsid();
 
     /* Execution of the program */
     {
@@ -391,7 +414,7 @@ control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
       child_av = (char **)malloc(argc * sizeof(char *));
       for (i = 1; i < argc; i ++)
       {
-        child_av[i - 1] = strdup(argv[i]);
+        child_av[i - 1] = mystrdup(argv[i]);
       }
       child_av[i - 1] = NULL;
 
