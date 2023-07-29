@@ -7,6 +7,7 @@
 
 #include <net/telnet.h>
 #include <net/select.h>
+#include <net/inet.h>
 
 #ifdef __clang__
 
@@ -45,7 +46,7 @@ char *s;
   int len;
   char *dup;
 
-  len = strlen(s);
+  len = (int)strlen(s);
   dup = (char *)malloc(len + 1);
   strcpy(dup, s);
   return dup;
@@ -353,7 +354,7 @@ char **argv;
       {
 	    if (ts.bi.start == ts.bi.end)
 	    {
-          n = read(socket, ts.bi.data, sizeof(ts.bi.data));
+          n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
           if (n < 0)
             return(1);
 
@@ -367,7 +368,7 @@ char **argv;
 	    /* Application ready to receive */
 	    if (ts.bi.start != ts.bi.end)
 	    {
-		  n = write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
+		  n = (int)write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
 		  if (n < 0)
 	        return(2);
           ts.bi.start += n;
@@ -380,7 +381,7 @@ char **argv;
         // Data arrived from application
         if (ts.bo.start == ts.bo.end) 
         {
-	      n = read(fdm, ts.bo.data, sizeof(ts.bo.data));
+	      n = (int)read(fdm, ts.bo.data, sizeof(ts.bo.data));
           if (n < 0)
             return(3);
 
@@ -390,7 +391,7 @@ char **argv;
 
         if (ts.bo.start != ts.bo.end) 
         {
-	      n = write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
+	      n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
 	      if (n < 0)
 	        return(4);
 	      ts.bo.start += n;
@@ -463,16 +464,7 @@ char **argv;
   return 0;
 }
 
-char *
-netaddr(addr)
-unsigned long addr;
-{
-  static char ipstring[16];
-
-  sprintf(ipstring, "%02x:%02x:%02x:%02x", (int)(addr>>24)&255,(int)(addr>>16)&255,(int)(addr>>8)&255,(int)(addr>>0)&255);
-  return ipstring;
-}
-
+int
 main(argc,argv)
 int argc;
 char **argv;
@@ -514,13 +506,13 @@ char **argv;
       return 1;
     }
 
-    fprintf(stderr, "client connected from %s\n", netaddr(cli_addr.sin_addr.s_addr));
+    fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
 
     //setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 
     telnet_session(newsock, argc, argv);
 
-    fprintf(stderr, "client disconnected from %s\n", netaddr(cli_addr.sin_addr.s_addr));
+    fprintf(stderr, "client disconnected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
   }
 }
 
