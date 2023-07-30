@@ -354,6 +354,12 @@ char **argv;
           if (n < 0)
             return(3);
 
+		  if (n == 0)
+		  {
+		    close(socket);
+		    return(0);
+		  }
+
 	      ts.bo.start = ts.bo.data;
           ts.bo.end = ts.bo.data + n;
         }
@@ -394,9 +400,9 @@ char **argv;
     close(1); /* Close standard output (current terminal) */
     close(2); /* Close standard error (current terminal) */
 
-    dup(fds); /* PTY becomes standard input (0) */
-    dup(fds); /* PTY becomes standard output (1) */
-    dup(fds); /* PTY becomes standard error (2) */
+    dup2(fds, 0); /* PTY becomes standard input (0) */
+    dup2(fds, 1); /* PTY becomes standard output (1) */
+    dup2(fds, 2); /* PTY becomes standard error (2) */
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
@@ -500,9 +506,9 @@ char **argv;
 
     //setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 
-    telnet_session(newsock, argc, argv);
+    rc = telnet_session(newsock, argc, argv);
 
-    fprintf(stderr, "client disconnected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+    fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
   }
 }
 
