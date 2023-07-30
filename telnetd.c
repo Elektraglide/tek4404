@@ -381,6 +381,9 @@ char **argv;
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
 	new_term_settings.sg_flag |= RAW;
+	new_term_settings.sg_flag |= CRMOD;
+	new_term_settings.sg_flag |= XTABS;
+	
 	//new_term_settings.sg_flag |= CBREAK;
 	//new_term_settings.sg_flag |= CNTRL;
 	new_term_settings.sg_flag &= ~ECHO;
