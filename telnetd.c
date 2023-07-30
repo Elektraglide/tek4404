@@ -4,6 +4,7 @@
 #include <sys/pty.h> 
 #include <sys/sgtty.h>
 #include <sys/fcntl.h>
+#include <signal.h>
 
 #include <net/telnet.h>
 #include <net/select.h>
@@ -32,20 +33,6 @@ native: cc +v pty_test.c +l=netlib
 clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c 
 
 */
-
-/***********************************/
-
-char *mystrdup(s)
-char *s;
-{
-  int len;
-  char *dup;
-
-  len = (int)strlen(s);
-  dup = (char *)malloc(len + 1);
-  strcpy(dup, s);
-  return dup;
-}
 
 /***********************************/
 
@@ -251,6 +238,11 @@ struct termstate *ts;
 }
 
 /************************************************/
+void
+cleanup(int sig)
+{
+  exit(2);
+}
 
 int telnet_session(socket,argc,argv)
 int socket;
@@ -261,6 +253,7 @@ char **argv;
   int ptfd[2];
   int fdm,fds;
   int n,rc;
+  int last_was_cr;
 
   fd_set fd_in;
 
@@ -304,6 +297,7 @@ char **argv;
     /* Close the slave side of the PTY */
     close(fds);
 
+    last_was_cr = 0;
     while (1)
     {
 
@@ -325,6 +319,13 @@ char **argv;
           n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
           if (n < 0)
             return(1);
+
+          // Convert cr nul to cr lf.
+          for (i = 0; i < n; ++i) {
+            unsigned char ch = ts.bi.data[i];
+            if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
+            last_was_cr = (ch == '\r');
+          }
 
           ts.bi.start = ts.bi.data;
           ts.bi.end = ts.bi.data + n;
@@ -405,6 +406,10 @@ char **argv;
 
     /* Make the current process a new session leader */
     setsid();
+
+	signal(SIGHUP, cleanup);
+	signal(SIGINT, cleanup);
+	signal(SIGTERM, cleanup);
 
     /* Execution of the program */
     {
