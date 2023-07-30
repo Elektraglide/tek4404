@@ -29,16 +29,11 @@ void setsid() {}
 
 native: cc +v pty_test.c +l=netlib
 
-clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include pty_test.c 
+clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c 
 
 */
 
 /***********************************/
-int myntohs(data)
-unsigned short data;
-{
-	return(data);
-}
 
 char *mystrdup(s)
 char *s;
@@ -64,40 +59,9 @@ char *s;
 #define STATE_OPTDAT 4
 #define STATE_SE     5
 
-/* Special telnet characters */
 
-#define TELNET_SE    240   /* End of subnegotiation parameters */
-#define TELNET_NOP   241   /* No operation */
-#define TELNET_MARK  242   /* Data mark */
-#define TELNET_BRK   243   /* Break */
-#define TELNET_IP    244   /* Interrupt process */
-#define TELNET_AO    245   /* Abort output */
-#define TELNET_AYT   246   /* Are you there */
-#define TELNET_EC    247   /* Erase character */
-#define TELNET_EL    248   /* Erase line */
-#define TELNET_GA    249   /* Go ahead */
-#define TELNET_SB    250   /* Start of subnegotiation parameters */
-#define TELNET_WILL  251   /* Will option code */
-#define TELNET_WONT  252   /* Won't option code */
-#define TELNET_DO    253   /* Do option code */
-#define TELNET_DONT  254   /* Don't option code */
-#define TELNET_IAC   255   /* Interpret as command */
+/* Telnet options NOT defined by Tek4404 headers */
 
-/* Telnet options */
-
-#define TELOPT_TRANSMIT_BINARY      0  /* Binary Transmission (RFC856) */
-#define TELOPT_ECHO                 1  /* Echo (RFC857) */
-#define TELOPT_SUPPRESS_GO_AHEAD    3  /* Suppress Go Ahead (RFC858) */
-#define TELOPT_STATUS               5  /* Status (RFC859) */
-#define TELOPT_TIMING_MARK          6  /* Timing Mark (RFC860) */
-#define TELOPT_NAOCRD              10  /* Output Carriage-Return Disposition (RFC652) */
-#define TELOPT_NAOHTS              11  /* Output Horizontal Tab Stops (RFC653) */
-#define TELOPT_NAOHTD              12  /* Output Horizontal Tab Stop Disposition (RFC654) */
-#define TELOPT_NAOFFD              13  /* Output Formfeed Disposition (RFC655) */
-#define TELOPT_NAOVTS              14  /* Output Vertical Tabstops (RFC656) */
-#define TELOPT_NAOVTD              15  /* Output Vertical Tab Disposition (RFC657) */
-#define TELOPT_NAOLFD              16  /* Output Linefeed Disposition (RFC658) */
-#define TELOPT_EXTEND_ASCII        17  /* Extended ASCII (RFC698) */
 #define TELOPT_TERMINAL_TYPE       24  /* Terminal Type (RFC1091) */
 #define TELOPT_NAWS                31  /* Negotiate About Window Size (RFC1073) */
 #define TELOPT_TERMINAL_SPEED      32  /* Terminal Speed (RFC1079) */
@@ -111,7 +75,6 @@ char *s;
 #define RUNNING 1
 
 int port;
-char *pgm;
 int sock = -1;
 int state = STOPPED;
 
@@ -151,10 +114,13 @@ int option;
 {
   unsigned char buf[3];
 
-  buf[0] = TELNET_IAC;
+  buf[0] = IAC;
   buf[1] = (unsigned char) code;
   buf[2] = (unsigned char) option;
   write(ts->sock, buf, 3);
+  
+  /* fprintf(stderr, "sendopt: OPTION %d code %d\n", option, code); */
+
 }
 
 void parseopt(ts, code, option)
@@ -164,21 +130,21 @@ int option;
 {
 
   switch (option) {
-    case TELOPT_ECHO:
-    case TELOPT_SUPPRESS_GO_AHEAD:
+    case T_ECHO:
+    case T_SGA:
     case TELOPT_NAWS:
       break;
 
     case TELOPT_TERMINAL_TYPE:
     case TELOPT_TERMINAL_SPEED:
-      sendopt(ts, TELNET_DO, option);
+      sendopt(ts, DO, option);
       break;
 
     default:
-      if (code == TELNET_WILL || code == TELNET_WONT) {
-        sendopt(ts, TELNET_DONT, option);
+      if (code == WILL || code == WONT) {
+        sendopt(ts, DONT, option);
       } else {
-        sendopt(ts, TELNET_WONT, option);
+        sendopt(ts, WONT, option);
       }
   }
 }
@@ -191,15 +157,16 @@ int len;
 {
   int cols,lines;
 
-  /* fprintf(stderr, "OPTION %d data (%d bytes)\n", option, len); */
+  fprintf(stderr, "parseoptdat: OPTION %d data (%d bytes)\n", option, len);
 
   switch (option) {
     case TELOPT_NAWS:
       if (len == 4) {
-        cols = myntohs(*(unsigned short *) data);
-        lines = myntohs(*(unsigned short *) (data + 2));
+        cols = ntohs(*(unsigned short *) data);
+        lines = ntohs(*(unsigned short *) (data + 2));
         if (cols != 0) ts->term.cols = cols;
         if (lines != 0) ts->term.lines = lines;
+        fprintf(stderr, "parseoptdat: term(%d,%d)\n",ts->term.cols,ts->term.lines);
       }
       break;
 
@@ -223,7 +190,7 @@ struct termstate *ts;
 
     switch (ts->state) {
       case STATE_NORMAL:
-        if (c == TELNET_IAC) {
+        if (c == IAC) {
           ts->state = STATE_IAC;
         } else {
           *q++ = c;
@@ -232,20 +199,20 @@ struct termstate *ts;
 
       case STATE_IAC:
         switch (c) {
-          case TELNET_IAC:
+          case IAC:
             *q++ = c;
             ts->state = STATE_NORMAL;
             break;
 
-          case TELNET_WILL:
-          case TELNET_WONT:
-          case TELNET_DO:
-          case TELNET_DONT:
+          case WILL:
+          case WONT:
+          case DO:
+          case DONT:
             ts->code = c;
             ts->state = STATE_OPT;
             break;
 
-          case TELNET_SB:
+          case SB:
             ts->state = STATE_SB;
             break;
 
@@ -266,7 +233,7 @@ struct termstate *ts;
         break;
 
       case STATE_OPTDAT:
-        if (c == TELNET_IAC) {
+        if (c == IAC) {
           ts->state = STATE_SE;
         } else if (ts->optlen < sizeof(ts->optdata)) {
           ts->optdata[ts->optlen++] = c;
@@ -274,7 +241,7 @@ struct termstate *ts;
         break;
 
       case STATE_SE:
-        if (c == TELNET_SE) parseoptdat(ts, ts->code, ts->optdata, ts->optlen);
+        if (c == SE) parseoptdat(ts, ts->code, ts->optdata, ts->optlen);
         ts->state = STATE_NORMAL;
         break;
     } 
@@ -293,7 +260,6 @@ char **argv;
   struct termstate ts;
   int ptfd[2];
   int fdm,fds;
-  char input[150];
   int n,rc;
 
   fd_set fd_in;
@@ -301,6 +267,8 @@ char **argv;
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
   char **child_av;
+  char *child_args;
+  int child_av_len;
   int i;
 
   /* telnet state */
@@ -312,10 +280,10 @@ char **argv;
   ts.term.lines = 25;
 
   // Send initial options
-  sendopt(&ts, TELNET_WILL, TELOPT_ECHO);
-  sendopt(&ts, TELNET_WILL, TELOPT_SUPPRESS_GO_AHEAD);
-  sendopt(&ts, TELNET_WONT, TELOPT_LINEMODE);
-  sendopt(&ts, TELNET_DO, TELOPT_NAWS);
+  sendopt(&ts, WILL, T_ECHO);
+  sendopt(&ts, WILL, T_SGA);
+  sendopt(&ts, WONT, TELOPT_LINEMODE);
+  sendopt(&ts, DO, TELOPT_NAWS);
 
   /* build pty pair */
   rc = create_pty(ptfd);
@@ -342,7 +310,7 @@ char **argv;
       FD_ZERO(&fd_in);
       FD_SET(socket, &fd_in);
       FD_SET(fdm, &fd_in);
-	  rc = select(fdm + 1, &fd_in, NULL, NULL, NULL);
+	  rc = select(max(fdm,socket) + 1, &fd_in, NULL, NULL, NULL);
       if (rc < 0)
       {
           fprintf(stderr, "select() error %d\n", rc);
@@ -440,11 +408,22 @@ char **argv;
 
     /* Execution of the program */
     {
-      /* Build the command line */
-      child_av = (char **)malloc(argc * sizeof(char *));
+      /* determine space for command line vector */
+      child_av_len = sizeof(char *);
       for (i = 1; i < argc; i ++)
       {
-        child_av[i - 1] = mystrdup(argv[i]);
+        child_av_len += sizeof(char *);
+        child_av_len += strlen(argv[i]) + 1;
+      }
+      
+      /* vectors to strings followed by strings themselves */
+      child_av = (char **)malloc(child_av_len);
+      child_args = (char *)(child_av + argc + 1);
+      for (i = 1; i < argc; i ++)
+      {
+        child_av[i - 1] = child_args;
+        strcpy(child_args, argv[i]);
+        child_args += strlen(argv[i]) + 1;
       }
       child_av[i - 1] = NULL;
 
@@ -474,6 +453,7 @@ char **argv;
   struct sockaddr_in serv_addr;
   struct sockaddr_in cli_addr;
   socklen_t cli_addr_len;
+  int reuse = 1;
 
   port = 8023;
 
@@ -481,6 +461,8 @@ char **argv;
   if (sock < 0) {
     return 1;
   }
+
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
 
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
