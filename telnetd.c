@@ -502,14 +502,18 @@ char **argv;
       return 1;
     }
 
-    fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
-
     //setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 
-    rc = telnet_session(newsock, argc, argv);
-
-    fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
+    if (fork())
+    {
+      fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      close(newsock);
+    }
+    else
+    {
+      rc = telnet_session(newsock, argc, argv);
+     fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
+    }
   }
 }
-
 
