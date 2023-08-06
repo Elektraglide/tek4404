@@ -37,8 +37,9 @@ void setsid() {}
 
 struct BBCOM bb;
 
-typedef struct
+typedef struct _win
 {
+  struct _win *next;
   char title[32];
   struct RECT windowrect;
   struct RECT contentrect;
@@ -49,9 +50,9 @@ typedef struct
   VTemu vt;
 } Window;
 
+Window *winchain;
 Window allwindows[32];
 int numwindows = 0;
-int topwindow = 0;
 char *winprocess[] = {"bash", NULL};
 char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
@@ -151,18 +152,38 @@ int islogger;
   return pid;
 }
 
-void WindowDestroy(wid)
-int wid;
+int WindowTop(Window *win)
 {
+  Window *awin,*prevwin;
 
-  bb.halftoneform = &GrayMask;
-  RectDrawX(&allwindows[wid].windowrect, &bb);
+  if (win != winchain)
+  {
+    /* find it and put at the front */
+    prevwin = NULL;
+    awin = winchain;
+    while(awin)
+    {
+      if (awin == win)
+      {
+        if (prevwin)
+          prevwin->next = win->next;
+
+        win->next = winchain;
+        winchain = win;
+        break;
+      }
+      
+      prevwin = awin;
+      awin = awin->next;
+    }
+    
+    fprintf(stderr, "topwindow: %s\n", win->title);
+  }
   
-  if (wid != numwindows-1)
-    memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
+  bb.cliprect = win->windowrect;
+  win->vt.dirty |= 2;
 
-  numwindows--;
-  topwindow = numwindows ? 0 : -1;
+  return 0;
 }
 
 int WindowCreate(title, x, y, islogger)
@@ -172,7 +193,6 @@ int islogger;
 {
   int pid;
   Window *win = allwindows + numwindows;
-
   
   /* term emu */
 	win->vt.cols = 80;
@@ -200,12 +220,17 @@ int islogger;
     win->pid = pid;
     sprintf(win->title, "%s [pid:%d]", title, pid);
 
-    topwindow = numwindows;
-
     /* needs rendering */
     win->vt.dirty = 3;
 
-		return numwindows++;
+    /* link it */
+    win->next = winchain;
+    winchain = win;
+
+    numwindows++;
+    WindowTop(win);
+
+		return numwindows;
 	}
 	else
 	{
@@ -227,34 +252,43 @@ int n;
   return 0;
 }
 
-void WindowMove(int wid, int x, int y)
+void WindowMove(win, x, y)
+Window *win;
+int x, y;
 {
-  Window *win = allwindows + wid;
 
-  win->windowrect.x = x;
-  win->windowrect.y = y;
+  if (x != win->windowrect.x || win->windowrect.y != y)
+  {
+    win->windowrect.x = x;
+    win->windowrect.y = y;
 
-  /* update window content too */
-  win->contentrect.x = win->windowrect.x + WINBORDER;
-  win->contentrect.y = win->windowrect.y + WINTITLEBAR;
+    /* update window content too */
+    win->contentrect.x = win->windowrect.x + WINBORDER;
+    win->contentrect.y = win->windowrect.y + WINTITLEBAR;
+
+    win->vt.dirty |= 2;
+  }
   
-  win->vt.dirty |= 2;
+  if (win == winchain)
+  {
+    bb.cliprect = win->windowrect;
+  }
 }
 
-int WindowRender(wid)
-int wid;
+int WindowRender(win, forcedirty)
+Window *win;
+int forcedirty;
 {
   static long newtime,oldtime = 0;
-  Window *win = allwindows + wid;
   struct RECT r;
   struct POINT origin;
   int j,k;
   char line[128];
   char cursor;
   
-  if (win->vt.dirty)
+  if (forcedirty || win->vt.dirty)
   {
-    if (win->vt.dirty & 2)
+    if (forcedirty || (win->vt.dirty & 2))
     {
       // render frame
       bb.halftoneform = &WhiteMask;
@@ -288,7 +322,7 @@ int wid;
     }
 
     // render contents
-    if (win->vt.dirty & 1)
+    if (forcedirty || (win->vt.dirty & 1))
     {
       origin.x = win->contentrect.x;
       origin.y = win->contentrect.y;
@@ -312,7 +346,7 @@ int wid;
   /* focus window has blinking cursor */
   if ((win->vt.dirty & 2) == 0)
   {
-    if ((wid == topwindow) && (win->vt.hidecursor == 0))
+    if ((win == winchain) && (win->vt.hidecursor == 0))
     {
       newtime = EGetTime() / 256;
       if (oldtime != newtime)
@@ -333,6 +367,79 @@ int wid;
   win->vt.dirty = 0;
 
   return 0;
+}
+
+void Paint(win, r)
+Window *win;
+struct RECT *r;
+{
+  struct RECT overlap;
+  struct QUADRECT quadrect;
+  int i;
+
+  /* paint desktop */
+  if (win == NULL)
+  {
+    bb.cliprect.x = 0;
+    bb.cliprect.y = 0;
+    bb.cliprect.w = ScrWidth;
+    bb.cliprect.h = ScrHeight;
+    bb.halftoneform =  &GrayMask;
+    RectDrawX(r, &bb);
+  }
+  else
+  {
+    /* repaint self */
+    RectIntersect(r, &win->windowrect, &overlap);
+    if (overlap.w && overlap.h)
+    {
+      bb.cliprect = overlap;
+      WindowRender(win, TRUE);
+    }
+
+    /* recurse for parts outside this window */
+    RectAreasOutside(r, &win->windowrect, &quadrect);
+    for(i=0; i<quadrect.next; i++)
+    {
+      Paint(win->next, &quadrect.region[i]);
+    }
+  }
+}
+
+void WindowDestroy(wid)
+int wid;
+{
+  Window *awin,*prevwin;
+  struct RECT oldrect;
+  int i;
+
+  /* unlink it */
+  prevwin = NULL;
+  awin = winchain;
+  for(i=0; i<numwindows; i++)
+  {
+    if (awin == &allwindows[wid])
+    {
+      if (prevwin)
+        prevwin->next = allwindows[wid].next;
+      else
+        winchain = allwindows[wid].next;
+        
+      break;
+    }
+    
+    prevwin = awin;
+    awin = awin->next;
+  }
+
+  oldrect = allwindows[wid].windowrect;
+  memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
+  numwindows--;
+  
+  if (numwindows > 0)
+    WindowTop(&allwindows[0]);
+    
+  Paint(winchain, &oldrect);
 }
 
 void
@@ -368,9 +475,12 @@ main(int argc, char *argv[])
   bb.halftoneform = &GrayMask;
   RectDrawX(&bb.cliprect, &bb);
 
-
   EventEnable();
   SetKBCode(0);
+
+  // window chain
+  winchain = NULL;
+  numwindows = 0;
   
   // create a logger of /var/log/system.log OR run a shell
   //WindowCreate("SysLog", 50, 50, TRUE);
@@ -419,8 +529,8 @@ main(int argc, char *argv[])
 		  if (FD_ISSET(0, &fd_in))
 		  {
 			  n = (int)read(0, inputbuffer, sizeof(inputbuffer));
-        if (topwindow >= 0)
-          n = (int)write(allwindows[topwindow].pfd[1], inputbuffer, n);
+        if (winchain)
+          n = (int)write(winchain->pfd[1], inputbuffer, n);
 		  }
 
       /* read any output from window process */
@@ -452,19 +562,21 @@ main(int argc, char *argv[])
       if (ev.estruct.etype == E_PRESS)
       {
         char ch = ev.estruct.eparam;
-        if (topwindow >= 0)
-          n = (int)write(allwindows[topwindow].pfd[1], &ch, 1);
+        if (winchain)
+          n = (int)write(winchain->pfd[1], &ch, 1);
       }
 
       if (GetButtons() & M_LEFT)
       {
         /* walk from frontmost windows back to find which we are over */
         GetMPosition(&origin);
-        win = allwindows + numwindows - 1;
-        for(i=numwindows-1; i>=0; i--,win--)
+        win = winchain;
+        while (win)
         {
           if (RectContainsPoint(&win->windowrect, &origin))
           {
+            WindowTop(win);
+
             /* record offset from window boundary */
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
@@ -474,38 +586,32 @@ main(int argc, char *argv[])
             {
               GetMPosition(&p);
 
-              /* repaint only difference of old and new */
-              r.x = p.x - offset.x;
-              r.y = p.y - offset.y;
-              r.w = win->windowrect.w;
-              r.h = win->windowrect.h;
-              bb.halftoneform =  &GrayMask;
-              RectAreasOutside(&win->windowrect, &r, &quadrect);
-              for(j=0; j<quadrect.next; j++)
-                RectDrawX(&quadrect.region[j], &bb);
+              r2 = win->windowrect;
+              WindowMove(win, p.x - offset.x, p.y - offset.y);
 
-              WindowMove(i, p.x - offset.x, p.y - offset.y);
-              WindowRender(i);
+              /* repaint only difference of old and new */
+              RectAreasOutside(&r2, &win->windowrect, &quadrect);
+              for(j=0; j<quadrect.next; j++)
+                Paint(winchain, &quadrect.region[j]);
+              WindowRender(win, FALSE);
             }
 
-            /* repaint difference of old and new */
+            /* repaint union of old and new */
             r.x = origin.x - offset.x;
             r.y = origin.y - offset.y;
             r.w = win->windowrect.w;
             r.h = win->windowrect.h;
-            bb.halftoneform =  &LightGrayMask;
-            RectAreasOutside(&r, &win->windowrect, &quadrect);
-            for(j=0; j<quadrect.next; j++)
-              RectDrawX(&quadrect.region[j], &bb);
+            RectMerge(&r, &win->windowrect, &r2);
+            Paint(winchain, &r2);
 
-            /* now has focus */
-            topwindow = i;
-            bb.cliprect = win->windowrect;
-            
             win->vt.dirty |= 1;
+            WindowRender(win, FALSE);
             
+            /* now has focus */
             break;
           }
+          
+          win = win->next;
         }
       }
       else
@@ -520,10 +626,11 @@ main(int argc, char *argv[])
 
       }
 
-      win = allwindows;
-		  for(i=0; i<numwindows; i++,win++)
+      win = winchain;
+		  while(win)
 		  {
-        WindowRender(i);
+        WindowRender(win, FALSE);
+        win = win->next;
 		  }
 
 	  }
