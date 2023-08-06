@@ -31,9 +31,12 @@ void setsid() {}
 
 #include "vtemu.h"
 
+extern int rand();
+
 /**********************************/
 #define WINTITLEBAR 16
 #define WINBORDER 8
+#define CLOSEBOX
 
 struct BBCOM bb;
 
@@ -266,6 +269,7 @@ int x, y;
     win->contentrect.x = win->windowrect.x + WINBORDER;
     win->contentrect.y = win->windowrect.y + WINTITLEBAR;
 
+    /* frame is dirty */
     win->vt.dirty |= 2;
   }
   
@@ -290,10 +294,22 @@ int forcedirty;
   {
     if (forcedirty || (win->vt.dirty & 2))
     {
-      // render frame
+      // render (just) frame
+      r = win->windowrect;
+      r.h = WINTITLEBAR;
       bb.halftoneform = &WhiteMask;
-      RectDrawX(&win->windowrect, &bb);
+      RectDrawX(&r, &bb);
+      r = win->windowrect;
+      r.w = WINBORDER;
+      RectDrawX(&r, &bb);
+      r.x += win->windowrect.w - WINBORDER;
+      RectDrawX(&r, &bb);
+      r = win->windowrect;
+      r.y += win->windowrect.h - WINBORDER;;
+      r.h = WINBORDER;
+      RectDrawX(&r, &bb);
 
+      // some accent lines
       bb.halftoneform = &BlackMask;
       r = win->windowrect;
       r.h = WINTITLEBAR;
@@ -307,8 +323,10 @@ int forcedirty;
       /* render closebox */
       bb.halftoneform = &VeryLightGrayMask;
       r = win->windowrect;
-      r.w = 16;
-      r.h = 16;
+      r.x += 4;
+      r.y += 4;
+      r.w = 8;
+      r.h = 8;
       RectDrawX(&r, &bb);
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
@@ -328,16 +346,24 @@ int forcedirty;
       origin.y = win->contentrect.y;
       for(j=0; j<win->vt.rows; j++)
       {
-        // NB we may have embedded \0 where cursor has been warped, so we need to handle this
-        for(k=0; k<win->vt.cols; k++)
+        /* will it be clipped away */
+        r.x = origin.x;
+        r.y = origin.y;
+        r.w = win->contentrect.w;
+        r.h = 9;
+        if (RectIntersects(&r, &bb.cliprect))
         {
-          line[k] = win->vt.buffer[win->vt.cols*j+k];
-          if (line[k] == 0)
-            line[k] = ' ';
+          // NB we may have embedded \0 where cursor has been warped, so we need to handle this
+          for(k=0; k<win->vt.cols; k++)
+          {
+            line[k] = win->vt.buffer[win->vt.cols*j+k];
+            if (line[k] == 0)
+              line[k] = ' ';
+          }
+          line[win->vt.cols] = '\0';
+          
+          StringDrawX(line, &origin, &bb);
         }
-        line[win->vt.cols] = '\0';
-        
-        StringDraw(line, &origin);
         origin.y += 9;
       }
     }
@@ -357,7 +383,8 @@ int forcedirty;
         cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
         if (!cursor)
           cursor = ' ';
-        CharDraw(newtime & 1 ? '_' : cursor, &origin);
+
+        CharDrawX(newtime & 1 ? '_' : cursor, &origin, &bb);
 
         oldtime = newtime;
       }
@@ -385,15 +412,20 @@ struct RECT *r;
     bb.cliprect.w = ScrWidth;
     bb.cliprect.h = ScrHeight;
     bb.halftoneform =  &GrayMask;
+
+    //i = rand() & 255;
+    //RectDebug(r, i,i,i);
+
     RectDrawX(r, &bb);
   }
   else
   {
     /* repaint self */
     RectIntersect(r, &win->windowrect, &overlap);
-    if (overlap.w && overlap.h)
+    if (overlap.w > 0 && overlap.h > 0)
     {
       bb.cliprect = overlap;
+     // RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
       WindowRender(win, TRUE);
     }
 
@@ -438,7 +470,7 @@ int wid;
   
   if (numwindows > 0)
     WindowTop(&allwindows[0]);
-    
+
   Paint(winchain, &oldrect);
 }
 
@@ -593,19 +625,11 @@ main(int argc, char *argv[])
               RectAreasOutside(&r2, &win->windowrect, &quadrect);
               for(j=0; j<quadrect.next; j++)
                 Paint(winchain, &quadrect.region[j]);
-              WindowRender(win, FALSE);
+              WindowRender(win, TRUE);
             }
 
-            /* repaint union of old and new */
-            r.x = origin.x - offset.x;
-            r.y = origin.y - offset.y;
-            r.w = win->windowrect.w;
-            r.h = win->windowrect.h;
-            RectMerge(&r, &win->windowrect, &r2);
-            Paint(winchain, &r2);
-
-            win->vt.dirty |= 1;
-            WindowRender(win, FALSE);
+            /* content is dirty */
+            win->vt.dirty |= 3;
             
             /* now has focus */
             break;
