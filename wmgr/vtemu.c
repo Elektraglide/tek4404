@@ -1,0 +1,447 @@
+//
+//  vtemu.c
+//  winprocmgr
+//
+//  Created by Adam Billyard on 05/08/2023.
+//
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <errno.h>
+#include "vtemu.h"
+
+extern int write();
+
+void VTreset(vt)
+VTemu *vt;
+{
+  vt->state = 0;
+  vt->wrapping = 0;
+  vt->hidecursor = 0;
+	vt->cx = 0;
+	vt->cy = 0;
+  vt->dirty = 1;
+  vt->margintop = 0;
+  vt->marginbot = vt->rows - 1;
+  
+  memset(vt->buffer, 0, vt->rows*vt->cols);
+}
+
+void VTmovelines(vt, dst, src, n)
+VTemu *vt;
+int dst,src,n;
+{
+    memmove(vt->buffer+vt->cols*dst, vt->buffer+vt->cols*src, vt->cols*n);
+}
+void VTclearlines(vt, dst, n)
+VTemu *vt;
+int dst,n;
+{
+    memset(vt->buffer+vt->cols*dst, 0, vt->cols*n);
+}
+
+void VTnewline(vt)
+VTemu *vt;
+{
+  //vt->buffer[vt->cy*vt->cols+vt->cols-1] = '\0';
+
+  /* scroll only region inside margintop/marginbot */
+  vt->cx = 0;
+  vt->cy++;
+  if (vt->cy > vt->marginbot)
+  {
+    /* scroll up */
+    VTmovelines(vt, vt->margintop, vt->margintop+1, vt->marginbot - vt->margintop);
+    VTclearlines(vt,vt->marginbot,1);
+    vt->cy--;
+  }
+}
+
+int asciinum(msg)
+char *msg;
+{
+  int i = 0;
+  while (isdigit(*msg))
+  {
+    i *= 10;
+    i += *msg++ - '0';
+  }
+  return i ? i : 1;
+  
+}
+
+int asciinum2(msg)
+char *msg;
+{
+  while(*msg++ != ';');
+  return asciinum(msg);
+}
+
+int asciinumdef0(msg)
+char *msg;
+{
+  if (isdigit(*msg))
+    return asciinum(msg);
+  else
+    return 0;
+}
+
+void reply(fdout, c)
+int fdout;
+char c;
+{
+   write(fdout, &c, 1);
+}
+
+int VToutput(vt, msg, n, fdout)
+VTemu *vt;
+char *msg;
+int n;
+int fdout;
+{
+  char c;
+  int i,j;
+
+  vt->dirty |= 1;
+  while (n--)
+  {
+    c = *msg++;
+
+    if (vt->state > 0)
+    {
+      vt->escseq[vt->state] = c;
+      vt->state++;
+      /* CSI Escape */
+      if (vt->escseq[1] == '[')
+      {
+        /* is it final byte */
+        if (c >= 0x40 && c <= 0x7e  && vt->state > 2)
+        {
+          switch(c)
+          {
+            case 'A':
+            vt->cy -= asciinum(vt->escseq+2);
+            break;
+            case 'B':
+            vt->cy += asciinum(vt->escseq+2);
+            break;
+            case 'C':
+            vt->cx += asciinum(vt->escseq+2);
+            break;
+            case 'D':
+            vt->cx -= asciinum(vt->escseq+2);
+            break;
+            case 'E':
+            vt->cy += asciinum(vt->escseq+2);
+            vt->cx = 0;
+            break;
+            case 'F':
+            vt->cy -= asciinum(vt->escseq+2);
+            vt->cx = 0;
+            break;
+            case 'G':
+            vt->cx = asciinum(vt->escseq+2) - 1;
+            break;
+            case 'H':
+            vt->cy = asciinum(vt->escseq+2) - 1;
+            vt->cx = asciinum2(vt->escseq+2) - 1;
+            break;
+            case 'J':
+            if (vt->escseq[2] == '1')
+            {
+              memset(vt->buffer, 0, vt->cols*vt->cy+vt->cx);
+            }
+            else
+            if (vt->escseq[2] == '2')
+            {
+              VTclearlines(vt, 0, vt->rows);
+            }
+            else
+            {
+              i = vt->cols * vt->rows;
+              memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
+            }
+            vt->cx = 0;
+            vt->cy = 0;
+            break;
+            case 'K':
+            if (vt->escseq[2] == '1')
+            {
+              memset(vt->buffer+vt->cols*vt->cy, 0, vt->cx);
+            }
+            else
+            if (vt->escseq[2] == '2')
+            {
+              VTclearlines(vt, vt->cy, 1);
+            }
+            else
+            if (vt->escseq[2] == '3')
+            {
+              VTclearlines(vt, vt->cy, 1);
+            }
+            else
+            {
+              memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
+            }
+            break;
+
+            case 'L':
+            i = asciinum(vt->escseq+2);
+            memmove(vt->buffer+vt->cols*(vt->cy+i), vt->buffer+vt->cols*vt->cy, vt->cols*i);
+            VTclearlines(vt, vt->cy, i);
+
+            break;
+            case 'M':
+            i = asciinum(vt->escseq+2);
+            memmove(vt->buffer+vt->cols*vt->cy, vt->buffer+vt->cols*(vt->cy+i), vt->cols*i);
+            memset(vt->buffer+vt->cols*(vt->cy+i), 0, vt->cols*(vt->rows-vt->cy-i));
+            break;
+
+            case 'P':
+            i = asciinum(vt->escseq+2);
+            j = vt->cols - vt->cx - i;
+            memmove(vt->buffer+vt->cols*vt->cy+vt->cx,vt->buffer+vt->cols*vt->cy+vt->cx+i,j);
+            break;
+
+            case 'S':
+            i = asciinum(vt->escseq+2);
+            memmove(vt->buffer, vt->buffer+vt->cols*i, vt->cols*i);
+            VTclearlines(vt, vt->rows-i, i);
+            break;
+            case 'T':
+            i = asciinum(vt->escseq+2);
+            memmove(vt->buffer+vt->cols*i, vt->buffer, vt->cols*i);
+            VTclearlines(vt, 0, i);
+            break;
+
+            case 'I':
+            vt->cx += 8 * asciinum(vt->escseq+2);
+            vt->cx &= -8;
+            break;
+            case 'Z':
+            vt->cx -= 8 * asciinum(vt->escseq+2);
+            vt->cx &= -8;
+            break;
+
+            case 'c':
+            /* I am a VT100 */
+            reply(fdout, 0x1b);
+            reply(fdout,'[');
+            reply(fdout,'?');
+            reply(fdout,'1');
+            reply(fdout,';');
+            reply(fdout,'2');
+            reply(fdout,'c');
+            break;
+
+            case 'd':
+            vt->cy = asciinum(vt->escseq+2) - 1;
+            break;
+
+            case 'f':
+            vt->cy = asciinum(vt->escseq+2) - 1;
+            vt->cx = asciinum2(vt->escseq+2);
+            break;
+
+            case 'm':
+            /* display attrib */
+            i = asciinumdef0(vt->escseq+2);
+            //fprintf(stderr,"text attrib %d\n", i);
+            //for(i=0; i<vt->state; i++)
+            //  vt->buffer[vt->cy*vt->cols+vt->cx++] = vt->escseq[i];
+            break;
+
+            case 'n':
+            /* status report */
+            i = asciinum(vt->escseq+2);
+            reply(fdout, 0x1b);
+            reply(fdout, '[');
+            if (i == 5)
+              reply(fdout, 'c');
+            if (i == 6)
+            {
+            reply(fdout, '0' + vt->cy + 1);
+            reply(fdout, ';');
+            reply(fdout, '0' + vt->cx + 1);
+            reply(fdout, 'R');
+            }
+            break;
+
+            case 'r':
+            vt->margintop = asciinum(vt->escseq+2) - 1;
+            vt->marginbot = asciinum2(vt->escseq+2) - 1;
+            vt->cx = 0;
+            vt->cy = 0;
+            break;
+
+            case 't':
+            i = asciinum(vt->escseq+2);
+            j = asciinum2(vt->escseq+2);
+            fprintf(stderr,"window manipulation %d - %d\n",i,j);
+            break;
+
+            case 'h':
+            case 'l':
+            if (vt->escseq[2] == '?')
+            {
+              /* private attribs */
+              i = asciinum(vt->escseq+3);
+              fprintf(stderr,"attrib %d = %s\n", i, c=='h' ?"on" : "off");
+              if (i == 7)
+              {
+                vt->wrapping = (c=='h');
+              }
+              if (i == 25)
+              {
+                vt->hidecursor = (c=='l');
+              }
+              if (i == 47)
+              {
+                /* we dont implement saved screen */
+                VTclearlines(vt, 0, vt->rows);
+                vt->cx = vt->cy = 0;
+              }
+              if (i == 1049)
+              {
+                /* we dont implement an alt buffer */
+                VTclearlines(vt, 0, vt->rows);
+                vt->cx = vt->cy = 0;
+              }
+            }
+            if (vt->escseq[2] == '=')
+            {
+              /* set mode */
+              i = asciinum(vt->escseq+3);
+              fprintf(stderr,"set mode %d\n", i);
+            }
+            break;
+            
+            default:
+            fprintf(stderr,"unhandled: %d %c\n",asciinum(vt->escseq+2),c);
+            break;
+          }
+          
+          vt->state = 0;
+        }
+      }
+      else
+      if (vt->escseq[1] >= '(' && vt->escseq[1] <= ')')
+      {
+        if (c == '0' || c == 'A' || c == 'B')
+        {
+          fprintf(stderr,"Designate G0/1 charset\n");
+          vt->state = 0;
+        }
+      }
+      else
+      {
+        /* Fs Escape */
+        if (c == 'D')
+        {
+          i = vt->marginbot - vt->margintop;
+          VTmovelines(vt, vt->margintop, vt->margintop+1, vt->marginbot - vt->margintop);
+          VTclearlines(vt, vt->marginbot, 1);
+        }
+        else
+        if (c == 'M')
+        {
+          i = vt->marginbot - vt->margintop;
+          memmove(vt->buffer+vt->cols*(vt->margintop+1), vt->buffer+vt->cols*vt->margintop, vt->cols*i);
+          VTclearlines(vt, vt->margintop, 1);
+        }
+        else
+        if (c == 'E')
+        {
+          if (vt->cy < vt->rows)
+            vt->cy++;
+        }
+        else
+        if (c == 'c')
+        {
+          /* reset to initial state */
+          VTreset(vt);
+        }
+        else
+        /* Fp Escape */
+        if (c == '7')
+        {
+            /* save cursor */
+          vt->sx = vt->cx;
+          vt->sy = vt->cy;
+        }
+        else
+        if (c == '8')
+        {
+            /* restore cursor */
+          vt->cx = vt->sx;
+          vt->cy = vt->sy;
+        }
+        else
+        if (c == '=')
+        {
+          fprintf(stderr,"Application Keypad (DECKPAM)\n");
+        }
+        else
+        if (c == '>')
+        {
+          fprintf(stderr,"Normal Keypad (DECKPNM)\n");
+        }
+        else
+        {
+          /* unhandled */
+          n = n;
+        }
+	      vt->state = 0;
+      }
+    }
+    else
+    if (c == 0x1b)
+    {
+      /* escape code */
+      vt->escseq[0] = c;
+      vt->state = 1;
+    }
+    else
+    if (c == 0x08)
+    {
+      if (vt->cx)
+	      vt->cx--;
+    }
+    else
+    if (c == '\r')
+    {
+      vt->cx = 0;
+    }
+    else
+    if (c == '\n')
+    {
+      VTnewline(vt);
+    }
+    else
+    if (c == '\t')
+    {
+      vt->cx += 8;
+      vt->cx &= -8;
+    }
+    else
+    if (isprint(c))
+    {
+      if (vt->cx < vt->cols)
+        vt->buffer[vt->cy*vt->cols+vt->cx] = c;
+      vt->cx++;
+      if (vt->wrapping && vt->cx >= vt->cols)
+      {
+        VTnewline(vt);
+      }
+    }
+    else
+    {
+      /* unhandled */
+      n = n;
+    }
+  }
+
+  return 0;
+}
+
