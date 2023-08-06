@@ -7,6 +7,8 @@ various C projects for Tektronix4404
 - **telnetd.c**  - listens on port 8023 and creates a pty running argv[1]<br>
 - **uniflexshim.h**  - incomplete Uniflex emulation to allow compiling these on Darwin<br>
 
-- **tek_graphics.c** - incomplete implementation of Tek4404 graphics libs
-- window manager
-- 
+- **tek_graphics.c** - incomplete implementation of Tek4404 graphics libs using SDL 
+- **wmgr** implements a simple desktop with windows running a shell via a pseudo terminal.  Implements vt100.
+
+![alt text](https://github.com/Elektraglide/tek4404/blob/main/wmgr/tek4404_wmgr.png?raw=true)
+
