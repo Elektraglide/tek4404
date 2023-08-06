@@ -108,6 +108,29 @@ int CharDraw(char ch, struct POINT *loc)
   return 0;
 }
 
+int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
+{
+  SDL_Rect dst = {loc->x,loc->y,7,9};
+  SDL_Rect src = {0,0,7,9};
+  SDL_Rect cr;
+  
+  cr.x = bbcom->cliprect.x;
+  cr.y = bbcom->cliprect.y;
+  cr.w = bbcom->cliprect.w;
+  cr.h = bbcom->cliprect.h;
+  SDL_RenderSetClipRect(renderer, &cr);
+
+  src.x = ((ch - ' ') % 18) * 7;
+  src.y = ((ch - ' ') / 18) * 9;
+  SDL_RenderCopy(renderer, font7x9, &src, &dst);
+
+  // dirty area
+  updatewin(&dst);
+
+  return 0;
+}
+
+
 int StringWidth(char *string,struct FontHeader *font)
 {
   int w = 0;
@@ -659,6 +682,23 @@ int RectDrawX(struct RECT *rect, struct BBCOM *bbcom)
   return 0;
 }
 
+int RectDebug(struct RECT *rect, int r1, int g, int b)
+{
+  SDL_Rect r;
+  
+  r.x = rect->x;
+  r.y = rect->y;
+  r.w = rect->w;
+  r.h = rect->h;
+
+  SDL_RenderSetClipRect(renderer, NULL);
+  SDL_SetRenderDrawColor(renderer, r1,g,b,255);
+  SDL_RenderFillRect(renderer, &r);
+  updatewin(&r);
+  updatewin(&r);
+  updatewin(&r);
+}
+
 int RectFromUser(struct RECT *rect)
 {
 
@@ -687,7 +727,7 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
   {
     quadrect->region[i].x = r1.x;
     quadrect->region[i].y = r1.y;
-    quadrect->region[i].w = rect2->x - r1.x;
+    quadrect->region[i].w = min(r1.w, rect2->x - r1.x);
     quadrect->region[i].h = r1.h;
     i++;
     
@@ -700,7 +740,7 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
     quadrect->region[i].x = r1.x;
     quadrect->region[i].y = r1.y;
     quadrect->region[i].w = r1.w;
-    quadrect->region[i].h = rect2->y - r1.y;
+    quadrect->region[i].h = min(r1.h, rect2->y - r1.y);
     i++;
     
     r1.h -= rect2->y - r1.y;
@@ -709,9 +749,9 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
 
   if (r1.x+r1.w > rect2->x+rect2->w)
   {
-    quadrect->region[i].x = rect2->x+rect2->w;
+    quadrect->region[i].x = max(r1.x, rect2->x+rect2->w);
     quadrect->region[i].y = r1.y;
-    quadrect->region[i].w = (r1.x+r1.w) - (rect2->x+rect2->w);
+    quadrect->region[i].w = (r1.x+r1.w) - quadrect->region[i].x;
     quadrect->region[i].h = r1.h;
     i++;
 
@@ -721,9 +761,9 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
   if (r1.y+r1.h > rect2->y+rect2->h)
   {
     quadrect->region[i].x = r1.x;
-    quadrect->region[i].y = rect2->y + rect2->h;
+    quadrect->region[i].y = max(r1.y , rect2->y + rect2->h);
     quadrect->region[i].w = r1.w;
-    quadrect->region[i].h = (r1.y+r1.h) - (rect2->y+rect2->h);
+    quadrect->region[i].h = (r1.y+r1.h) - quadrect->region[i].y;
     i++;
 
     r1.h -= (r1.y+r1.y) - (rect2->y+rect2->h);
