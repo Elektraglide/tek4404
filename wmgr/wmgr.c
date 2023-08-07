@@ -270,7 +270,7 @@ int x, y;
     win->contentrect.y = win->windowrect.y + WINTITLEBAR;
 
     /* frame is dirty */
-    win->vt.dirty |= 2;
+    win->vt.dirty |= 3;
   }
   
   if (win == winchain)
@@ -370,7 +370,6 @@ int forcedirty;
   }
 
   /* focus window has blinking cursor */
-  if ((win->vt.dirty & 2) == 0)
   {
     if ((win == winchain) && (win->vt.hidecursor == 0))
     {
@@ -391,19 +390,18 @@ int forcedirty;
     }
   }
   
-  win->vt.dirty = 0;
-
   return 0;
 }
 
-void Paint(win, r)
+void Paint(win, r, forcedirty)
 Window *win;
 struct RECT *r;
+int forcedirty;
 {
   struct RECT overlap;
   struct QUADRECT quadrect;
   int i;
-
+  
   /* paint desktop */
   if (win == NULL)
   {
@@ -412,9 +410,6 @@ struct RECT *r;
     bb.cliprect.w = ScrWidth;
     bb.cliprect.h = ScrHeight;
     bb.halftoneform =  &GrayMask;
-
-    //i = rand() & 255;
-    //RectDebug(r, i,i,i);
 
     RectDrawX(r, &bb);
   }
@@ -425,15 +420,14 @@ struct RECT *r;
     if (overlap.w > 0 && overlap.h > 0)
     {
       bb.cliprect = overlap;
-     // RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
-      WindowRender(win, TRUE);
+      WindowRender(win, forcedirty);
     }
 
     /* recurse for parts outside this window */
     RectAreasOutside(r, &win->windowrect, &quadrect);
     for(i=0; i<quadrect.next; i++)
     {
-      Paint(win->next, &quadrect.region[i]);
+      Paint(win->next, &quadrect.region[i], forcedirty);
     }
   }
 }
@@ -471,7 +465,7 @@ int wid;
   if (numwindows > 0)
     WindowTop(&allwindows[0]);
 
-  Paint(winchain, &oldrect);
+  Paint(winchain, &oldrect, TRUE);
 }
 
 void
@@ -624,8 +618,9 @@ main(int argc, char *argv[])
               /* repaint only difference of old and new */
               RectAreasOutside(&r2, &win->windowrect, &quadrect);
               for(j=0; j<quadrect.next; j++)
-                Paint(winchain, &quadrect.region[j]);
-              WindowRender(win, TRUE);
+                Paint(winchain, &quadrect.region[j], TRUE);
+
+              WindowRender(win, FALSE);
             }
 
             /* content is dirty */
@@ -653,7 +648,12 @@ main(int argc, char *argv[])
       win = winchain;
 		  while(win)
 		  {
-        WindowRender(win, FALSE);
+        if (win->vt.dirty || (win == winchain))
+        {
+          Paint(winchain, &win->windowrect, FALSE);
+          win->vt.dirty = 0;
+        }
+
         win = win->next;
 		  }
 
