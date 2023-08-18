@@ -13,7 +13,7 @@ SDL_Window *window;
 SDL_Surface *framebuffer;
 SDL_Renderer *renderer;
 SDL_Rect vport;
-SDL_Texture *font7x9;
+SDL_Texture *font8x16;
 
 struct FORM Screen;
 union EVENTUNION eventqueue[32];
@@ -95,12 +95,12 @@ int CharWidth(char ch, struct FontHeader *font)
 
 int CharDraw(char ch, struct POINT *loc)
 {
-  SDL_Rect dst = {loc->x,loc->y,7,9};
-  SDL_Rect src = {0,0,7,9};
+  SDL_Rect dst = {loc->x,loc->y,8,16};
+  SDL_Rect src = {0,0,8,16};
 
-  src.x = ((ch - ' ') % 18) * 7;
-  src.y = ((ch - ' ') / 18) * 9;
-  SDL_RenderCopy(renderer, font7x9, &src, &dst);
+  src.x = ((ch - ' ') % 18) * 8;
+  src.y = ((ch - ' ') / 18) * 16;
+  SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
   updatewin(&dst);
@@ -110,8 +110,8 @@ int CharDraw(char ch, struct POINT *loc)
 
 int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
 {
-  SDL_Rect dst = {loc->x,loc->y,7,9};
-  SDL_Rect src = {0,0,7,9};
+  SDL_Rect dst = {loc->x,loc->y,7,16};
+  SDL_Rect src = {0,0,7,16};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -120,9 +120,9 @@ int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
-  src.x = ((ch - ' ') % 18) * 7;
-  src.y = ((ch - ' ') / 18) * 9;
-  SDL_RenderCopy(renderer, font7x9, &src, &dst);
+  src.x = ((ch - ' ') % 18) * 8;
+  src.y = ((ch - ' ') / 18) * 16;
+  SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
   updatewin(&dst);
@@ -147,20 +147,20 @@ int StringWidth(char *string,struct FontHeader *font)
 int StringDraw(char *ch, struct POINT *loc)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,7,9};
-  SDL_Rect src = {0,0,7,9};
+  SDL_Rect dst = {loc->x,loc->y,8,16};
+  SDL_Rect src = {0,0,8,16};
   
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * 7;
-    src.y = ((c - ' ') / 18) * 9;
-    SDL_RenderCopy(renderer, font7x9, &src, &dst);
+    src.x = ((c - ' ') % 18) * 8;
+    src.y = ((c - ' ') / 18) * 16;
+    SDL_RenderCopy(renderer, font8x16, &src, &dst);
     dst.x += 7;
   }
   
   // dirty area
   dst.w = dst.x - loc->x;
-  dst.h = dst.y - loc->y + 9;
+  dst.h = dst.y - loc->y + 16;
   dst.x = loc->x;
   dst.y = loc->y;
 
@@ -172,8 +172,8 @@ int StringDraw(char *ch, struct POINT *loc)
 int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,7,9};
-  SDL_Rect src = {0,0,7,9};
+  SDL_Rect dst = {loc->x,loc->y,7,16};
+  SDL_Rect src = {0,0,7,16};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -184,15 +184,15 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
 
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * 7;
-    src.y = ((c - ' ') / 18) * 9;
-    SDL_RenderCopy(renderer, font7x9, &src, &dst);
+    src.x = ((c - ' ') % 18) * 8;
+    src.y = ((c - ' ') / 18) * 16;
+    SDL_RenderCopy(renderer, font8x16, &src, &dst);
     dst.x += 7;
   }
   
   // dirty area
   dst.w = dst.x - loc->x;
-  dst.h = dst.y - loc->y + 9;
+  dst.h = dst.y - loc->y + 16;
   dst.x = loc->x;
   dst.y = loc->y;
 
@@ -263,6 +263,7 @@ unsigned long EGetNext()
 			case SDL_QUIT:
 				break;
 
+#if 0
       case SDL_TEXTINPUT:
         if (keyboardenable)
         {
@@ -271,6 +272,7 @@ unsigned long EGetNext()
           ewrite = (ewrite + 1) & 31;
         }
 				break;
+#endif
 
 			case SDL_KEYDOWN:
         if (specialkey(event.key.keysym.scancode, 0))
@@ -281,22 +283,51 @@ unsigned long EGetNext()
             eventqueue[ewrite].estruct.eparam = '\n';
             ewrite = (ewrite + 1) & 31;
           }
+          else
           if (event.key.keysym.scancode == SDL_SCANCODE_BACKSPACE)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = 0x08;
             ewrite = (ewrite + 1) & 31;
           }
+          else
           if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = 0x1b;
             ewrite = (ewrite + 1) & 31;
           }
+          else
           if (event.key.keysym.scancode == SDL_SCANCODE_UP)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = 'U';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_SPACE)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = ' ';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode >= SDL_SCANCODE_A && event.key.keysym.scancode <= SDL_SCANCODE_Z)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = 'a' + event.key.keysym.scancode - SDL_SCANCODE_A;
+            if (event.key.keysym.mod & KMOD_CAPS)
+            {
+              eventqueue[ewrite].estruct.eparam -= 32;
+            }
+            if (event.key.keysym.mod & KMOD_SHIFT)
+            {
+              eventqueue[ewrite].estruct.eparam -= 32;
+            }
+            if (event.key.keysym.mod & KMOD_CTRL)
+            {
+              eventqueue[ewrite].estruct.eparam -= 64;
+            }
             ewrite = (ewrite + 1) & 31;
           }
         }
@@ -422,12 +453,26 @@ static void refreshmousestate()
       else
       if (event.type == SDL_MOUSEBUTTONDOWN)
       {
-        mbuttons = 1;
+        int tek4404buttoncode;
+        if (event.button.button == SDL_BUTTON_LEFT)
+          tek4404buttoncode = 4;
+        if (event.button.button == SDL_BUTTON_MIDDLE)
+          tek4404buttoncode = 2;
+        if (event.button.button == SDL_BUTTON_RIGHT)
+          tek4404buttoncode = 1;
+        mbuttons |= tek4404buttoncode;
       }
       else
       if (event.type == SDL_MOUSEBUTTONUP)
       {
-        mbuttons = 0;
+        int tek4404buttoncode;
+        if (event.button.button == SDL_BUTTON_LEFT)
+          tek4404buttoncode = 4;
+        if (event.button.button == SDL_BUTTON_MIDDLE)
+          tek4404buttoncode = 2;
+        if (event.button.button == SDL_BUTTON_RIGHT)
+          tek4404buttoncode = 1;
+        mbuttons &= ~tek4404buttoncode;        
       }
   }
 }
@@ -452,8 +497,8 @@ int GetMBounds(struct POINT *ulpoint,struct POINT *lrpoint)
 int GetMPosition(struct POINT *point)
 {
   refreshmousestate();
-  point->x = mousex;
-  point->y = mousey;
+  point->x = mousex + vport.x;
+  point->y = mousey + vport.y;
   return 0;
 }
 
@@ -543,15 +588,15 @@ int PointsToRect(struct POINT *point1,struct POINT *point2, struct RECT *rect)
 void PointToRC(int *row,int *col, struct POINT *point)
 {
   *col = point->x / 7;
-  *row = point->y / 9;
+  *row = point->y / 16;
 }
 
 void RCToRect(struct RECT *rect, int row, int col)
 {
   rect->x = col * 7;
-  rect->y = row * 9;
+  rect->y = row * 16;
   rect->w = 7;
-  rect->h = 9;
+  rect->h = 16;
 }
 
 static void halftone2color(struct FORM *halftoneform)
@@ -837,6 +882,7 @@ struct FORM *InitGraphics(int mode)
   framebuffer = SDL_CreateRGBSurfaceWithFormat(0, ScrWidth, ScrHeight, 32, SDL_PIXELFORMAT_RGBA8888);
 
   renderer = SDL_CreateSoftwareRenderer(framebuffer);
+//  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED );
 
   vport.x = 0;
   vport.y = 0;
@@ -864,11 +910,11 @@ struct FORM *InitGraphics(int mode)
   Screen.offseth = 0;
   Screen.inc = ScrWidth / 8;
   
-  // fonts 7x9
-  SDL_Surface *bitmap = SDL_LoadBMP("charmap-oldschool_white.bmp");
-  font7x9 =  SDL_CreateTextureFromSurface(renderer, bitmap);
-  SDL_SetTextureColorMod(font7x9, 255,255,255);
-  SDL_SetTextureBlendMode(font7x9, SDL_BLENDMODE_NONE);
+  // fonts 7x16
+  SDL_Surface *bitmap = SDL_LoadBMP("char8x16.bmp");
+  font8x16 =  SDL_CreateTextureFromSurface(renderer, bitmap);
+  SDL_SetTextureColorMod(font8x16, 255,255,255);
+  SDL_SetTextureBlendMode(font8x16, SDL_BLENDMODE_NONE);
   SDL_FreeSurface( bitmap );
 
   return 0;

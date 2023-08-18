@@ -10,7 +10,6 @@
 
 #include <font.h>
 #include <graphics.h>
-#include <net/ftype.h>
 
 #ifdef __clang__
 
@@ -206,7 +205,7 @@ int islogger;
 	win->contentrect.x = x;
 	win->contentrect.y = y;
 	win->contentrect.w = win->vt.cols*7;
-	win->contentrect.h = win->vt.rows*9;
+	win->contentrect.h = win->vt.rows*16;
 
   /* outset for window border */
   win->windowrect = win->contentrect;
@@ -255,10 +254,15 @@ int n;
   return 0;
 }
 
-void WindowMove(win, x, y)
+int WindowMove(win, x, y)
 Window *win;
 int x, y;
 {
+
+  if (win == winchain)
+  {
+    bb.cliprect = win->windowrect;
+  }
 
   if (x != win->windowrect.x || win->windowrect.y != y)
   {
@@ -271,11 +275,12 @@ int x, y;
 
     /* frame is dirty */
     win->vt.dirty |= 3;
+    
+    return 1;
   }
-  
-  if (win == winchain)
+  else
   {
-    bb.cliprect = win->windowrect;
+    return 0;
   }
 }
 
@@ -350,7 +355,7 @@ int forcedirty;
         r.x = origin.x;
         r.y = origin.y;
         r.w = win->contentrect.w;
-        r.h = 9;
+        r.h = 16;
         if (RectIntersects(&r, &bb.cliprect))
         {
           // NB we may have embedded \0 where cursor has been warped, so we need to handle this
@@ -364,7 +369,7 @@ int forcedirty;
           
           StringDrawX(line, &origin, &bb);
         }
-        origin.y += 9;
+        origin.y += 16;
       }
     }
   }
@@ -393,6 +398,8 @@ int forcedirty;
   return 0;
 }
 
+static int counter;
+
 void Paint(win, r, forcedirty)
 Window *win;
 struct RECT *r;
@@ -401,6 +408,9 @@ int forcedirty;
   struct RECT overlap;
   struct QUADRECT quadrect;
   int i;
+  
+  if (win == winchain)
+    counter++;
   
   /* paint desktop */
   if (win == NULL)
@@ -411,6 +421,12 @@ int forcedirty;
     bb.cliprect.h = ScrHeight;
     bb.halftoneform =  &GrayMask;
 
+    if ((counter & 1) == 0)
+    {
+      i = rand() & 255;
+   //   RectDebug(r, i,i,i);
+    }
+    
     RectDrawX(r, &bb);
   }
   else
@@ -421,6 +437,10 @@ int forcedirty;
     {
       bb.cliprect = overlap;
       WindowRender(win, forcedirty);
+      if ((counter & 1) == 0)
+      {
+       // RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
+      }
     }
 
     /* recurse for parts outside this window */
@@ -488,9 +508,9 @@ main(int argc, char *argv[])
   struct sgttyb new_term_settings;
 
   /* how do we detect child is dead? */
-  //signal(SIGHUP, cleanup);
-  //signal(SIGDEAD, cleanup);
-  //signal(SIGABORT, cleanup);
+  signal(SIGHUP, cleanup);
+  signal(SIGDEAD, cleanup);
+  signal(SIGABORT, cleanup);
 
   InitGraphics(TRUE);
 
@@ -613,14 +633,15 @@ main(int argc, char *argv[])
               GetMPosition(&p);
 
               r2 = win->windowrect;
-              WindowMove(win, p.x - offset.x, p.y - offset.y);
+              if (WindowMove(win, p.x - offset.x, p.y - offset.y))
+              {
+                /* repaint only difference of old and new */
+                RectAreasOutside(&r2, &win->windowrect, &quadrect);
+                for(j=0; j<quadrect.next; j++)
+                  Paint(winchain, &quadrect.region[j], TRUE);
 
-              /* repaint only difference of old and new */
-              RectAreasOutside(&r2, &win->windowrect, &quadrect);
-              for(j=0; j<quadrect.next; j++)
-                Paint(winchain, &quadrect.region[j], TRUE);
-
-              WindowRender(win, FALSE);
+                WindowRender(win, FALSE);
+              }
             }
 
             /* content is dirty */
