@@ -33,7 +33,7 @@ void setsid() {}
 extern int rand();
 
 /**********************************/
-#define WINTITLEBAR 16
+#define WINTITLEBAR 24
 #define WINBORDER 8
 #define CLOSEBOX
 
@@ -302,7 +302,7 @@ int forcedirty;
       // render (just) frame
       r = win->windowrect;
       r.h = WINTITLEBAR;
-      bb.halftoneform = &WhiteMask;
+      bb.halftoneform = &BlackMask;
       RectDrawX(&r, &bb);
       r = win->windowrect;
       r.w = WINBORDER;
@@ -315,7 +315,7 @@ int forcedirty;
       RectDrawX(&r, &bb);
 
       // some accent lines
-      bb.halftoneform = &BlackMask;
+      bb.halftoneform = &WhiteMask;
       r = win->windowrect;
       r.h = WINTITLEBAR;
       RectBoxDrawX(&r, 1, &bb);
@@ -330,8 +330,8 @@ int forcedirty;
       r = win->windowrect;
       r.x += 4;
       r.y += 4;
-      r.w = 8;
-      r.h = 8;
+      r.w = 16;
+      r.h = 16;
       RectDrawX(&r, &bb);
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
@@ -388,7 +388,7 @@ int forcedirty;
         if (!cursor)
           cursor = ' ';
 
-        CharDrawX(newtime & 1 ? '_' : cursor, &origin, &bb);
+        CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb);
 
         oldtime = newtime;
       }

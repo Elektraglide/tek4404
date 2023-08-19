@@ -291,6 +291,13 @@ unsigned long EGetNext()
             ewrite = (ewrite + 1) & 31;
           }
           else
+          if (event.key.keysym.scancode == SDL_SCANCODE_TAB)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = '\t';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
           if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
@@ -298,17 +305,85 @@ unsigned long EGetNext()
             ewrite = (ewrite + 1) & 31;
           }
           else
-          if (event.key.keysym.scancode == SDL_SCANCODE_UP)
-          {
-            eventqueue[ewrite].estruct.etype = E_PRESS;
-            eventqueue[ewrite].estruct.eparam = 'U';
-            ewrite = (ewrite + 1) & 31;
-          }
-          else
           if (event.key.keysym.scancode == SDL_SCANCODE_SPACE)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = ' ';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+
+          if (event.key.keysym.scancode == SDL_SCANCODE_COMMA)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '<' : ',';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_PERIOD)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '>' : '.';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_SLASH)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '?' : '/';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_SEMICOLON)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? ':' : ';';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_LEFTBRACKET)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '{' : '[';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '}' : ']';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_BACKSLASH)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '|' : '\\';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_MINUS)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '_' : '-';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_EQUALS)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '+' : '=';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode >= SDL_SCANCODE_1 && event.key.keysym.scancode <= SDL_SCANCODE_0)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = '1' + event.key.keysym.scancode - SDL_SCANCODE_1;
+            if (event.key.keysym.mod & KMOD_SHIFT)
+            {
+              eventqueue[ewrite].estruct.eparam = "!@£$%^&*()"[event.key.keysym.scancode - SDL_SCANCODE_1];
+            }
             ewrite = (ewrite + 1) & 31;
           }
           else
