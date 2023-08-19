@@ -376,13 +376,26 @@ unsigned long EGetNext()
             ewrite = (ewrite + 1) & 31;
           }
           else
-          if (event.key.keysym.scancode >= SDL_SCANCODE_1 && event.key.keysym.scancode <= SDL_SCANCODE_0)
+          if (event.key.keysym.scancode == SDL_SCANCODE_0)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = '0';
+            if (event.key.keysym.mod & KMOD_SHIFT)
+            {
+              eventqueue[ewrite].estruct.eparam = ')';
+            }
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode >= SDL_SCANCODE_1 && event.key.keysym.scancode <= SDL_SCANCODE_9)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = '1' + event.key.keysym.scancode - SDL_SCANCODE_1;
             if (event.key.keysym.mod & KMOD_SHIFT)
             {
-              eventqueue[ewrite].estruct.eparam = "!@£$%^&*()"[event.key.keysym.scancode - SDL_SCANCODE_1];
+              static char shifted[] = "!@#$%^&*(";
+              int n = event.key.keysym.scancode - SDL_SCANCODE_1;
+              eventqueue[ewrite].estruct.eparam = shifted[n];
             }
             ewrite = (ewrite + 1) & 31;
           }
@@ -391,17 +404,13 @@ unsigned long EGetNext()
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = 'a' + event.key.keysym.scancode - SDL_SCANCODE_A;
-            if (event.key.keysym.mod & KMOD_CAPS)
-            {
-              eventqueue[ewrite].estruct.eparam -= 32;
-            }
-            if (event.key.keysym.mod & KMOD_SHIFT)
+            if ((event.key.keysym.mod & KMOD_CAPS) || (event.key.keysym.mod & KMOD_SHIFT))
             {
               eventqueue[ewrite].estruct.eparam -= 32;
             }
             if (event.key.keysym.mod & KMOD_CTRL)
             {
-              eventqueue[ewrite].estruct.eparam -= 64;
+              eventqueue[ewrite].estruct.eparam -= 'a'-1;
             }
             ewrite = (ewrite + 1) & 31;
           }
