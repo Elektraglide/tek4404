@@ -456,6 +456,7 @@ char **argv;
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
+    fprintf(stderr, "socket: %s\n",strerror(errno));
     return 1;
   }
 
@@ -472,12 +473,13 @@ char **argv;
   serv_addr.sin_port = htons(IPO_TELNET);
   rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
   if (rc < 0) {
-    fprintf(stderr,"bind: failed\n");
+    fprintf(stderr, "bind: %s\n",strerror(errno));
     return errno;
   }
 
   rc = listen(sock, 5);
   if (rc < 0) {
+    fprintf(stderr, "listen: %s\n",strerror(errno));
     return errno;
   }
 
@@ -498,7 +500,7 @@ char **argv;
     setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
-    if (fork())
+    if (vfork())
     {
       fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
       sleep(1);
