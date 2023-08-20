@@ -69,6 +69,8 @@ void setsid() {}
 
 #endif
 
+extern int rand();
+
 /***********************************/
 typedef unsigned int ip4_t;
 
@@ -108,6 +110,7 @@ typedef struct dhcp
 #define MESSAGE_TYPE_REQ_SUBNET_MASK        1
 #define MESSAGE_TYPE_ROUTER                 3
 #define MESSAGE_TYPE_DNS                    6
+#define MESSAGE_TYPE_HOSTNAME                12
 #define MESSAGE_TYPE_DOMAIN_NAME            15
 #define MESSAGE_TYPE_REQ_IP                 50
 #define MESSAGE_TYPE_DHCP                   53
@@ -119,6 +122,7 @@ typedef struct dhcp
 #define DHCP_OPTION_REQUEST                 3
 #define DHCP_OPTION_PACK                    4
 
+
 #define DHCP_BROADCAST_FLAG 32768
 
 #define DHCP_SERVER_PORT    67
@@ -129,6 +133,7 @@ typedef struct dhcp
 int verbose = 0;
 int sock = -1;
 int ip;
+int packet_xid;
 
 static void
 print_buffer(unsigned char *buffer, int len)
@@ -307,6 +312,8 @@ int *len;
     memcpy(dhcp->chaddr, mac, ETHER_ADDR_LEN); /* mac[] is smaller than DHCP_CHADDR_LEN */
 
     dhcp->siaddr = inet_addr(DHCP_SERVER);
+    packet_xid = htonl(rand());
+    dhcp->xid = packet_xid;
     dhcp->secs = 0xFF;
     /* tell server it should broadcast its response */
     dhcp->flags = htons(DHCP_BROADCAST_FLAG);
@@ -345,9 +352,12 @@ dhcp_t *dhcp;
 
     option = DHCP_OPTION_DISCOVER;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
-    req_ip = htonl(0xc0a80108); /* 192.168.1.10 */
+    req_ip = htonl(0xc0a80040); /* 192.168.0.64 */
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_PARAMETER_REQ_LIST, (unsigned char *)&parameter_req_list, sizeof(parameter_req_list));
+
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
+
     option = 0;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_END, &option, sizeof(option));
 
@@ -519,7 +529,7 @@ char **argv;
     dhcp = (dhcp_t *)((char *)udp_header + sizeof(udph_t));
 #endif
 
-    if (dhcp->opcode == DHCP_OPTION_OFFER)
+    if (dhcp->opcode == DHCP_OPTION_OFFER && dhcp->xid == packet_xid)
     {
       ip = ntohl(dhcp->yiaddr);
       printf("%s\n", inet_ntoa(dhcp->yiaddr));
