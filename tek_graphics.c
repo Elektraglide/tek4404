@@ -110,8 +110,8 @@ int CharDraw(char ch, struct POINT *loc)
 
 int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
 {
-  SDL_Rect dst = {loc->x,loc->y,7,16};
-  SDL_Rect src = {0,0,7,16};
+  SDL_Rect dst = {loc->x,loc->y,8,16};
+  SDL_Rect src = {0,0,8,16};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -172,8 +172,8 @@ int StringDraw(char *ch, struct POINT *loc)
 int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,7,16};
-  SDL_Rect src = {0,0,7,16};
+  SDL_Rect dst = {loc->x,loc->y,8,16};
+  SDL_Rect src = {0,0,8,16};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -963,7 +963,7 @@ struct FORM *InitGraphics(int mode)
 	}
  
   /* CPU pixel buffer */
-  framebuffer = SDL_CreateRGBSurfaceWithFormat(0, ScrWidth, ScrHeight, 32, SDL_PIXELFORMAT_RGBA8888);
+  framebuffer = SDL_CreateRGBSurfaceWithFormat(0, ScrWidth, ScrHeight, 32, SDL_PIXELFORMAT_BGR888);
 
   renderer = SDL_CreateSoftwareRenderer(framebuffer);
 //  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED );
