@@ -10,11 +10,7 @@
 #include <net/select.h>
 #include <net/inet.h>
 
-#ifdef __clang__
-
-#include "uniflexshim.h"
-
-#else
+#ifndef __clang__
 
 typedef int fd_set;
 #define FD_SET(A,SET)	*SET |= (1<<A)
@@ -23,6 +19,17 @@ typedef int fd_set;
 #define FD_ISSET(A,SET)	(*SET & (1<<A))
 
 void setsid() {}
+
+socketopt opt;
+char *telnetprocess[] = {"shell", NULL};
+
+
+#else
+
+#define	IPO_TELNET		23
+char *telnetprocess[] = {"bash", NULL};
+
+#include "uniflexshim.h"
 
 #endif
 
@@ -61,7 +68,6 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 #define STOPPED 0
 #define RUNNING 1
 
-int port;
 int sock = -1;
 int state = STOPPED;
 
@@ -241,6 +247,7 @@ struct termstate *ts;
 void
 cleanup(int sig)
 {
+  fprintf(stderr,"cleanup telnetd\n");
   exit(2);
 }
 
@@ -259,9 +266,6 @@ char **argv;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
-  char **child_av;
-  char *child_args;
-  int child_av_len;
   int i;
 
   /* telnet state */
@@ -304,7 +308,7 @@ char **argv;
       FD_ZERO(&fd_in);
       FD_SET(socket, &fd_in);
       FD_SET(fdm, &fd_in);
-	  rc = select(max(fdm,socket) + 1, &fd_in, NULL, NULL, NULL);
+	    rc = select(max(fdm,socket) + 1, &fd_in, NULL, NULL, NULL);
       if (rc < 0)
       {
           fprintf(stderr, "select() error %d\n", rc);
@@ -387,10 +391,10 @@ char **argv;
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
 	new_term_settings.sg_flag |= RAW;
-	new_term_settings.sg_flag |= CRMOD;
-	new_term_settings.sg_flag |= XTABS;
+	//new_term_settings.sg_flag |= CRMOD;
+	//new_term_settings.sg_flag |= XTABS;
 	
-	//new_term_settings.sg_flag |= CBREAK;
+  new_term_settings.sg_flag |= CBREAK;
 	//new_term_settings.sg_flag |= CNTRL;
 	new_term_settings.sg_flag &= ~ECHO;
     stty(fds, &new_term_settings);
@@ -416,33 +420,14 @@ char **argv;
     /* Make the current process a new session leader */
     setsid();
 
-	signal(SIGHUP, cleanup);
-	signal(SIGINT, cleanup);
-	signal(SIGTERM, cleanup);
+    signal(SIGHUP, cleanup);
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
 
     /* Execution of the program */
     {
-      /* determine space for command line vector */
-      child_av_len = sizeof(char *);
-      for (i = 1; i < argc; i ++)
-      {
-        child_av_len += sizeof(char *);
-        child_av_len += strlen(argv[i]) + 1;
-      }
-      
-      /* vectors to strings followed by strings themselves */
-      child_av = (char **)malloc(child_av_len);
-      child_args = (char *)(child_av + argc + 1);
-      for (i = 1; i < argc; i ++)
-      {
-        child_av[i - 1] = child_args;
-        strcpy(child_args, argv[i]);
-        child_args += strlen(argv[i]) + 1;
-      }
-      child_av[i - 1] = NULL;
-
       /* launch cmd */
-      rc = execvp(child_av[0], child_av);
+      rc = execvp(telnetprocess[0], telnetprocess);
       if (rc < 0)
       {
         fprintf(stderr, "Error %d on exec\n", errno);
@@ -469,29 +454,34 @@ char **argv;
   socklen_t cli_addr_len;
   int reuse = 1;
 
-  port = 8023;
-
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
     return 1;
   }
 
+#ifndef __clang__
+  opt.so_optlen = sizeof(reuse);
+  opt.so_optdata = (char *)&reuse;
+  setopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt);
+#else
   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+#endif
 
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(port);
+  serv_addr.sin_port = htons(IPO_TELNET);
   rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
   if (rc < 0) {
-    return 1;
+    fprintf(stderr,"bind: failed\n");
+    return errno;
   }
 
   rc = listen(sock, 5);
   if (rc < 0) {
-    return 1;
+    return errno;
   }
 
-  fprintf(stderr, "telnetd started on port %d\n", port);
+  fprintf(stderr, "telnetd started\n");
   state = RUNNING;
   while (1) {
 
@@ -499,14 +489,19 @@ char **argv;
     if (state == STOPPED) break;
     if (newsock < 0) {
       fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
-      return 1;
+      return errno;
     }
 
-    //setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
+#ifndef __clang__
+    /* is turning off Nagle supported? */
+#else
+    setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
+#endif
 
     if (fork())
     {
       fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      sleep(1);
       close(newsock);
     }
     else
@@ -515,5 +510,7 @@ char **argv;
      fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
     }
   }
+  
+  return 0;
 }
 
