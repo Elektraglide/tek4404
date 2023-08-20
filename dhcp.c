@@ -33,7 +33,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o dhcp  dhcp.c
 #include <net/inet.h>
 #include <net/ip.h>
 #include <net/udp.h>
-#include <net/netdb.h>
+//#include <net/netdb.h>
 
 /* TEKTRONIX UNIFLEX HEADERS */
 
@@ -126,27 +126,27 @@ typedef struct dhcp
 
 #define DHCP_MAGIC_COOKIE   0x63825363
 
-
-int port;
+int verbose = 0;
 int sock = -1;
 int ip;
 
 static void
 print_buffer(unsigned char *buffer, int len)
 {
-  return;
+  if (!verbose)
+    return;
   
   int i;
   for (i = 0; i < min(128, len); i++)
   {
       if (i % 0x10 == 0)
-          printf("%04x :: ", i);
-      printf("%02x ", buffer[i]);
+          fprintf(stderr,"%04x :: ", i);
+      fprintf(stderr,"%02x ", buffer[i]);
       if (i % 0x10 == 15)
-          printf("\n");
+          fprintf(stderr,"\n");
   }
   if (i % 0x10 != 0)
-    printf("\n");
+    fprintf(stderr,"\n");
 }
 
 /*
@@ -172,7 +172,8 @@ get_mac_address(char *dev_name, unsigned char *mac)
         if ((strcmp(p->ifa_name, dev_name) == 0) &&
             (p->ifa_addr->sa_family == AF_LINK))
         {
-            fprintf(stderr, "checking AF_LINK %s\n", p->ifa_name);
+            if (verbose)
+              fprintf(stderr, "checking AF_LINK %s\n", p->ifa_name);
         
             struct sockaddr_dl* sdp;
 
@@ -184,6 +185,7 @@ get_mac_address(char *dev_name, unsigned char *mac)
     freeifaddrs(ifap);
 #endif
 
+  if (verbose)
     fprintf(stderr,"MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
 
     return 0;
@@ -367,7 +369,8 @@ unsigned char *mac;
     udph_t *udp_header;
     dhcp_t *dhcp_payload;
 
-    fprintf(stderr, "Sending DHCP_DISCOVERY\n");
+    if (verbose)
+      fprintf(stderr, "Sending DHCP_DISCOVERY\n");
 
     memset(buffer, 0, sizeof(buffer));
     en_header = (enh *)buffer;
@@ -394,7 +397,8 @@ unsigned char *mac;
     server.sin_port = htons(DHCP_SERVER_PORT);
     server.sin_addr.s_addr = inet_addr(DHCP_SERVER);
 
-    fprintf(stderr, "Sending %d bytes to %s : %d\n", len, inet_ntoa(server.sin_addr.s_addr), ntohs(server.sin_port));
+    if (verbose)
+      fprintf(stderr, "Sending %d bytes to %s : %d\n", len, inet_ntoa(server.sin_addr.s_addr), ntohs(server.sin_port));
     print_buffer(packet, len);
 
     if (sendto(sock, packet, len, 0, (struct sockaddr *)&server, sizeof(server)) != len)
@@ -402,7 +406,8 @@ unsigned char *mac;
       fprintf(stderr, "sendto: %s\n",strerror(errno));
       return errno;
     }
-    fprintf(stderr, "SENT --------\n");
+    if (verbose)
+      fprintf(stderr, "SENT --------\n");
     return 0;
 }
 
@@ -473,7 +478,8 @@ char **argv;
     
     memset(buffer, 0, sizeof(buffer));
     rc = (int)recvfrom(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&client, &src_addr_len);
-    printf("recvfrom: len=%d src=%s port=%d\n", rc, inet_ntoa(client.sin_addr.s_addr),ntohs(client.sin_port));
+    if (verbose)
+      fprintf(stderr, "recvfrom: len=%d src=%s port=%d\n", rc, inet_ntoa(client.sin_addr.s_addr),ntohs(client.sin_port));
     print_buffer((unsigned char *)buffer, rc);
     if (rc <= 0)
     {
@@ -484,20 +490,26 @@ char **argv;
     dhcp_t *dhcp = (dhcp_t *)buffer;
 #ifdef USE_SOCK_RAW
     struct ip *ip_header = (struct ip *)buffer;
-    printf("ip_header: len=%d protocol=%d header=%d\n", ip_header->ip_len, ip_header->ip_p, ip_header->ip_hl*4);
-    printf("ip_header: src=%s\n", inet_ntoa(ip_header->ip_src.s_addr));
-    printf("ip_header: dst=%s\n", inet_ntoa(ip_header->ip_dst.s_addr));
+    if (verbose)
+    {
+      fprintf(stderr,"ip_header: len=%d protocol=%d header=%d\n", ip_header->ip_len, ip_header->ip_p, ip_header->ip_hl*4);
+      fprintf(stderr,"ip_header: src=%s\n", inet_ntoa(ip_header->ip_src.s_addr));
+      fprintf(stderr,"ip_header: dst=%s\n", inet_ntoa(ip_header->ip_dst.s_addr));
+    }
     
-    if (ip_header->ip_p != PACKET_TYPE || ip_header->ip_p != IPPROTO_UDP)
+    if (ip_header->ip_p != PACKET_TYPE)
     {
       continue;
     }
 
     udph_t *udp_header = (udph_t *)((char *)ip_header + ip_header->ip_hl * sizeof(int) );
-    printf("udp_header: len=%d sport=%d dport=%d\n",
-      ntohs(*(u16 *)&udp_header->udph_length),
-      ntohs(*(u16 *)&udp_header->udph_sport),
-      ntohs(*(u16 *)&udp_header->udph_dport));
+    if (verbose)
+    {
+      fprintf(stderr,"udp_header: len=%d sport=%d dport=%d\n",
+        ntohs(*(u16 *)&udp_header->udph_length),
+        ntohs(*(u16 *)&udp_header->udph_sport),
+        ntohs(*(u16 *)&udp_header->udph_dport));
+    }
 
     if (ntohs(*(u16 *)&udp_header->udph_sport) != DHCP_SERVER_PORT)
     {
@@ -510,7 +522,7 @@ char **argv;
     if (dhcp->opcode == DHCP_OPTION_OFFER)
     {
       ip = ntohl(dhcp->yiaddr);
-      printf("DHCP_OPTION_OFFER: %s\n", inet_ntoa(dhcp->yiaddr));
+      printf("%s\n", inet_ntoa(dhcp->yiaddr));
       break;
     }
   }
