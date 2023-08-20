@@ -180,10 +180,11 @@ int WindowTop(Window *win)
     }
     
     fprintf(stderr, "topwindow: %s\n", win->title);
+
+    win->vt.dirty |= 2;
   }
   
   bb.cliprect = win->windowrect;
-  win->vt.dirty |= 2;
 
   return 0;
 }
@@ -204,7 +205,7 @@ int islogger;
   /* bounds of content */
 	win->contentrect.x = x;
 	win->contentrect.y = y;
-	win->contentrect.w = win->vt.cols*7;
+	win->contentrect.w = win->vt.cols*8;
 	win->contentrect.h = win->vt.rows*16;
 
   /* outset for window border */
@@ -291,7 +292,7 @@ int forcedirty;
   static long newtime,oldtime = 0;
   struct RECT r;
   struct POINT origin;
-  int j,k;
+  int i,j,k;
   char line[128];
   char cursor;
   
@@ -359,6 +360,7 @@ int forcedirty;
         if (RectIntersects(&r, &bb.cliprect))
         {
           // NB we may have embedded \0 where cursor has been warped, so we need to handle this
+          i = 0;
           for(k=0; k<win->vt.cols; k++)
           {
             line[k] = win->vt.buffer[win->vt.cols*j+k];
@@ -372,28 +374,39 @@ int forcedirty;
         origin.y += 16;
       }
     }
-  }
-
-  /* focus window has blinking cursor */
-  {
-    if ((win == winchain) && (win->vt.hidecursor == 0))
+    
+#ifndef BLINK
+    if ((win == winchain) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
     {
-      newtime = EGetTime() / 256;
-      if (oldtime != newtime)
-      {
         RCToRect(&r, win->vt.cy, win->vt.cx);
         origin.x = win->contentrect.x + r.x;
         origin.y = win->contentrect.y + r.y;
         cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
-        if (!cursor)
-          cursor = ' ';
+        CharDrawX(' '+95, &origin, &bb);
+    }
+#endif
+  }
 
-        CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb);
+  /* focus window has blinking cursor regardless of whether its dirty */
+#ifdef BLINK
+  if ((win == winchain) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
+  {
+    newtime = EGetTime() / 256;
+    if (oldtime != newtime)
+    {
+      RCToRect(&r, win->vt.cy, win->vt.cx);
+      origin.x = win->contentrect.x + r.x;
+      origin.y = win->contentrect.y + r.y;
+      cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
+      if (!cursor)
+        cursor = ' ';
 
-        oldtime = newtime;
-      }
+      CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb);
+
+      oldtime = newtime;
     }
   }
+#endif
   
   return 0;
 }
@@ -424,7 +437,7 @@ int forcedirty;
     if ((counter & 1) == 0)
     {
       i = rand() & 255;
-   //   RectDebug(r, i,i,i);
+  //    RectDebug(r, i,i,i);
     }
     
     RectDrawX(r, &bb);
@@ -439,7 +452,7 @@ int forcedirty;
       WindowRender(win, forcedirty);
       if ((counter & 1) == 0)
       {
-       // RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
+      //  RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
       }
     }
 
@@ -669,7 +682,7 @@ main(int argc, char *argv[])
       win = winchain;
 		  while(win)
 		  {
-        if (win->vt.dirty || (win == winchain))
+        if (win->vt.dirty)
         {
           Paint(winchain, &win->windowrect, FALSE);
           win->vt.dirty = 0;

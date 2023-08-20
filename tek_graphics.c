@@ -90,7 +90,7 @@ int ProtectCursor(struct RECT *rl,struct RECT *r2)
 
 int CharWidth(char ch, struct FontHeader *font)
 {
-  return 7;
+  return 8;
 }
 
 int CharDraw(char ch, struct POINT *loc)
@@ -155,7 +155,7 @@ int StringDraw(char *ch, struct POINT *loc)
     src.x = ((c - ' ') % 18) * 8;
     src.y = ((c - ' ') / 18) * 16;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
-    dst.x += 7;
+    dst.x += 8;
   }
   
   // dirty area
@@ -182,12 +182,14 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
+  //SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDOPERATION_SUBTRACT);
+  
   while((c = *ch++) != '\0')
   {
     src.x = ((c - ' ') % 18) * 8;
     src.y = ((c - ' ') / 18) * 16;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
-    dst.x += 7;
+    dst.x += 8;
   }
   
   // dirty area
@@ -671,15 +673,15 @@ int PointsToRect(struct POINT *point1,struct POINT *point2, struct RECT *rect)
 
 void PointToRC(int *row,int *col, struct POINT *point)
 {
-  *col = point->x / 7;
+  *col = point->x / 8;
   *row = point->y / 16;
 }
 
 void RCToRect(struct RECT *rect, int row, int col)
 {
-  rect->x = col * 7;
+  rect->x = col * 8;
   rect->y = row * 16;
-  rect->w = 7;
+  rect->w = 8;
   rect->h = 16;
 }
 
