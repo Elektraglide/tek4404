@@ -43,6 +43,7 @@ typedef struct _win
 {
   struct _win *next;
   char title[32];
+  struct RECT oldrect;
   struct RECT windowrect;
   struct RECT contentrect;
   int pfd[2];
@@ -196,17 +197,21 @@ int islogger;
 {
   int pid;
   Window *win = allwindows + numwindows;
-  
+  struct RECT r;
+
   /* term emu */
 	win->vt.cols = 80;
 	win->vt.rows = 25;
   VTreset(&win->vt);
 
+  /* size of text block */
+  RCToRect(&r, win->vt.rows, win->vt.cols);
+  
   /* bounds of content */
 	win->contentrect.x = x;
 	win->contentrect.y = y;
-	win->contentrect.w = win->vt.cols*8;
-	win->contentrect.h = win->vt.rows*16;
+	win->contentrect.w = r.x;
+	win->contentrect.h = r.y;
 
   /* outset for window border */
   win->windowrect = win->contentrect;
@@ -289,7 +294,9 @@ int WindowRender(win, forcedirty)
 Window *win;
 int forcedirty;
 {
+#ifdef BLINK
   static long newtime,oldtime = 0;
+#endif
   struct RECT r;
   struct POINT origin;
   int i,j,k;
@@ -348,6 +355,9 @@ int forcedirty;
     // render contents
     if (forcedirty || (win->vt.dirty & 1))
     {
+      /* size of single glyph */
+      RCToRect(&r, 0, 0);
+
       origin.x = win->contentrect.x;
       origin.y = win->contentrect.y;
       for(j=0; j<win->vt.rows; j++)
@@ -356,7 +366,6 @@ int forcedirty;
         r.x = origin.x;
         r.y = origin.y;
         r.w = win->contentrect.w;
-        r.h = 16;
         if (RectIntersects(&r, &bb.cliprect))
         {
           // NB we may have embedded \0 where cursor has been warped, so we need to handle this
@@ -371,7 +380,7 @@ int forcedirty;
           
           StringDrawX(line, &origin, &bb);
         }
-        origin.y += 16;
+        origin.y += r.h;
       }
     }
     
@@ -463,6 +472,27 @@ int forcedirty;
       Paint(win->next, &quadrect.region[i], forcedirty);
     }
   }
+}
+
+int WindowMin(Window *win)
+{
+  if (win->windowrect.h == WINTITLEBAR)
+  {
+    win->windowrect.w = win->oldrect.w;
+    win->windowrect.h = win->oldrect.h;
+    win->contentrect.h = win->windowrect.h - WINTITLEBAR - WINBORDER;
+  }
+  else
+  {
+    win->oldrect = win->windowrect;
+    win->windowrect.w = 256;
+    win->windowrect.h = WINTITLEBAR;
+    win->contentrect.h = 0;
+  }
+  
+  Paint(winchain, &win->oldrect, TRUE);
+
+  return 0;
 }
 
 void WindowDestroy(wid)
@@ -653,10 +683,19 @@ main(int argc, char *argv[])
                 for(j=0; j<quadrect.next; j++)
                   Paint(winchain, &quadrect.region[j], TRUE);
 
+                bb.cliprect = win->windowrect;
                 WindowRender(win, FALSE);
+                
+                SDLshowwin();
               }
             }
-
+            
+            /* was it a Click on top left? */
+            if (offset.x < 20 && offset.y < 20)
+            {
+              WindowMin(win);
+            }
+            
             /* content is dirty */
             win->vt.dirty |= 3;
             
@@ -679,6 +718,7 @@ main(int argc, char *argv[])
 
       }
 
+      /* repaint any dirty windows */
       win = winchain;
 		  while(win)
 		  {
@@ -690,6 +730,9 @@ main(int argc, char *argv[])
 
         win = win->next;
 		  }
+    
+      /* this is need in SDL emulator to flip window buffer */
+      SDLshowwin();
 
 	  }
   }

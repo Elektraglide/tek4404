@@ -14,6 +14,9 @@ SDL_Surface *framebuffer;
 SDL_Renderer *renderer;
 SDL_Rect vport;
 SDL_Texture *font8x16;
+#define FONTWIDTH 8
+#define FONTHEIGHT 16
+#define FONTSPACING 14
 
 struct FORM Screen;
 union EVENTUNION eventqueue[32];
@@ -21,6 +24,12 @@ int eread,ewrite;
 int eventsenable,keyboardenable;
 int mbuttons,mousex,mousey;
 int pandisc;
+
+// need to call this for window to flip
+void SDLshowwin()
+{
+  SDL_UpdateWindowSurface(window);
+}
 
 void updatewin(SDL_Rect *r)
 {
@@ -33,7 +42,6 @@ void updatewin(SDL_Rect *r)
   dst.h = r->h;
   
   SDL_BlitSurface(framebuffer, r, SDL_GetWindowSurface(window), &dst);
-  SDL_UpdateWindowSurface(window);
 }
 
 short ScrWidth,ScrHeight,ViewWidth,ViewHeight;
@@ -90,16 +98,16 @@ int ProtectCursor(struct RECT *rl,struct RECT *r2)
 
 int CharWidth(char ch, struct FontHeader *font)
 {
-  return 8;
+  return FONTWIDTH;
 }
 
 int CharDraw(char ch, struct POINT *loc)
 {
-  SDL_Rect dst = {loc->x,loc->y,8,16};
-  SDL_Rect src = {0,0,8,16};
+  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
 
-  src.x = ((ch - ' ') % 18) * 8;
-  src.y = ((ch - ' ') / 18) * 16;
+  src.x = ((ch - ' ') % 18) * FONTWIDTH;
+  src.y = ((ch - ' ') / 18) * FONTHEIGHT;
   SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
@@ -110,8 +118,8 @@ int CharDraw(char ch, struct POINT *loc)
 
 int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
 {
-  SDL_Rect dst = {loc->x,loc->y,8,16};
-  SDL_Rect src = {0,0,8,16};
+  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -120,8 +128,8 @@ int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
-  src.x = ((ch - ' ') % 18) * 8;
-  src.y = ((ch - ' ') / 18) * 16;
+  src.x = ((ch - ' ') % 18) * FONTWIDTH;
+  src.y = ((ch - ' ') / 18) * FONTHEIGHT;
   SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
@@ -147,20 +155,20 @@ int StringWidth(char *string,struct FontHeader *font)
 int StringDraw(char *ch, struct POINT *loc)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,8,16};
-  SDL_Rect src = {0,0,8,16};
+  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * 8;
-    src.y = ((c - ' ') / 18) * 16;
+    src.x = ((c - ' ') % 18) * FONTWIDTH;
+    src.y = ((c - ' ') / 18) * FONTHEIGHT;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
     dst.x += 8;
   }
   
   // dirty area
   dst.w = dst.x - loc->x;
-  dst.h = dst.y - loc->y + 16;
+  dst.h = dst.y - loc->y + FONTHEIGHT;
   dst.x = loc->x;
   dst.y = loc->y;
 
@@ -172,8 +180,8 @@ int StringDraw(char *ch, struct POINT *loc)
 int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,8,16};
-  SDL_Rect src = {0,0,8,16};
+  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   SDL_Rect cr;
   
   cr.x = bbcom->cliprect.x;
@@ -182,19 +190,21 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
-  //SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDOPERATION_SUBTRACT);
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_MUL);
   
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * 8;
-    src.y = ((c - ' ') / 18) * 16;
+    src.x = ((c - ' ') % 18) * FONTWIDTH;
+    src.y = ((c - ' ') / 18) * FONTHEIGHT;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
-    dst.x += 8;
+    dst.x += FONTWIDTH;
   }
   
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
   // dirty area
   dst.w = dst.x - loc->x;
-  dst.h = dst.y - loc->y + 16;
+  dst.h = dst.y - loc->y + FONTHEIGHT;
   dst.x = loc->x;
   dst.y = loc->y;
 
@@ -673,16 +683,16 @@ int PointsToRect(struct POINT *point1,struct POINT *point2, struct RECT *rect)
 
 void PointToRC(int *row,int *col, struct POINT *point)
 {
-  *col = point->x / 8;
-  *row = point->y / 16;
+  *col = point->x / FONTWIDTH;
+  *row = point->y / FONTSPACING; // NB
 }
 
 void RCToRect(struct RECT *rect, int row, int col)
 {
-  rect->x = col * 8;
-  rect->y = row * 16;
-  rect->w = 8;
-  rect->h = 16;
+  rect->x = col * FONTWIDTH;
+  rect->y = row * FONTSPACING;  // NB
+  rect->w = FONTWIDTH;
+  rect->h = FONTSPACING;
 }
 
 static void halftone2color(struct FORM *halftoneform)
@@ -726,7 +736,6 @@ int RectBoxDraw(struct RECT *rect, int width)
   return 0;
 }
 
-// NB ignores width
 int RectBoxDrawX(struct RECT *rect, int width, struct BBCOM *bbcom)
 {
   SDL_Rect r,cr;
@@ -752,8 +761,6 @@ int RectBoxDrawX(struct RECT *rect, int width, struct BBCOM *bbcom)
     r.h += 2;
   }
   updatewin(&r);
-
-  return 0;
 
   return 0;
 }
@@ -825,8 +832,6 @@ int RectDebug(struct RECT *rect, int r1, int g, int b)
   SDL_RenderSetClipRect(renderer, NULL);
   SDL_SetRenderDrawColor(renderer, r1,g,b,255);
   SDL_RenderFillRect(renderer, &r);
-  updatewin(&r);
-  updatewin(&r);
   updatewin(&r);
 }
 
@@ -996,7 +1001,7 @@ struct FORM *InitGraphics(int mode)
   Screen.offseth = 0;
   Screen.inc = ScrWidth / 8;
   
-  // fonts 7x16
+  // fonts 8x16
   SDL_Surface *bitmap = SDL_LoadBMP("char8x16.bmp");
   font8x16 =  SDL_CreateTextureFromSurface(renderer, bitmap);
   SDL_SetTextureColorMod(font8x16, 255,255,255);
