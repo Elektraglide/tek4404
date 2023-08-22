@@ -13,12 +13,14 @@ typedef struct
   char state;
   char wrapping;
   char hidecursor;
+  char style;
   char escseq[16];
   short sx,sy;
   short margintop,marginbot;
 
   short cols,rows;
   char buffer[80*25];
+  char attrib[80*25];
   short cx,cy;
   int dirty;
 } VTemu;

@@ -299,7 +299,7 @@ int forcedirty;
 #endif
   struct RECT r;
   struct POINT origin;
-  int i,j,k;
+  int i,j,k,n,style;
   char line[128];
   char cursor;
   
@@ -358,30 +358,66 @@ int forcedirty;
       /* size of single glyph */
       RCToRect(&r, 0, 0);
 
-      origin.x = win->contentrect.x;
       origin.y = win->contentrect.y;
       for(j=0; j<win->vt.rows; j++)
       {
+        origin.x = win->contentrect.x;
+        
         /* will it be clipped away */
         r.x = origin.x;
         r.y = origin.y;
         r.w = win->contentrect.w;
         if (RectIntersects(&r, &bb.cliprect))
         {
-          // NB we may have embedded \0 where cursor has been warped, so we need to handle this
-          i = 0;
+          // NB we may have embedded \0 where cursor has been warped as well as handle style attributes
+          style = win->vt.attrib[win->vt.cols*j];
+          bb.rule = style & 1 ? bbSorD : bbS;
+          bb.rule = style & 2 ? bbnS : bb.rule;
+          n = 0;
           for(k=0; k<win->vt.cols; k++)
           {
-            line[k] = win->vt.buffer[win->vt.cols*j+k];
-            if (line[k] == 0)
-              line[k] = ' ';
+            /* change of style */
+            if (win->vt.attrib[win->vt.cols*j+k] != style)
+            {
+              /* flush so far */
+              line[n] = '\0';
+              StringDrawX(line, &origin, &bb);
+
+              /* bold needs drawing again */
+              if (style & 1)
+              {
+                origin.x += 5;
+                origin.y += 5;
+                StringDrawX(line, &origin, &bb);
+                origin.x -= 5;
+                origin.y -= 5;
+              }
+
+              origin.x += n * 8;
+              n = 0;
+
+              style = win->vt.attrib[win->vt.cols*j+k];
+              bb.rule = style & 1 ? bbSorD : bbS;
+              bb.rule = style & 2 ? bbnS : bb.rule;
+            }
+            
+            line[n] = win->vt.buffer[win->vt.cols*j+k];
+            if (line[n] == 0)
+              line[n] = ' ';
+
+            n++;
+
+
           }
-          line[win->vt.cols] = '\0';
-          
+
+          line[n] = '\0';
           StringDrawX(line, &origin, &bb);
         }
+        
         origin.y += r.h;
       }
+      
+      bb.rule = bbSorD;
     }
     
 #ifndef BLINK
@@ -715,7 +751,6 @@ main(int argc, char *argv[])
 
           GetMPosition(&origin);
           WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
-
       }
 
       /* repaint any dirty windows */

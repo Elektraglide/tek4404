@@ -19,6 +19,7 @@ VTemu *vt;
   vt->state = 0;
   vt->wrapping = 0;
   vt->hidecursor = 0;
+  vt->style = 0;
 	vt->cx = 0;
 	vt->cy = 0;
   vt->dirty = 1;
@@ -26,6 +27,7 @@ VTemu *vt;
   vt->marginbot = vt->rows - 1;
   
   memset(vt->buffer, 0, vt->rows*vt->cols);
+  memset(vt->attrib, 0, vt->rows*vt->cols);
 }
 
 void VTmovelines(vt, dst, src, n)
@@ -33,19 +35,19 @@ VTemu *vt;
 int dst,src,n;
 {
     memmove(vt->buffer+vt->cols*dst, vt->buffer+vt->cols*src, vt->cols*n);
+    memmove(vt->attrib+vt->cols*dst, vt->attrib+vt->cols*src, vt->cols*n);
 }
 void VTclearlines(vt, dst, n)
 VTemu *vt;
 int dst,n;
 {
     memset(vt->buffer+vt->cols*dst, 0, vt->cols*n);
+    memset(vt->attrib+vt->cols*dst, 0, vt->cols*n);
 }
 
 void VTnewline(vt)
 VTemu *vt;
 {
-  //vt->buffer[vt->cy*vt->cols+vt->cols-1] = '\0';
-
   /* scroll only region inside margintop/marginbot */
   vt->cx = 0;
   vt->cy++;
@@ -58,8 +60,9 @@ VTemu *vt;
   }
 }
 
-int asciinum(msg)
+int asciinum(msg, defval)
 char *msg;
+int defval;
 {
   int i = 0;
   while (isdigit(*msg))
@@ -67,31 +70,55 @@ char *msg;
     i *= 10;
     i += *msg++ - '0';
   }
-  return i ? i : 1;
+  return i ? i : defval;
   
 }
 
-int asciinum2(msg)
+int asciinum2(msg, defval)
 char *msg;
+int defval;
 {
   while(*msg++ != ';');
-  return asciinum(msg);
+  return asciinum(msg, defval);
 }
 
-int asciinumdef0(msg)
-char *msg;
-{
-  if (isdigit(*msg))
-    return asciinum(msg);
-  else
-    return 0;
-}
 
 void reply(fdout, c)
 int fdout;
 char c;
 {
    write(fdout, &c, 1);
+}
+
+void VTsetstyle(vt, i)
+VTemu *vt;
+int i;
+{
+    switch(i)
+    {
+      case 0:
+        vt->style = 0;
+        break;
+        
+      /* BOLD */
+      case 1:
+        vt->style |= 1;
+        break;
+      case 21:
+        vt->style &= ~1;
+        break;
+
+      /* INVERSE */
+      case 7:
+        vt->style |= 2;
+        break;
+      case 27:
+        vt->style &= ~2;
+        break;
+
+      default:
+        break;
+    }
 }
 
 int VToutput(vt, msg, n, fdout)
@@ -118,39 +145,42 @@ int fdout;
         /* is it final byte */
         if (c >= 0x40 && c <= 0x7e  && vt->state > 2)
         {
+          vt->escseq[vt->state] = '\0';
+          
           switch(c)
           {
             case 'A':
-            vt->cy -= asciinum(vt->escseq+2);
+            vt->cy -= asciinum(vt->escseq+2, 1);
             break;
             case 'B':
-            vt->cy += asciinum(vt->escseq+2);
+            vt->cy += asciinum(vt->escseq+2, 1);
             break;
             case 'C':
-            vt->cx += asciinum(vt->escseq+2);
+            vt->cx += asciinum(vt->escseq+2, 1);
             break;
             case 'D':
-            vt->cx -= asciinum(vt->escseq+2);
+            vt->cx -= asciinum(vt->escseq+2, 1);
             break;
             case 'E':
-            vt->cy += asciinum(vt->escseq+2);
+            vt->cy += asciinum(vt->escseq+2, 1);
             vt->cx = 0;
             break;
             case 'F':
-            vt->cy -= asciinum(vt->escseq+2);
+            vt->cy -= asciinum(vt->escseq+2, 1);
             vt->cx = 0;
             break;
             case 'G':
-            vt->cx = asciinum(vt->escseq+2) - 1;
+            vt->cx = asciinum(vt->escseq+2, 1) - 1;
             break;
             case 'H':
-            vt->cy = asciinum(vt->escseq+2) - 1;
-            vt->cx = asciinum2(vt->escseq+2) - 1;
+            vt->cy = asciinum(vt->escseq+2, 1) - 1;
+            vt->cx = asciinum2(vt->escseq+2, 1) - 1;
             break;
             case 'J':
             if (vt->escseq[2] == '1')
             {
               memset(vt->buffer, 0, vt->cols*vt->cy+vt->cx);
+              memset(vt->attrib, 0, vt->cols*vt->cy+vt->cx);
             }
             else
             if (vt->escseq[2] == '2')
@@ -161,6 +191,7 @@ int fdout;
             {
               i = vt->cols * vt->rows;
               memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
+              memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
             }
             vt->cx = 0;
             vt->cy = 0;
@@ -169,6 +200,7 @@ int fdout;
             if (vt->escseq[2] == '1')
             {
               memset(vt->buffer+vt->cols*vt->cy, 0, vt->cx);
+              memset(vt->attrib+vt->cols*vt->cy, 0, vt->cx);
             }
             else
             if (vt->escseq[2] == '2')
@@ -183,44 +215,51 @@ int fdout;
             else
             {
               memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
+              memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
             }
             break;
 
             case 'L':
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             memmove(vt->buffer+vt->cols*(vt->cy+i), vt->buffer+vt->cols*vt->cy, vt->cols*i);
+            memmove(vt->attrib+vt->cols*(vt->cy+i), vt->attrib+vt->cols*vt->cy, vt->cols*i);
             VTclearlines(vt, vt->cy, i);
 
             break;
             case 'M':
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             memmove(vt->buffer+vt->cols*vt->cy, vt->buffer+vt->cols*(vt->cy+i), vt->cols*i);
+            memmove(vt->attrib+vt->cols*vt->cy, vt->attrib+vt->cols*(vt->cy+i), vt->cols*i);
             memset(vt->buffer+vt->cols*(vt->cy+i), 0, vt->cols*(vt->rows-vt->cy-i));
+            memset(vt->attrib+vt->cols*(vt->cy+i), 0, vt->cols*(vt->rows-vt->cy-i));
             break;
 
             case 'P':
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             j = vt->cols - vt->cx - i;
             memmove(vt->buffer+vt->cols*vt->cy+vt->cx,vt->buffer+vt->cols*vt->cy+vt->cx+i,j);
+            memmove(vt->attrib+vt->cols*vt->cy+vt->cx,vt->attrib+vt->cols*vt->cy+vt->cx+i,j);
             break;
 
             case 'S':
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             memmove(vt->buffer, vt->buffer+vt->cols*i, vt->cols*i);
+            memmove(vt->attrib, vt->attrib+vt->cols*i, vt->cols*i);
             VTclearlines(vt, vt->rows-i, i);
             break;
             case 'T':
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             memmove(vt->buffer+vt->cols*i, vt->buffer, vt->cols*i);
+            memmove(vt->attrib+vt->cols*i, vt->attrib, vt->cols*i);
             VTclearlines(vt, 0, i);
             break;
 
             case 'I':
-            vt->cx += 8 * asciinum(vt->escseq+2);
+            vt->cx += 8 * asciinum(vt->escseq+2, 1);
             vt->cx &= -8;
             break;
             case 'Z':
-            vt->cx -= 8 * asciinum(vt->escseq+2);
+            vt->cx -= 8 * asciinum(vt->escseq+2, 1);
             vt->cx &= -8;
             break;
 
@@ -236,25 +275,25 @@ int fdout;
             break;
 
             case 'd':
-            vt->cy = asciinum(vt->escseq+2) - 1;
+            vt->cy = asciinum(vt->escseq+2, 1) - 1;
             break;
 
             case 'f':
-            vt->cy = asciinum(vt->escseq+2) - 1;
-            vt->cx = asciinum2(vt->escseq+2);
+            vt->cy = asciinum(vt->escseq+2, 1) - 1;
+            vt->cx = asciinum2(vt->escseq+2, 1) - 1;
             break;
 
             case 'm':
             /* display attrib */
-            i = asciinumdef0(vt->escseq+2);
-            //fprintf(stderr,"text attrib %d\n", i);
-            //for(i=0; i<vt->state; i++)
-            //  vt->buffer[vt->cy*vt->cols+vt->cx++] = vt->escseq[i];
+            VTsetstyle(vt, asciinum(vt->escseq+2, 0));
+            if (strchr(vt->escseq+2, ';'))
+              VTsetstyle(vt, asciinum2(vt->escseq+2, 0));
+            //printf("%.*s   style = %d\n", vt->state, vt->escseq, vt->style);
             break;
 
             case 'n':
             /* status report */
-            i = asciinum(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
             reply(fdout, 0x1b);
             reply(fdout, '[');
             if (i == 5)
@@ -269,15 +308,15 @@ int fdout;
             break;
 
             case 'r':
-            vt->margintop = asciinum(vt->escseq+2) - 1;
-            vt->marginbot = asciinum2(vt->escseq+2) - 1;
+            vt->margintop = asciinum(vt->escseq+2, 1) - 1;
+            vt->marginbot = asciinum2(vt->escseq+2, 1) - 1;
             vt->cx = 0;
             vt->cy = 0;
             break;
 
             case 't':
-            i = asciinum(vt->escseq+2);
-            j = asciinum2(vt->escseq+2);
+            i = asciinum(vt->escseq+2, 1);
+            j = asciinum2(vt->escseq+2, 1);
             fprintf(stderr,"window manipulation %d - %d\n",i,j);
             break;
 
@@ -286,8 +325,8 @@ int fdout;
             if (vt->escseq[2] == '?')
             {
               /* private attribs */
-              i = asciinum(vt->escseq+3);
-              fprintf(stderr,"attrib %d = %s\n", i, c=='h' ?"on" : "off");
+              i = asciinum(vt->escseq+3, 1);
+              fprintf(stderr,"private mode attrib %d = %s\n", i, c=='h' ?"on" : "off");
               if (i == 7)
               {
                 vt->wrapping = (c=='h');
@@ -312,13 +351,19 @@ int fdout;
             if (vt->escseq[2] == '=')
             {
               /* set mode */
-              i = asciinum(vt->escseq+3);
+              i = asciinum(vt->escseq+3, 1);
               fprintf(stderr,"set mode %d\n", i);
+              
+              if (i == 7)
+              {
+                vt->wrapping = (c=='h');
+              }
+              
             }
             break;
             
             default:
-            fprintf(stderr,"unhandled: %d %c\n",asciinum(vt->escseq+2),c);
+            fprintf(stderr,"unhandled: %d %c\n",asciinum(vt->escseq+2, 1),c);
             break;
           }
           
@@ -348,6 +393,7 @@ int fdout;
         {
           i = vt->marginbot - vt->margintop;
           memmove(vt->buffer+vt->cols*(vt->margintop+1), vt->buffer+vt->cols*vt->margintop, vt->cols*i);
+          memmove(vt->attrib+vt->cols*(vt->margintop+1), vt->attrib+vt->cols*vt->margintop, vt->cols*i);
           VTclearlines(vt, vt->margintop, 1);
         }
         else
@@ -428,7 +474,10 @@ int fdout;
     if (isprint(c))
     {
       if (vt->cx < vt->cols)
+      {
         vt->buffer[vt->cy*vt->cols+vt->cx] = c;
+        vt->attrib[vt->cy*vt->cols+vt->cx] = vt->style;
+      }
       vt->cx++;
       if (vt->wrapping && vt->cx >= vt->cols)
       {
