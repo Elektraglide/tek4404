@@ -1,0 +1,435 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		213A64AB2A75004400B726FA /* telnetd.c in Sources */ = {isa = PBXBuildFile; fileRef = 213A64AA2A75004400B726FA /* telnetd.c */; };
+		213A64E52A75780700B726FA /* wmgr.c in Sources */ = {isa = PBXBuildFile; fileRef = 213A64E42A75780700B726FA /* wmgr.c */; };
+		2188054C2A84D0FE006606EE /* dhcp.c in Sources */ = {isa = PBXBuildFile; fileRef = 2188054B2A84D0FE006606EE /* dhcp.c */; };
+		21C6592C2A7BF0CA0090FBC7 /* SDL2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 21C6592B2A7BF0CA0090FBC7 /* SDL2.framework */; };
+		21E92EF82A7C055C00AC0EE3 /* tek_graphics.c in Sources */ = {isa = PBXBuildFile; fileRef = 21E92EF72A7C055C00AC0EE3 /* tek_graphics.c */; };
+		21E92F022A7E470500AC0EE3 /* vtemu.c in Sources */ = {isa = PBXBuildFile; fileRef = 21E92F012A7E470500AC0EE3 /* vtemu.c */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		212ED3D816370E0F00986179 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		213A64DC2A7575A200B726FA /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		218805452A84D0CE006606EE /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		212ED3DA16370E0F00986179 /* telnetd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = telnetd; sourceTree = BUILT_PRODUCTS_DIR; };
+		213A64AA2A75004400B726FA /* telnetd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = telnetd.c; sourceTree = SOURCE_ROOT; };
+		213A64E02A7575A200B726FA /* swm.app */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = swm.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		213A64E42A75780700B726FA /* wmgr.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = wmgr.c; path = wmgr/wmgr.c; sourceTree = "<group>"; };
+		213A64E62A75783700B726FA /* uniflexshim.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = uniflexshim.h; sourceTree = "<group>"; };
+		218805492A84D0CE006606EE /* dhcp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = dhcp; sourceTree = BUILT_PRODUCTS_DIR; };
+		2188054B2A84D0FE006606EE /* dhcp.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = dhcp.c; sourceTree = SOURCE_ROOT; };
+		2188055E2A87D830006606EE /* libpcap.A.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libpcap.A.tbd; path = usr/lib/libpcap.A.tbd; sourceTree = SDKROOT; };
+		21C658D82A7ACD480090FBC7 /* OpenGL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGL.framework; path = System/Library/Frameworks/OpenGL.framework; sourceTree = SDKROOT; };
+		21C6592B2A7BF0CA0090FBC7 /* SDL2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SDL2.framework; path = ../../../../../../Library/Frameworks/SDL2.framework; sourceTree = "<group>"; };
+		21E92EF72A7C055C00AC0EE3 /* tek_graphics.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = tek_graphics.c; sourceTree = "<group>"; };
+		21E92EFC2A7C1B4F00AC0EE3 /* wmgr.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = wmgr.plist; path = wmgr/wmgr.plist; sourceTree = "<group>"; };
+		21E92F002A7E470500AC0EE3 /* vtemu.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = vtemu.h; path = wmgr/vtemu.h; sourceTree = "<group>"; };
+		21E92F012A7E470500AC0EE3 /* vtemu.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = vtemu.c; path = wmgr/vtemu.c; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		212ED3D716370E0F00986179 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		213A64DB2A7575A200B726FA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				21C6592C2A7BF0CA0090FBC7 /* SDL2.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		218805442A84D0CE006606EE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		212ED3CF16370E0F00986179 = {
+			isa = PBXGroup;
+			children = (
+				213A64E62A75783700B726FA /* uniflexshim.h */,
+				213A64E32A7577E800B726FA /* swm */,
+				212ED3DD16370E0F00986179 /* telnetd */,
+				2188054A2A84D0EA006606EE /* dhcp */,
+				212ED3DB16370E0F00986179 /* Products */,
+				21C658D72A7ACD480090FBC7 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		212ED3DB16370E0F00986179 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				212ED3DA16370E0F00986179 /* telnetd */,
+				213A64E02A7575A200B726FA /* swm.app */,
+				218805492A84D0CE006606EE /* dhcp */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		212ED3DD16370E0F00986179 /* telnetd */ = {
+			isa = PBXGroup;
+			children = (
+				213A64AA2A75004400B726FA /* telnetd.c */,
+			);
+			path = telnetd;
+			sourceTree = "<group>";
+		};
+		213A64E32A7577E800B726FA /* swm */ = {
+			isa = PBXGroup;
+			children = (
+				21E92EFC2A7C1B4F00AC0EE3 /* wmgr.plist */,
+				213A64E42A75780700B726FA /* wmgr.c */,
+				21E92F002A7E470500AC0EE3 /* vtemu.h */,
+				21E92F012A7E470500AC0EE3 /* vtemu.c */,
+				21E92EF72A7C055C00AC0EE3 /* tek_graphics.c */,
+			);
+			name = swm;
+			sourceTree = "<group>";
+		};
+		2188054A2A84D0EA006606EE /* dhcp */ = {
+			isa = PBXGroup;
+			children = (
+				2188054B2A84D0FE006606EE /* dhcp.c */,
+			);
+			path = dhcp;
+			sourceTree = "<group>";
+		};
+		21C658D72A7ACD480090FBC7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2188055E2A87D830006606EE /* libpcap.A.tbd */,
+				21C6592B2A7BF0CA0090FBC7 /* SDL2.framework */,
+				21C658D82A7ACD480090FBC7 /* OpenGL.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		212ED3D916370E0F00986179 /* telnetd */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 212ED3E416370E0F00986179 /* Build configuration list for PBXNativeTarget "telnetd" */;
+			buildPhases = (
+				212ED3D616370E0F00986179 /* Sources */,
+				212ED3D716370E0F00986179 /* Frameworks */,
+				212ED3D816370E0F00986179 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = telnetd;
+			productName = echoserver;
+			productReference = 212ED3DA16370E0F00986179 /* telnetd */;
+			productType = "com.apple.product-type.tool";
+		};
+		213A64D82A7575A200B726FA /* swm */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 213A64DD2A7575A200B726FA /* Build configuration list for PBXNativeTarget "swm" */;
+			buildPhases = (
+				213A64D92A7575A200B726FA /* Sources */,
+				213A64DB2A7575A200B726FA /* Frameworks */,
+				213A64DC2A7575A200B726FA /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = swm;
+			productName = echoserver;
+			productReference = 213A64E02A7575A200B726FA /* swm.app */;
+			productType = "com.apple.product-type.tool";
+		};
+		218805412A84D0CE006606EE /* dhcp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 218805462A84D0CE006606EE /* Build configuration list for PBXNativeTarget "dhcp" */;
+			buildPhases = (
+				218805422A84D0CE006606EE /* Sources */,
+				218805442A84D0CE006606EE /* Frameworks */,
+				218805452A84D0CE006606EE /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = dhcp;
+			productName = echoserver;
+			productReference = 218805492A84D0CE006606EE /* dhcp */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		212ED3D116370E0F00986179 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0430;
+				TargetAttributes = {
+					212ED3D916370E0F00986179 = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 212ED3D416370E0F00986179 /* Build configuration list for PBXProject "tek4404_utilities" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				English,
+				en,
+			);
+			mainGroup = 212ED3CF16370E0F00986179;
+			productRefGroup = 212ED3DB16370E0F00986179 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				212ED3D916370E0F00986179 /* telnetd */,
+				213A64D82A7575A200B726FA /* swm */,
+				218805412A84D0CE006606EE /* dhcp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		212ED3D616370E0F00986179 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				213A64AB2A75004400B726FA /* telnetd.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		213A64D92A7575A200B726FA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				21E92F022A7E470500AC0EE3 /* vtemu.c in Sources */,
+				213A64E52A75780700B726FA /* wmgr.c in Sources */,
+				21E92EF82A7C055C00AC0EE3 /* tek_graphics.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		218805422A84D0CE006606EE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2188054C2A84D0FE006606EE /* dhcp.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		212ED3E216370E0F00986179 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				COPY_PHASE_STRIP = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = B42;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "tek_include/**";
+				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = (
+					"-Wno-extra-tokens",
+					"-Wno-comment",
+				);
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		212ED3E316370E0F00986179 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = B42;
+				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = "tek_include/**";
+				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				OTHER_CFLAGS = (
+					"-Wno-extra-tokens",
+					"-Wno-comment",
+				);
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		212ED3E516370E0F00986179 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = telnetd.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+			};
+			name = Debug;
+		};
+		212ED3E616370E0F00986179 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = telnetd.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+			};
+			name = Release;
+		};
+		213A64DE2A7575A200B726FA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks",
+				);
+				INFOPLIST_FILE = "$(SRCROOT)/wmgr/wmgr.plist";
+				INSTALL_PATH = "$(SRCROOT)";
+				PRODUCT_NAME = "$(TARGET_NAME).app";
+				WRAPPER_EXTENSION = app;
+			};
+			name = Debug;
+		};
+		213A64DF2A7575A200B726FA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(LOCAL_LIBRARY_DIR)/Frameworks",
+				);
+				INFOPLIST_FILE = "$(SRCROOT)/wmgr/wmgr.plist";
+				INSTALL_PATH = "$(SRCROOT)";
+				PRODUCT_NAME = "$(TARGET_NAME).app";
+				WRAPPER_EXTENSION = app;
+			};
+			name = Release;
+		};
+		218805472A84D0CE006606EE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "";
+				INSTALL_PATH = .;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		218805482A84D0CE006606EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "";
+				INSTALL_PATH = .;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		212ED3D416370E0F00986179 /* Build configuration list for PBXProject "tek4404_utilities" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				212ED3E216370E0F00986179 /* Debug */,
+				212ED3E316370E0F00986179 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		212ED3E416370E0F00986179 /* Build configuration list for PBXNativeTarget "telnetd" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				212ED3E516370E0F00986179 /* Debug */,
+				212ED3E616370E0F00986179 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		213A64DD2A7575A200B726FA /* Build configuration list for PBXNativeTarget "swm" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				213A64DE2A7575A200B726FA /* Debug */,
+				213A64DF2A7575A200B726FA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		218805462A84D0CE006606EE /* Build configuration list for PBXNativeTarget "dhcp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				218805472A84D0CE006606EE /* Debug */,
+				218805482A84D0CE006606EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 212ED3D116370E0F00986179 /* Project object */;
+}
