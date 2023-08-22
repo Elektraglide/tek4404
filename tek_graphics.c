@@ -14,6 +14,7 @@ SDL_Surface *framebuffer;
 SDL_Renderer *renderer;
 SDL_Rect vport;
 SDL_Texture *font8x16;
+SDL_Texture *font8x16_normal,*font8x16_invert;
 #define FONTWIDTH 8
 #define FONTHEIGHT 16
 #define FONTSPACING 14
@@ -128,6 +129,8 @@ int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
+  font8x16 = bbcom->rule != bbSorD ? font8x16_invert : font8x16_normal;
+
   src.x = ((ch - ' ') % 18) * FONTWIDTH;
   src.y = ((ch - ' ') / 18) * FONTHEIGHT;
   SDL_RenderCopy(renderer, font8x16, &src, &dst);
@@ -190,7 +193,11 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_MUL);
+  // any !source needs to use inverted fontmap
+  font8x16 = (bbcom->rule == bbnS || bbcom->rule == bbSnorD) ? font8x16_invert : font8x16_normal;
+
+  // any blending?
+  SDL_SetRenderDrawBlendMode(renderer, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_NONE);
   
   while((c = *ch++) != '\0')
   {
@@ -200,7 +207,6 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
     dst.x += FONTWIDTH;
   }
   
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
   // dirty area
   dst.w = dst.x - loc->x;
@@ -273,6 +279,7 @@ unsigned long EGetNext()
 			case SDL_WINDOWEVENT:
 			break;
 			case SDL_QUIT:
+        exit(0);
 				break;
 
 #if 0
@@ -350,6 +357,13 @@ unsigned long EGetNext()
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
             eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? ':' : ';';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
+          if (event.key.keysym.scancode == SDL_SCANCODE_APOSTROPHE)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '\"' : '\'';
             ewrite = (ewrite + 1) & 31;
           }
           else
@@ -1003,10 +1017,18 @@ struct FORM *InitGraphics(int mode)
   
   // fonts 8x16
   SDL_Surface *bitmap = SDL_LoadBMP("char8x16.bmp");
-  font8x16 =  SDL_CreateTextureFromSurface(renderer, bitmap);
-  SDL_SetTextureColorMod(font8x16, 255,255,255);
-  SDL_SetTextureBlendMode(font8x16, SDL_BLENDMODE_NONE);
+  font8x16_normal =  SDL_CreateTextureFromSurface(renderer, bitmap);
+  SDL_SetTextureColorMod(font8x16_normal, 255,255,255);
+  SDL_SetTextureBlendMode(font8x16_normal, SDL_BLENDMODE_NONE);
   SDL_FreeSurface( bitmap );
 
+  bitmap = SDL_LoadBMP("char8x16_invert.bmp");
+  font8x16_invert =  SDL_CreateTextureFromSurface(renderer, bitmap);
+  SDL_SetTextureColorMod(font8x16_invert, 255,255,255);
+  SDL_SetTextureBlendMode(font8x16_invert, SDL_BLENDMODE_NONE);
+  SDL_FreeSurface( bitmap );
+
+  font8x16 = font8x16_normal;
+  
   return 0;
 }
