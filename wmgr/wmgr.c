@@ -371,8 +371,7 @@ int forcedirty;
         {
           // NB we may have embedded \0 where cursor has been warped as well as handle style attributes
           style = win->vt.attrib[win->vt.cols*j];
-          bb.rule = style & 1 ? bbSorD : bbS;
-          bb.rule = style & 2 ? bbnS : bb.rule;
+          bb.rule = style & 2 ? bbnS : bbS;
           n = 0;
           for(k=0; k<win->vt.cols; k++)
           {
@@ -386,19 +385,17 @@ int forcedirty;
               /* bold needs drawing again */
               if (style & 1)
               {
-                origin.x += 5;
-                origin.y += 5;
+                origin.x += 1;
+                bb.rule = bbSorD;
                 StringDrawX(line, &origin, &bb);
-                origin.x -= 5;
-                origin.y -= 5;
+                origin.x -= 1;
               }
 
               origin.x += n * 8;
               n = 0;
 
               style = win->vt.attrib[win->vt.cols*j+k];
-              bb.rule = style & 1 ? bbSorD : bbS;
-              bb.rule = style & 2 ? bbnS : bb.rule;
+              bb.rule = style & 2 ? bbnS : bbS;
             }
             
             line[n] = win->vt.buffer[win->vt.cols*j+k];
@@ -406,8 +403,6 @@ int forcedirty;
               line[n] = ' ';
 
             n++;
-
-
           }
 
           line[n] = '\0';
@@ -417,7 +412,7 @@ int forcedirty;
         origin.y += r.h;
       }
       
-      bb.rule = bbSorD;
+      bb.rule = bbS;
     }
     
 #ifndef BLINK

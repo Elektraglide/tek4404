@@ -177,13 +177,14 @@ int fdout;
             vt->cx = asciinum2(vt->escseq+2, 1) - 1;
             break;
             case 'J':
-            if (vt->escseq[2] == '1')
+            i = asciinum(vt->escseq+2, 0);
+            if (i == 1)
             {
               memset(vt->buffer, 0, vt->cols*vt->cy+vt->cx);
               memset(vt->attrib, 0, vt->cols*vt->cy+vt->cx);
             }
             else
-            if (vt->escseq[2] == '2')
+            if (i == 2)
             {
               VTclearlines(vt, 0, vt->rows);
             }
@@ -197,18 +198,19 @@ int fdout;
             vt->cy = 0;
             break;
             case 'K':
-            if (vt->escseq[2] == '1')
+            i = asciinum(vt->escseq+2, 0);
+            if (i == 1)
             {
               memset(vt->buffer+vt->cols*vt->cy, 0, vt->cx);
               memset(vt->attrib+vt->cols*vt->cy, 0, vt->cx);
             }
             else
-            if (vt->escseq[2] == '2')
+            if (i == 2)
             {
               VTclearlines(vt, vt->cy, 1);
             }
             else
-            if (vt->escseq[2] == '3')
+            if (i == 3)
             {
               VTclearlines(vt, vt->cy, 1);
             }

@@ -129,7 +129,12 @@ int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
 
-  font8x16 = bbcom->rule != bbSorD ? font8x16_invert : font8x16_normal;
+  // any !source needs to use inverted fontmap
+  font8x16 = (bbcom->rule == bbnS || bbcom->rule == bbSnorD) ? font8x16_invert : font8x16_normal;
+
+  // any blending?
+  SDL_SetTextureBlendMode(font8x16, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_MOD : SDL_BLENDMODE_NONE);
+
 
   src.x = ((ch - ' ') % 18) * FONTWIDTH;
   src.y = ((ch - ' ') / 18) * FONTHEIGHT;
@@ -197,8 +202,8 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
   font8x16 = (bbcom->rule == bbnS || bbcom->rule == bbSnorD) ? font8x16_invert : font8x16_normal;
 
   // any blending?
-  SDL_SetRenderDrawBlendMode(renderer, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_ADD : SDL_BLENDMODE_NONE);
-  
+  SDL_SetTextureBlendMode(font8x16, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_MOD : SDL_BLENDMODE_NONE);
+
   while((c = *ch++) != '\0')
   {
     src.x = ((c - ' ') % 18) * FONTWIDTH;
