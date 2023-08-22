@@ -407,6 +407,13 @@ unsigned long EGetNext()
             ewrite = (ewrite + 1) & 31;
           }
           else
+          if (event.key.keysym.scancode == SDL_SCANCODE_NONUSBACKSLASH)
+          {
+            eventqueue[ewrite].estruct.etype = E_PRESS;
+            eventqueue[ewrite].estruct.eparam = (event.key.keysym.mod & KMOD_SHIFT) ? '~' : '\`';
+            ewrite = (ewrite + 1) & 31;
+          }
+          else
           if (event.key.keysym.scancode == SDL_SCANCODE_0)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
