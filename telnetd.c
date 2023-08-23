@@ -27,7 +27,7 @@ char *telnetprocess[] = {"shell", NULL};
 #else
 
 #define	IPO_TELNET		23
-char *telnetprocess[] = {"bash", NULL};
+char *telnetprocess[] = {"login", NULL};
 
 #include "uniflexshim.h"
 
@@ -68,6 +68,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 #define STOPPED 0
 #define RUNNING 1
 
+char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\r\n";
 int sock = -1;
 int state = STOPPED;
 
@@ -297,6 +298,9 @@ char **argv;
   {
 
     /* PARENT */
+    
+    /* motd */
+    write(socket, welcomemotd, sizeof(welcomemotd));
 
     /* Close the slave side of the PTY */
     close(fds);
@@ -500,7 +504,7 @@ char **argv;
     setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
-    if (vfork())
+    if (fork())
     {
       fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
       sleep(1);
