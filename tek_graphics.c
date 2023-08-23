@@ -304,7 +304,7 @@ unsigned long EGetNext()
           if (event.key.keysym.scancode == SDL_SCANCODE_RETURN)
           {
             eventqueue[ewrite].estruct.etype = E_PRESS;
-            eventqueue[ewrite].estruct.eparam = '\n';
+            eventqueue[ewrite].estruct.eparam = '\r';
             ewrite = (ewrite + 1) & 31;
           }
           else
