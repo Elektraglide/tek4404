@@ -1,7 +1,9 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/termios.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #include <sys/select.h>
 #include <util.h>
@@ -12,6 +14,7 @@
 #include <sys/ioctl.h>
 #define	gtty(fd, buf)	ioctl(fd, TIOCGETP, buf)
 #define	stty(fd, buf)	ioctl(fd, TIOCSETP, buf)
+
 
 // unix kernel calls without stdlib.h
 extern void *malloc();
@@ -26,23 +29,29 @@ int create_pty(int *ptfd)
 	return openpty(&ptfd[1], &ptfd[0], NULL, NULL, NULL);;
 }
 
+#ifdef sgtty_h
+
 int control_pty(int fd, int code, int cval)
 {
+  int i;
+  
 	if (code ==  PTY_INQUIRY)
 	{
 		return 0;
-    }
+  }
 
 	if (code == PTY_SET_MODE)
-    {
-		fprintf(stderr, "control_pty: PTY_SET_MODE: unimplemented\n");
-#if 0
+  {
 		if (cval & PTY_REMOTE_MODE)
-			ioctl_tty(fd, TIOCGPKT, 0);
+    {
+      i = (cval & PTY_REMOTE_MODE);
+			//ioctl(fd, TIOCREMOTE, &i);
+    }
 
 		if (cval & PTY_READ_WAIT)
-			ioctl_tty(fd, TIOCGPKT, 0);
+      tcdrain(fd);
 
+#if 0
 		if (cval & PTY_HANDSHAKE_MODE)
 			ioctl_tty(fd, TIOCGPKT, 0);
 
@@ -62,31 +71,32 @@ int control_pty(int fd, int code, int cval)
     }
 
 	if (code == PTY_START_OUTPUT)
-    {
-		ioctl(fd, TIOCPKT, TIOCPKT_START);
+  {
+      ioctl(fd, TIOCSTART , 0);
 	    return(0);
-    }
+  }
 
 	if (code == PTY_STOP_OUTPUT)
-    {
-		ioctl(fd, TIOCPKT , TIOCPKT_STOP);
+  {
+      ioctl(fd, TIOCSTOP , 0);
 	    return(0);
-    }
+  }
 
 	if (code == PTY_FLUSH_READ)
-    {
-		ioctl(fd, TIOCPKT , TIOCPKT_FLUSHREAD);
+  {
+      tcflush(fd, TCIFLUSH);
 	    return(0);
-    }
+  }
 
 	if (code == PTY_FLUSH_WRITE)
-    {
-		ioctl(fd, TIOCPKT , TIOCPKT_FLUSHWRITE);
+  {
+      tcflush(fd, TCOFLUSH);
 	    return(0);
-    }
+  }
 
     return 0;
 }
+#endif
 
 char *phys(int code)
 {
@@ -105,7 +115,9 @@ char *phys(int code)
 
 }
 
-#ifdef TEK_GFX
+#ifdef bbZeros
+
+extern void SDLrefreshwin();
 
 extern void SaveDisplayState(struct DISPSTATE *state);
 extern void RestoreDisplayStat(struct DISPSTATE *state);

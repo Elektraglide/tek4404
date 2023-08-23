@@ -27,7 +27,7 @@ int mbuttons,mousex,mousey;
 int pandisc;
 
 // need to call this for window to flip
-void SDLshowwin()
+void SDLrefreshwin()
 {
   SDL_UpdateWindowSurface(window);
 }
