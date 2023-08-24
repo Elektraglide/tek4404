@@ -1,6 +1,5 @@
 #define USE_SOCK_RAWxx
-#define PACKET_TYPE IPPROTO_UDP /* IPPROTO_RAW */
-#define DHCP_SERVER "192.168.0.1"
+#define PACKET_TYPE IPPROTO_RAW /* IPPROTO_RAW */
 
 /*
 
@@ -129,6 +128,8 @@ typedef struct dhcp
 #define DHCP_CLIENT_PORT    68
 
 #define DHCP_MAGIC_COOKIE   0x63825363
+
+char DHCP_SERVER[20] = "192.168.0.1";
 
 int verbose = 0;
 int sock = -1;
@@ -352,8 +353,8 @@ dhcp_t *dhcp;
 
     option = DHCP_OPTION_DISCOVER;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
-    req_ip = htonl(0xc0a80040); /* 192.168.0.64 */
-    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
+    //req_ip = htonl(0xc0a80040); /* 192.168.0.64 */
+    //len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_PARAMETER_REQ_LIST, (unsigned char *)&parameter_req_list, sizeof(parameter_req_list));
 
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
@@ -431,6 +432,10 @@ char **argv;
   unsigned char mac[6];
   unsigned char buffer[4096];
   struct sockaddr_in client;
+
+  /* use this DHCP server address */
+  if (argc > 1)
+    strcpy(DHCP_SERVER, argv[1]);
 
   /* make a raw socket,  NB needs elevated permission */
 #ifdef USE_SOCK_RAW
