@@ -129,7 +129,7 @@ typedef struct dhcp
 
 #define DHCP_MAGIC_COOKIE   0x63825363
 
-char DHCP_SERVER[20] = "192.168.0.1";
+char DHCP_SERVER[20] = "255.255.255.255";
 
 int verbose = 0;
 int sock = -1;
@@ -448,9 +448,9 @@ char **argv;
     return -1;
   }
 
-  char reuse = 1;
+  int reuse = 1;
   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-  char broadcast = 1;
+  int broadcast = 1;
   setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
 
 #ifdef USE_SOCK_RAW
