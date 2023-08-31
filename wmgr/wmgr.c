@@ -13,7 +13,6 @@
 
 #ifdef __clang__
 
-#define TEK_GFX
 #include "uniflexshim.h"
 
 #else
@@ -53,7 +52,7 @@ typedef struct _win
   VTemu vt;
 } Window;
 
-Window *winchain;
+Window *wintopmost;
 Window allwindows[32];
 int numwindows = 0;
 char *winprocess[] = {"bash", NULL};
@@ -111,13 +110,13 @@ int islogger;
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
-	new_term_settings.sg_flag |= RAW;
-	//new_term_settings.sg_flag |= CRMOD;
-	//new_term_settings.sg_flag |= XTABS;
+	  new_term_settings.sg_flag |= RAW;
+	  //new_term_settings.sg_flag |= CRMOD;
+	  //new_term_settings.sg_flag |= XTABS;
 	
-	//new_term_settings.sg_flag |= CBREAK;
-	//new_term_settings.sg_flag |= CNTRL;
-	new_term_settings.sg_flag &= ~ECHO;
+	  new_term_settings.sg_flag |= CBREAK;
+	  //new_term_settings.sg_flag |= CNTRL;
+	  new_term_settings.sg_flag &= ~ECHO;
     stty(fds, &new_term_settings);
 
     /* The slave side of the PTY becomes the standard input and outputs of the child process */
@@ -159,11 +158,11 @@ int WindowTop(Window *win)
 {
   Window *awin,*prevwin;
 
-  if (win != winchain)
+  if (win != wintopmost)
   {
     /* find it and put at the front */
     prevwin = NULL;
-    awin = winchain;
+    awin = wintopmost;
     while(awin)
     {
       if (awin == win)
@@ -171,8 +170,8 @@ int WindowTop(Window *win)
         if (prevwin)
           prevwin->next = win->next;
 
-        win->next = winchain;
-        winchain = win;
+        win->next = wintopmost;
+        wintopmost = win;
         break;
       }
       
@@ -232,8 +231,8 @@ int islogger;
     win->vt.dirty = 3;
 
     /* link it */
-    win->next = winchain;
-    winchain = win;
+    win->next = wintopmost;
+    wintopmost = win;
 
     numwindows++;
     WindowTop(win);
@@ -265,7 +264,7 @@ Window *win;
 int x, y;
 {
 
-  if (win == winchain)
+  if (win == wintopmost)
   {
     bb.cliprect = win->windowrect;
   }
@@ -416,7 +415,7 @@ int forcedirty;
     }
     
 #ifndef BLINK
-    if ((win == winchain) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
+    if ((win == wintopmost) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
     {
         RCToRect(&r, win->vt.cy, win->vt.cx);
         origin.x = win->contentrect.x + r.x;
@@ -462,7 +461,7 @@ int forcedirty;
   struct QUADRECT quadrect;
   int i;
   
-  if (win == winchain)
+  if (win == wintopmost)
     counter++;
   
   /* paint desktop */
@@ -521,7 +520,7 @@ int WindowMin(Window *win)
     win->contentrect.h = 0;
   }
   
-  Paint(winchain, &win->oldrect, TRUE);
+  Paint(wintopmost, &win->oldrect, TRUE);
 
   return 0;
 }
@@ -535,7 +534,7 @@ int wid;
 
   /* unlink it */
   prevwin = NULL;
-  awin = winchain;
+  awin = wintopmost;
   for(i=0; i<numwindows; i++)
   {
     if (awin == &allwindows[wid])
@@ -543,9 +542,9 @@ int wid;
       if (prevwin)
         prevwin->next = allwindows[wid].next;
       else
-        winchain = allwindows[wid].next;
-        
-      break;
+        wintopmost = allwindows[wid].next;
+      
+      // continue walking so we determine last/bottom window
     }
     
     prevwin = awin;
@@ -553,13 +552,29 @@ int wid;
   }
 
   oldrect = allwindows[wid].windowrect;
+  
+  /* reclaim a window slot */
+
+  /* update refs TO last element (which is about to be moved) */
+  if (prevwin->next == &allwindows[numwindows-1])
+    prevwin->next = &allwindows[wid];
+
+  /* update refs FROM last element (which is about to be moved) */
+  if (allwindows[numwindows-1].next == &allwindows[wid])
+    allwindows[numwindows-1].next = allwindows[wid].next;
+
+  /* update top window */
+  if (wintopmost == &allwindows[numwindows-1])
+    wintopmost = &allwindows[wid];
+
+  /* move last element to fill gap of deleted window */
   memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
   numwindows--;
-  
+
   if (numwindows > 0)
     WindowTop(&allwindows[0]);
 
-  Paint(winchain, &oldrect, TRUE);
+  Paint(wintopmost, &oldrect, TRUE);
 }
 
 void
@@ -599,7 +614,7 @@ main(int argc, char *argv[])
   SetKBCode(0);
 
   // window chain
-  winchain = NULL;
+  wintopmost = NULL;
   numwindows = 0;
   
   // create a logger of /var/log/system.log OR run a shell
@@ -649,8 +664,8 @@ main(int argc, char *argv[])
 		  if (FD_ISSET(0, &fd_in))
 		  {
 			  n = (int)read(0, inputbuffer, sizeof(inputbuffer));
-        if (winchain)
-          n = (int)write(winchain->pfd[1], inputbuffer, n);
+        if (wintopmost)
+          n = (int)write(wintopmost->pfd[1], inputbuffer, n);
 		  }
 
       /* read any output from window process */
@@ -682,15 +697,15 @@ main(int argc, char *argv[])
       if (ev.estruct.etype == E_PRESS)
       {
         char ch = ev.estruct.eparam;
-        if (winchain)
-          n = (int)write(winchain->pfd[1], &ch, 1);
+        if (wintopmost)
+          n = (int)write(wintopmost->pfd[1], &ch, 1);
       }
 
       if (GetButtons() & M_LEFT)
       {
         /* walk from frontmost windows back to find which we are over */
         GetMPosition(&origin);
-        win = winchain;
+        win = wintopmost;
         while (win)
         {
           if (RectContainsPoint(&win->windowrect, &origin))
@@ -712,12 +727,12 @@ main(int argc, char *argv[])
                 /* repaint only difference of old and new */
                 RectAreasOutside(&r2, &win->windowrect, &quadrect);
                 for(j=0; j<quadrect.next; j++)
-                  Paint(winchain, &quadrect.region[j], TRUE);
+                  Paint(wintopmost, &quadrect.region[j], TRUE);
 
                 bb.cliprect = win->windowrect;
                 WindowRender(win, FALSE);
                 
-                SDLshowwin();
+                SDLrefreshwin();
               }
             }
             
@@ -749,12 +764,12 @@ main(int argc, char *argv[])
       }
 
       /* repaint any dirty windows */
-      win = winchain;
+      win = wintopmost;
 		  while(win)
 		  {
         if (win->vt.dirty)
         {
-          Paint(winchain, &win->windowrect, FALSE);
+          Paint(wintopmost, &win->windowrect, FALSE);
           win->vt.dirty = 0;
         }
 
@@ -762,7 +777,7 @@ main(int argc, char *argv[])
 		  }
     
       /* this is need in SDL emulator to flip window buffer */
-      SDLshowwin();
+      SDLrefreshwin();
 
 	  }
   }
