@@ -27,7 +27,7 @@ char *telnetprocess[] = {"shell", NULL};
 #else
 
 #define	IPO_TELNET		23
-char *telnetprocess[] = {"login", NULL};
+char *telnetprocess[] = {"sh", NULL};
 
 #include "uniflexshim.h"
 
@@ -161,13 +161,16 @@ int len;
         if (cols != 0) ts->term.cols = cols;
         if (lines != 0) ts->term.lines = lines;
         fprintf(stderr, "parseoptdat: term(%d,%d)\n",ts->term.cols,ts->term.lines);
+
+        /* TODO: send child new window size; we dont have SIGWCHG */
+
       }
       break;
 
     case TELOPT_TERMINAL_SPEED:
       break;
 
-    case TELOPT_TERMINAL_TYPE:
+    case TELOPT_TERMINAL_TYPE:    
       break;
   }
 }
@@ -322,35 +325,35 @@ char **argv;
       /* read any socket input and send to slave input */
       if (FD_ISSET(socket, &fd_in))
       {
-	    if (ts.bi.start == ts.bi.end)
-	    {
-          n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
-          if (n < 0)
-            return(1);
+        if (ts.bi.start == ts.bi.end)
+        {
+            n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
+            if (n < 0)
+              return(1);
 
-          // Convert cr nul to cr lf.
-          for (i = 0; i < n; ++i) {
-            unsigned char ch = ts.bi.data[i];
-            if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
-            last_was_cr = (ch == '\r');
-          }
+            // Convert cr nul to cr lf.
+            for (i = 0; i < n; ++i) {
+              unsigned char ch = ts.bi.data[i];
+              if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
+              last_was_cr = (ch == '\r');
+            }
 
-          ts.bi.start = ts.bi.data;
-          ts.bi.end = ts.bi.data + n;
+            ts.bi.start = ts.bi.data;
+            ts.bi.end = ts.bi.data + n;
         }
 
-	    /* Parse user input for telnet options */
-	    parse(&ts);
+        /* Parse user input for telnet options */
+        parse(&ts);
 
-	    /* Application ready to receive */
-	    if (ts.bi.start != ts.bi.end)
-	    {
-		  n = (int)write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
-		  if (n < 0)
-	        return(2);
-          ts.bi.start += n;
-	     }
-	   }
+        /* Application ready to receive */
+        if (ts.bi.start != ts.bi.end)
+        {
+            n = (int)write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
+            if (n < 0)
+                return(2);
+            ts.bi.start += n;
+        }
+      }
 
       /* read any slave output and send to socket */
       if (FD_ISSET(fdm, &fd_in))
@@ -358,26 +361,26 @@ char **argv;
         // Data arrived from application
         if (ts.bo.start == ts.bo.end) 
         {
-	      n = (int)read(fdm, ts.bo.data, sizeof(ts.bo.data));
+          n = (int)read(fdm, ts.bo.data, sizeof(ts.bo.data));
           if (n < 0)
             return(3);
 
-		  if (n == 0)
-		  {
-		    close(socket);
-		    return(0);
-		  }
+          if (n == 0)
+          {
+            close(socket);
+            return(0);
+          }
 
-	      ts.bo.start = ts.bo.data;
+          ts.bo.start = ts.bo.data;
           ts.bo.end = ts.bo.data + n;
         }
 
         if (ts.bo.start != ts.bo.end) 
         {
-	      n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
-	      if (n < 0)
-	        return(4);
-	      ts.bo.start += n;
+          n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
+          if (n < 0)
+            return(4);
+          ts.bo.start += n;
         }
       }
     }
@@ -394,13 +397,13 @@ char **argv;
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
-	new_term_settings.sg_flag |= RAW;
-	//new_term_settings.sg_flag |= CRMOD;
-	//new_term_settings.sg_flag |= XTABS;
+    new_term_settings.sg_flag |= RAW;
+    //new_term_settings.sg_flag |= CRMOD;
+    //new_term_settings.sg_flag |= XTABS;
 	
-  new_term_settings.sg_flag |= CBREAK;
-	//new_term_settings.sg_flag |= CNTRL;
-	new_term_settings.sg_flag &= ~ECHO;
+    new_term_settings.sg_flag |= CBREAK;
+    //new_term_settings.sg_flag |= CNTRL;
+    new_term_settings.sg_flag &= ~ECHO;
     stty(fds, &new_term_settings);
 
     /* The slave side of the PTY becomes the standard input and outputs of the child process */
@@ -408,13 +411,18 @@ char **argv;
     close(1); /* Close standard output (current terminal) */
     close(2); /* Close standard error (current terminal) */
 
+    /* does opening the  ptty make it controlling? */
+    // https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
+    
     dup2(fds, 0); /* PTY becomes standard input (0) */
     dup2(fds, 1); /* PTY becomes standard output (1) */
     dup2(fds, 2); /* PTY becomes standard error (2) */
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
-    /* FIXME ioctl(0, TIOCSCTTY, 1); */
+    
+    ioctl(0, TIOCSCTTY, 1);
+
     n = control_pty(fds, PTY_INQUIRY, 0);
     control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
 
@@ -445,6 +453,8 @@ char **argv;
   fprintf(stderr, "EXIT\n");
   return 0;
 }
+
+extern int wait();
 
 int
 main(argc,argv)
@@ -478,12 +488,14 @@ char **argv;
   rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
   if (rc < 0) {
     fprintf(stderr, "bind: %s\n",strerror(errno));
+    close(sock);
     return errno;
   }
 
   rc = listen(sock, 5);
   if (rc < 0) {
     fprintf(stderr, "listen: %s\n",strerror(errno));
+    close(sock);
     return errno;
   }
 
@@ -495,6 +507,7 @@ char **argv;
     if (state == STOPPED) break;
     if (newsock < 0) {
       fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
+      close(sock);
       return errno;
     }
 
