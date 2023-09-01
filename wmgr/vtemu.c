@@ -5,6 +5,9 @@
 //  Created by Adam Billyard on 05/08/2023.
 //
 
+// 4-bit attrib[]
+
+
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -114,6 +117,14 @@ int i;
         break;
       case 27:
         vt->style &= ~2;
+        break;
+
+      case 30:
+      case 37:
+        break;
+
+      case 40:
+      case 47:
         break;
 
       default:
@@ -329,6 +340,18 @@ int fdout;
               /* private attribs */
               i = asciinum(vt->escseq+3, 1);
               fprintf(stderr,"private mode attrib %d = %s\n", i, c=='h' ?"on" : "off");
+              if (i == 1)
+              {
+                if (c=='h')
+                {
+                  /* Application Cursor Keys (DECCKM) */
+                }
+                else
+                {
+                  /* Normal Cursor Keys (DECCKM) */
+                  VTreset(vt);
+                }
+              }
               if (i == 7)
               {
                 vt->wrapping = (c=='h');

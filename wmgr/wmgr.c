@@ -124,9 +124,9 @@ int islogger;
     close(1); /* Close standard output (current terminal) */
     close(2); /* Close standard error (current terminal) */
 
-    dup(fds); /* PTY becomes standard input (0) */
-    dup(fds); /* PTY becomes standard output (1) */
-    dup(fds); /* PTY becomes standard error (2) */
+    dup2(fds, 0); /* PTY becomes standard input (0) */
+    dup2(fds, 1); /* PTY becomes standard output (1) */
+    dup2(fds, 2); /* PTY becomes standard error (2) */
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
@@ -200,7 +200,7 @@ int islogger;
 
   /* term emu */
 	win->vt.cols = 80;
-	win->vt.rows = 25;
+	win->vt.rows = 30;
   VTreset(&win->vt);
 
   /* size of text block */
