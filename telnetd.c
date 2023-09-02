@@ -162,7 +162,7 @@ int len;
         if (lines != 0) ts->term.lines = lines;
         fprintf(stderr, "parseoptdat: term(%d,%d)\n",ts->term.cols,ts->term.lines);
 
-        /* TODO: send child new window size; we dont have SIGWCHG */
+        /* TODO: send child new window size; we dont have SIGWINCH */
 
       }
       break;
@@ -332,12 +332,13 @@ char **argv;
               return(1);
 
             // Convert cr nul to cr lf.
+#ifdef WHY_IS_THIS_NEEDED
             for (i = 0; i < n; ++i) {
               unsigned char ch = ts.bi.data[i];
               if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
               last_was_cr = (ch == '\r');
             }
-
+#endif
             ts.bi.start = ts.bi.data;
             ts.bi.end = ts.bi.data + n;
         }
