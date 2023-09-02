@@ -349,6 +349,8 @@ int fdout;
                 else
                 {
                   /* Normal Cursor Keys (DECCKM) */
+                  
+                  /* this is not correct but mostly useful to reset margins */
                   VTreset(vt);
                 }
               }
@@ -496,6 +498,18 @@ int fdout;
       vt->cx &= -8;
     }
     else
+    if (c == '\f')
+    {
+      fprintf(stderr, "Form Feed\n");
+      
+      vt->margintop = 0;
+      vt->marginbot = vt->rows - 1;
+
+      i = vt->rows - vt->cy;
+      while (i--)
+        VTnewline(vt);
+    }
+    else
     if (isprint(c))
     {
       if (vt->cx < vt->cols)
@@ -512,7 +526,7 @@ int fdout;
     else
     {
       /* unhandled */
-      n = n;
+      c = c;
     }
   }
 
