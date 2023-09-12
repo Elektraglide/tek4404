@@ -4,6 +4,7 @@
 #include <sys/pty.h> 
 #include <sys/sgtty.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <signal.h>
 
 #include <net/telnet.h>
@@ -11,7 +12,10 @@
 #include <net/inet.h>
 
 #ifndef __clang__
+#include <net/in.h>
+#include <net/socket.h>
 
+typedef int socklen_t;
 typedef int fd_set;
 #define FD_SET(A,SET)	*SET |= (1<<A)
 #define FD_CLR(A,SET)	*SET &= ~(1<<A)
@@ -68,9 +72,10 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 #define STOPPED 0
 #define RUNNING 1
 
-char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\r\n";
+char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\r\n\r\n";
 int sock = -1;
 int state = STOPPED;
+int sessionsock;
 
 int off = 0;
 int on = 1;
@@ -249,10 +254,21 @@ struct termstate *ts;
 
 /************************************************/
 void
-cleanup(int sig)
+cleanup(sig)
+int sig;
 {
   fprintf(stderr,"cleanup telnetd\n");
-  exit(2);
+
+  state = STOPPED;
+}
+
+void
+cleanup2(sig)
+int sig;
+{
+  fprintf(stderr,"cleanup telnet session\n");
+  close(sessionsock);
+  exit(sig);
 }
 
 int telnet_session(socket,argc,argv)
@@ -262,15 +278,16 @@ char **argv;
 {
   struct termstate ts;
   int ptfd[2];
-  int fdm,fds;
-  int n,rc;
+  int fdmaster,fdslave;
+  int n,rc,sessionpid;
   int last_was_cr;
 
   fd_set fd_in;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
-  int i;
+  int i,fd;
+  char buffer[16];
 
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
@@ -280,7 +297,7 @@ char **argv;
   ts.term.cols = 80;
   ts.term.lines = 25;
 
-  // Send initial options
+  /* Send initial options */
   sendopt(&ts, WILL, T_ECHO);
   sendopt(&ts, WILL, T_SGA);
   sendopt(&ts, WONT, TELOPT_LINEMODE);
@@ -294,28 +311,52 @@ char **argv;
     exit(1);
   }
 
-  fds = ptfd[0];
-  fdm = ptfd[1];
+  fdslave = ptfd[0];
+  fdmaster = ptfd[1];
 
-  if (fork())
+    fprintf(stderr, "pty %d %d on create_pty\n", fdmaster,fdslave);
+
+    sessionsock = socket;
+    signal(SIGKILL, cleanup2);
+    signal(SIGQUIT, cleanup2);
+    signal(SIGHUP, cleanup2);
+    signal(SIGINT, cleanup2);
+    signal(SIGTERM, cleanup2);
+
+  sessionpid = fork();
+  if (sessionpid)
   {
+    argv[0] = "dodah";
 
     /* PARENT */
     
+    n = control_pty(fdmaster, PTY_INQUIRY, 0);
+    control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
+
     /* motd */
     write(socket, welcomemotd, sizeof(welcomemotd));
 
-    /* Close the slave side of the PTY */
-    close(fds);
+#if 1
+     fd = open("/etc/log/motd", 0);
+     while((i = read(fd, buffer, sizeof(buffer))) > 0)
+     {
+       write(socket, buffer, i);
+     }
+     close(fd);
+#endif
 
+    /* Close the slave side of the PTY */
+/*
+    close(fdslave);
+*/
     last_was_cr = 0;
     while (1)
     {
 
       FD_ZERO(&fd_in);
       FD_SET(socket, &fd_in);
-      FD_SET(fdm, &fd_in);
-	    rc = select(max(fdm,socket) + 1, &fd_in, NULL, NULL, NULL);
+      FD_SET(fdmaster, &fd_in);
+      rc = select(max(fdmaster,socket) + 1, &fd_in, NULL, NULL, NULL);
       if (rc < 0)
       {
           fprintf(stderr, "select() error %d\n", rc);
@@ -330,15 +371,15 @@ char **argv;
             n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
             if (n < 0)
               return(1);
-
-            // Convert cr nul to cr lf.
-#ifdef WHY_IS_THIS_NEEDED
+#ifdef WHY_DO_WE_NEED_THIS
+            /* Convert cr nul to cr lf. */
             for (i = 0; i < n; ++i) {
               unsigned char ch = ts.bi.data[i];
               if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
               last_was_cr = (ch == '\r');
             }
 #endif
+
             ts.bi.start = ts.bi.data;
             ts.bi.end = ts.bi.data + n;
         }
@@ -349,7 +390,7 @@ char **argv;
         /* Application ready to receive */
         if (ts.bi.start != ts.bi.end)
         {
-            n = (int)write(fdm, ts.bi.start, ts.bi.end - ts.bi.start);
+            n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
             if (n < 0)
                 return(2);
             ts.bi.start += n;
@@ -357,19 +398,24 @@ char **argv;
       }
 
       /* read any slave output and send to socket */
-      if (FD_ISSET(fdm, &fd_in))
+      if (FD_ISSET(fdmaster, &fd_in))
       {
-        // Data arrived from application
+        /* Data arrived from application */
         if (ts.bo.start == ts.bo.end) 
         {
-          n = (int)read(fdm, ts.bo.data, sizeof(ts.bo.data));
+          n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
           if (n < 0)
             return(3);
 
+          /* this normally means half closed, but we get these all the time */
           if (n == 0)
           {
-            close(socket);
-            return(0);
+            if (errno == EACCES)
+            {
+              fprintf(stderr,"broken connection\n");
+              close(socket);
+              return(errno);
+            }
           }
 
           ts.bo.start = ts.bo.data;
@@ -391,21 +437,27 @@ char **argv;
     /* CHILD */
 
     /* Close the master side of the PTY */
-    close(fdm);
+/*
+    close(fdmaster);
+*/
 
     /* Save the defaults parameters of the slave side of the PTY */
-    rc = gtty(fds, &slave_orig_term_settings);
+    rc = gtty(fdslave, &slave_orig_term_settings);
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= RAW;
-    //new_term_settings.sg_flag |= CRMOD;
-    //new_term_settings.sg_flag |= XTABS;
-	
+    /*
+    new_term_settings.sg_flag |= CRMOD;
+    new_term_settings.sg_flag |= XTABS;
+    new_term_settings.sg_flag |= CNTRL;
+  */
+ 
     new_term_settings.sg_flag |= CBREAK;
-    //new_term_settings.sg_flag |= CNTRL;
     new_term_settings.sg_flag &= ~ECHO;
-    stty(fds, &new_term_settings);
+    stty(fdslave, &new_term_settings);
+
+
 
     /* The slave side of the PTY becomes the standard input and outputs of the child process */
     close(0); /* Close standard input (current terminal) */
@@ -413,29 +465,24 @@ char **argv;
     close(2); /* Close standard error (current terminal) */
 
     /* does opening the  ptty make it controlling? */
-    // https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
+    /*
+      https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
+    */
     
-    dup2(fds, 0); /* PTY becomes standard input (0) */
-    dup2(fds, 1); /* PTY becomes standard output (1) */
-    dup2(fds, 2); /* PTY becomes standard error (2) */
+    dup2(fdslave, 0); /* PTY becomes standard input (0) */
+    dup2(fdslave, 1); /* PTY becomes standard output (1) */
+    dup2(fdslave, 2);  /* PTY becomes standard error (2) */
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
     
-    ioctl(0, TIOCSCTTY, 1);
-
-    n = control_pty(fds, PTY_INQUIRY, 0);
-    control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
+    /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    close(fds);
+    close(fdslave); 
 
     /* Make the current process a new session leader */
     setsid();
-
-    signal(SIGHUP, cleanup);
-    signal(SIGINT, cleanup);
-    signal(SIGTERM, cleanup);
 
     /* Execution of the program */
     {
@@ -455,8 +502,6 @@ char **argv;
   return 0;
 }
 
-extern int wait();
-
 int
 main(argc,argv)
 int argc;
@@ -464,9 +509,11 @@ char **argv;
 {
   int newsock;
   int rc;
-  struct sockaddr_in serv_addr;
-  struct sockaddr_in cli_addr;
+  int pair[2];
+  struct in_sockaddr serv_addr;
+  struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
+  socketopt opt;
   int reuse = 1;
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -478,7 +525,7 @@ char **argv;
 #ifndef __clang__
   opt.so_optlen = sizeof(reuse);
   opt.so_optdata = (char *)&reuse;
-  setopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt);
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt);
 #else
   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
 #endif
@@ -493,6 +540,12 @@ char **argv;
     return errno;
   }
 
+    signal(SIGKILL, cleanup);
+    signal(SIGQUIT, cleanup);
+    signal(SIGHUP, cleanup);
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
+
   rc = listen(sock, 5);
   if (rc < 0) {
     fprintf(stderr, "listen: %s\n",strerror(errno));
@@ -502,7 +555,8 @@ char **argv;
 
   fprintf(stderr, "telnetd started\n");
   state = RUNNING;
-  while (1) {
+  while (state == RUNNING) {
+    fprintf(stderr,"telnet: waiting to accept\n");
 
     newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
     if (state == STOPPED) break;
@@ -518,17 +572,22 @@ char **argv;
     setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
+    /* create pty in parent */
+    /* create_pty(pair); */
+
+
     if (fork())
     {
       fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
-      sleep(1);
-      close(newsock);
+       sleep(1);
+       close(newsock); 
     }
     else
     {
       rc = telnet_session(newsock, argc, argv);
      fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
     }
+
   }
   
   return 0;
