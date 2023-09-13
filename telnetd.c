@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h> 
-#include <sys/pty.h> 
+#include <sys/fcntl.h>
+#include <sys/pty.h>
 #include <sys/sgtty.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
@@ -30,6 +31,9 @@ char *telnetprocess[] = {"shell", NULL};
 
 #else
 
+extern int open();
+
+#define in_sockaddr sockaddr_in
 #define	IPO_TELNET		23
 char *telnetprocess[] = {"sh", NULL};
 
@@ -260,6 +264,7 @@ int sig;
   fprintf(stderr,"cleanup telnetd\n");
 
   state = STOPPED;
+  exit(sig);
 }
 
 void
@@ -267,7 +272,7 @@ cleanup2(sig)
 int sig;
 {
   fprintf(stderr,"cleanup telnet session\n");
-  close(sessionsock);
+  //close(sessionsock);
   exit(sig);
 }
 
@@ -314,7 +319,7 @@ char **argv;
   fdslave = ptfd[0];
   fdmaster = ptfd[1];
 
-    fprintf(stderr, "pty %d %d on create_pty\n", fdmaster,fdslave);
+    fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
 
     sessionsock = socket;
     signal(SIGKILL, cleanup2);
@@ -337,8 +342,8 @@ char **argv;
     write(socket, welcomemotd, sizeof(welcomemotd));
 
 #if 1
-     fd = open("/etc/log/motd", 0);
-     while((i = read(fd, buffer, sizeof(buffer))) > 0)
+     fd = open("/etc/log/motd", O_RDONLY);
+     while((i = (int)read(fd, buffer, sizeof(buffer))) > 0)
      {
        write(socket, buffer, i);
      }
@@ -346,9 +351,8 @@ char **argv;
 #endif
 
     /* Close the slave side of the PTY */
-/*
     close(fdslave);
-*/
+
     last_was_cr = 0;
     while (1)
     {
@@ -407,10 +411,12 @@ char **argv;
           if (n < 0)
             return(3);
 
-          /* this normally means half closed, but we get these all the time */
           if (n == 0)
           {
+#ifndef __clang__
+           /* this normally means half closed, but we get these all the time */
             if (errno == EACCES)
+#endif
             {
               fprintf(stderr,"broken connection\n");
               close(socket);
@@ -437,9 +443,7 @@ char **argv;
     /* CHILD */
 
     /* Close the master side of the PTY */
-/*
     close(fdmaster);
-*/
 
     /* Save the defaults parameters of the slave side of the PTY */
     rc = gtty(fdslave, &slave_orig_term_settings);
@@ -457,6 +461,7 @@ char **argv;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
 
+    fprintf(stderr, "isatty(%d)\n", isatty(fdslave));
 
 
     /* The slave side of the PTY becomes the standard input and outputs of the child process */
@@ -513,7 +518,9 @@ char **argv;
   struct in_sockaddr serv_addr;
   struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
+#ifndef __clang__
   socketopt opt;
+#endif
   int reuse = 1;
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
