@@ -43,7 +43,7 @@ char *telnetprocess[] = {"sh", NULL};
 
 /*
 
-native: cc +v pty_test.c +l=netlib
+native: cc +v telnetd.c +l=netlib
 
 clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c 
 
@@ -76,6 +76,10 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 #define STOPPED 0
 #define RUNNING 1
 
+char hexascii[] = "0123456789ABCDEF";
+
+/* Uniflex maps \n to \r..  so we have to insert at runtime */
+char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\r\n";
 char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\r\n\r\n";
 int sock = -1;
 int state = STOPPED;
@@ -160,7 +164,7 @@ int len;
 {
   int cols,lines;
 
-  fprintf(stderr, "parseoptdat: OPTION %d data (%d bytes)\n", option, len);
+  /* fprintf(stderr, "parseoptdat: OPTION %d data (%d bytes)\n", option, len); */
 
   switch (option) {
     case TELOPT_NAWS:
@@ -258,22 +262,22 @@ struct termstate *ts;
 
 /************************************************/
 void
-cleanup(sig)
-int sig;
-{
-  fprintf(stderr,"cleanup telnetd\n");
-
-  state = STOPPED;
-  exit(sig);
-}
-
-void
 cleanup2(sig)
 int sig;
 {
-  fprintf(stderr,"cleanup telnet session\n");
-  //close(sessionsock);
-  exit(sig);
+  fprintf(stderr,"cleanup telnet session on %d\n",sig);
+  close(sessionsock);
+  exit(0);
+}
+
+char hex[3];
+char *int2hex(val)
+int val;
+{
+  hex[0] = hexascii[val >> 4];
+  hex[1] = hexascii[val & 15];
+  hex[2] = 0;
+  return(hex);
 }
 
 int telnet_session(socket,argc,argv)
@@ -291,8 +295,9 @@ char **argv;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
-  int i,fd;
-  char buffer[16];
+  int i,fd, readspin;
+  char buffer[64];
+  struct timeval timeout;
 
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
@@ -322,11 +327,11 @@ char **argv;
     fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
 
     sessionsock = socket;
-    signal(SIGKILL, cleanup2);
     signal(SIGQUIT, cleanup2);
     signal(SIGHUP, cleanup2);
     signal(SIGINT, cleanup2);
     signal(SIGTERM, cleanup2);
+    signal(SIGPIPE, cleanup2);
 
   sessionpid = fork();
   if (sessionpid)
@@ -336,36 +341,56 @@ char **argv;
     /* PARENT */
     
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
-    control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
-
-    /* motd */
-    write(socket, welcomemotd, sizeof(welcomemotd));
-
-#if 1
-     fd = open("/etc/log/motd", O_RDONLY);
-     while((i = (int)read(fd, buffer, sizeof(buffer))) > 0)
-     {
-       write(socket, buffer, i);
-     }
-     close(fd);
+    n |= PTY_REMOTE_MODE;
+#if 0
+    n |= PTY_READ_WAIT; 
+/* 
+FIXME: causes client input to block 
+weirdly, this make the select on the network socket never become ready too
+*/
 #endif
+    control_pty(fdmaster, PTY_SET_MODE, n );
+
+    /* motd; Uniflex maps \n to \r so force it in */
+    copyright[sizeof(copyright)-1] = 0x0a;
+    write(socket, copyright, sizeof(copyright));
+
+     fd = open("/etc/log/motd", O_RDONLY);
+     if (fd < 0)
+     {
+       /* a default MOTD */
+       write(socket, welcomemotd, sizeof(welcomemotd));
+     }
+     else
+     {
+       while((i = (int)read(fd, buffer, sizeof(buffer))) > 0)
+       {
+         write(socket, buffer, i);
+       }
+       close(fd);
+     }
 
     /* Close the slave side of the PTY */
+/*
     close(fdslave);
-
+*/
     last_was_cr = 0;
     while (1)
     {
-
+      timeout.tv_sec = 1;
+      timeout.tv_usec = 0;
       FD_ZERO(&fd_in);
       FD_SET(socket, &fd_in);
       FD_SET(fdmaster, &fd_in);
       rc = select(max(fdmaster,socket) + 1, &fd_in, NULL, NULL, NULL);
       if (rc < 0)
       {
-          fprintf(stderr, "select() error %d\n", rc);
-          exit(23);
+          fprintf(stderr, "select() error %d\n", errno);
+          return(errno);
       }
+
+      if (rc < 1)
+       continue;
 
       /* read any socket input and send to slave input */
       if (FD_ISSET(socket, &fd_in))
@@ -374,8 +399,18 @@ char **argv;
         {
             n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
             if (n < 0)
-              return(1);
-#ifdef WHY_DO_WE_NEED_THIS
+            {
+              if (errno != EINTR)
+              {
+                return(1);
+              }
+
+              continue;
+            }
+
+fprintf(stderr, "read %d bytes from socket\n", n);
+
+#ifndef WHY_DO_WE_NEED_THIS
             /* Convert cr nul to cr lf. */
             for (i = 0; i < n; ++i) {
               unsigned char ch = ts.bi.data[i];
@@ -394,9 +429,17 @@ char **argv;
         /* Application ready to receive */
         if (ts.bi.start != ts.bi.end)
         {
+fprintf(stderr,"wrote %d bytes to fdmaster\n", ts.bi.end - ts.bi.start);
             n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
             if (n < 0)
-                return(2);
+            {
+              if (errno != EINTR)
+              {
+                return(errno);
+              }
+              continue;
+            }
+
             ts.bi.start += n;
         }
       }
@@ -409,19 +452,36 @@ char **argv;
         {
           n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
           if (n < 0)
-            return(3);
+          {
+            if (errno != EINTR)
+            {
+              return(errno);
+            }
+            continue;
+          }
 
           if (n == 0)
           {
 #ifndef __clang__
            /* this normally means half closed, but we get these all the time */
-            if (errno == EACCES)
+            if (errno != 0)
 #endif
             {
               fprintf(stderr,"broken connection\n");
               close(socket);
               return(errno);
             }
+
+            readspin++;
+          }
+          else
+          {
+            fprintf(stderr, "after %d spins, read %d bytes from fdmaster:\n", readspin, n);
+            for(i=0; i<n; i++)
+              fprintf(stderr, "0x%s ", int2hex((int)ts.bo.data[i]));
+            fprintf(stderr, "\n");
+
+            readspin = 0;
           }
 
           ts.bo.start = ts.bo.data;
@@ -430,9 +490,12 @@ char **argv;
 
         if (ts.bo.start != ts.bo.end) 
         {
+fprintf(stderr,"wrote %d bytes to socket\n", ts.bo.end - ts.bo.start);
           n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
           if (n < 0)
-            return(4);
+          {
+            return(errno);
+          }
           ts.bo.start += n;
         }
       }
@@ -443,8 +506,9 @@ char **argv;
     /* CHILD */
 
     /* Close the master side of the PTY */
+/*
     close(fdmaster);
-
+*/
     /* Save the defaults parameters of the slave side of the PTY */
     rc = gtty(fdslave, &slave_orig_term_settings);
 
@@ -452,22 +516,24 @@ char **argv;
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= RAW;
     /*
-    new_term_settings.sg_flag |= CRMOD;
     new_term_settings.sg_flag |= XTABS;
     new_term_settings.sg_flag |= CNTRL;
   */
  
     new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_flag |= CRMOD;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
+    fprintf(stderr,"terminal sg_flag(%x)\n", new_term_settings.sg_flag);
 
-    fprintf(stderr, "isatty(%d)\n", isatty(fdslave));
+    fprintf(stderr, "telnet session: isatty(%d) ttyname(%s)\n", isatty(fdslave),ttyname(fdslave));
 
-
-    /* The slave side of the PTY becomes the standard input and outputs of the child process */
+#if 1
+    /* The slave side of the PTY becomes the stdin/stdout/stderr of process */
     close(0); /* Close standard input (current terminal) */
     close(1); /* Close standard output (current terminal) */
     close(2); /* Close standard error (current terminal) */
+#endif
 
     /* does opening the  ptty make it controlling? */
     /*
@@ -484,7 +550,9 @@ char **argv;
     /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    close(fdslave); 
+/*
+   close(fdslave); 
+*/
 
     /* Make the current process a new session leader */
     setsid();
@@ -505,6 +573,16 @@ char **argv;
 
   fprintf(stderr, "EXIT\n");
   return 0;
+}
+
+void
+cleanup(sig)
+int sig;
+{
+  fprintf(stderr,"cleanup telnetd on %d\n",sig);
+
+  close(sock);
+  state = STOPPED;
 }
 
 int
@@ -547,7 +625,6 @@ char **argv;
     return errno;
   }
 
-    signal(SIGKILL, cleanup);
     signal(SIGQUIT, cleanup);
     signal(SIGHUP, cleanup);
     signal(SIGINT, cleanup);
@@ -579,13 +656,9 @@ char **argv;
     setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
-    /* create pty in parent */
-    /* create_pty(pair); */
-
-
     if (fork())
     {
-      fprintf(stderr, "client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      fprintf(stderr, "telnet: client connected from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
        sleep(1);
        close(newsock); 
     }
@@ -593,10 +666,11 @@ char **argv;
     {
       rc = telnet_session(newsock, argc, argv);
      fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
+     break;
     }
 
   }
-  
+  close(sock); 
   return 0;
 }
 
