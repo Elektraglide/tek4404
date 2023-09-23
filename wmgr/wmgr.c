@@ -6,6 +6,7 @@
 #include <sys/pty.h>
 #include <sys/sgtty.h>
 #include <sys/fcntl.h>
+#include <net/ftype.h>
 #include <signal.h>
 
 #include <font.h>
@@ -36,6 +37,7 @@ extern int rand();
 #define WINBORDER 8
 #define CLOSEBOX
 
+struct FontHeader *font;
 struct BBCOM bb;
 
 typedef struct _win
@@ -55,11 +57,14 @@ typedef struct _win
 Window *wintopmost;
 Window allwindows[32];
 int numwindows = 0;
-char *winprocess[] = {"bash", NULL};
+char *winprocess[] = {"shell", NULL};
 char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
+char welcome[] = "We4lcome to Tektronix 4404\r\n01234567890123456789012345678901234567890123456789\r\n";
 
-void RectInset(struct RECT *r, int d)
+void RectInset(r, d)
+struct RECT *r;
+int d;
 {
   r->x += d;
   r->y += d;
@@ -71,7 +76,7 @@ int window_session(ptfd, islogger)
 int *ptfd;
 int islogger;
 {
-  int fdm,fds;
+  int fdmaster,fdslave;
   int n,rc;
   int pid;
   
@@ -86,8 +91,8 @@ int islogger;
     exit(1);
   }
 
-  fds = ptfd[0];
-  fdm = ptfd[1];
+  fdslave = ptfd[0];
+  fdmaster = ptfd[1];
 
   pid = fork();
   if (pid)
@@ -95,47 +100,47 @@ int islogger;
 	
     /* PARENT */
 
+    n = control_pty(fdmaster, PTY_INQUIRY, 0);
+    control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
+
     /* Close the slave side of the PTY */
-    close(fds);
+    close(fdslave);
   }
   else
   {
     /* CHILD */
     
     /* Close the master side of the PTY */
-    close(fdm);
+    close(fdmaster);
 
     /* Save the defaults parameters of the slave side of the PTY */
-    rc = gtty(fds, &slave_orig_term_settings);
+    rc = gtty(fdslave, &slave_orig_term_settings);
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
 	  new_term_settings.sg_flag |= RAW;
-	  //new_term_settings.sg_flag |= CRMOD;
-	  //new_term_settings.sg_flag |= XTABS;
+	  new_term_settings.sg_flag |= CRMOD;
+	  new_term_settings.sg_flag |= XTABS;
 	
 	  new_term_settings.sg_flag |= CBREAK;
-	  //new_term_settings.sg_flag |= CNTRL;
 	  new_term_settings.sg_flag &= ~ECHO;
-    stty(fds, &new_term_settings);
+    stty(fdslave, &new_term_settings);
 
     /* The slave side of the PTY becomes the standard input and outputs of the child process */
     close(0); /* Close standard input (current terminal) */
     close(1); /* Close standard output (current terminal) */
     close(2); /* Close standard error (current terminal) */
 
-    dup2(fds, 0); /* PTY becomes standard input (0) */
-    dup2(fds, 1); /* PTY becomes standard output (1) */
-    dup2(fds, 2); /* PTY becomes standard error (2) */
+    dup2(fdslave, 0); /* PTY becomes standard input (0) */
+    dup2(fdslave, 1); /* PTY becomes standard output (1) */
+    dup2(fdslave, 2); /* PTY becomes standard error (2) */
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
     /* FIXME ioctl(0, TIOCSCTTY, 1); */
-    n = control_pty(fds, PTY_INQUIRY, 0);
-    control_pty(fds, PTY_SET_MODE, n | PTY_REMOTE_MODE);
 
     /* Now the original file descriptor is useless */
-    close(fds);
+    close(fdslave);
 
     /* Make the current process a new session leader */
     setsid();
@@ -154,12 +159,16 @@ int islogger;
   return pid;
 }
 
-int WindowTop(Window *win)
+int WindowTop(win)
+Window *win;
 {
   Window *awin,*prevwin;
 
   if (win != wintopmost)
   {
+    if (wintopmost)
+      VTblur(wintopmost->vt, wintopmost->pfd[1]);
+  
     /* find it and put at the front */
     prevwin = NULL;
     awin = wintopmost;
@@ -181,6 +190,8 @@ int WindowTop(Window *win)
     
     fprintf(stderr, "topwindow: %s\n", win->title);
 
+    VTfocus(win->vt, win->pfd[1]);
+
     win->vt.dirty |= 2;
   }
   
@@ -196,15 +207,15 @@ int islogger;
 {
   int pid;
   Window *win = allwindows + numwindows;
-  struct RECT r;
+  struct RECT r,glyph;
 
   /* term emu */
-	win->vt.cols = 80;
-	win->vt.rows = 30;
+  win->vt.cols = 64;
+  win->vt.rows = 20;
   VTreset(&win->vt);
 
   /* size of text block */
-  RCToRect(&r, win->vt.rows, win->vt.cols);
+  RCToRect(&r, win->vt.rows, win->vt.cols+1);
   
   /* bounds of content */
 	win->contentrect.x = x;
@@ -218,8 +229,8 @@ int islogger;
   win->windowrect.y -= WINTITLEBAR - WINBORDER;
   win->windowrect.h += WINTITLEBAR - WINBORDER;
 
-	// create a pty process; first window is always a logger
-	pid = window_session(win->pfd, islogger);
+  /* create a pty process; first window is always a logger */
+  pid = window_session(win->pfd, islogger);
   if (pid > 0)
   {
     fprintf(stderr, "WindowCreate with pid%d\n", pid);
@@ -237,13 +248,15 @@ int islogger;
     numwindows++;
     WindowTop(win);
 
-		return numwindows;
-	}
-	else
-	{
-		/* failed to create window */
-		return -1;
-	}
+    WindowOutput(0, welcome, sizeof(welcome));
+
+    return numwindows;
+  }
+  else
+  {
+    /* failed to create window */
+    return -1;
+  }
 }
 
 
@@ -296,17 +309,21 @@ int forcedirty;
 #ifdef BLINK
   static long newtime,oldtime = 0;
 #endif
-  struct RECT r;
+  struct RECT r,glyph;
   struct POINT origin;
   int i,j,k,n,style;
   char line[128];
   char cursor;
   
+  /* size of single glyph */
+  RCToRect(&glyph, 0, 0);
+
   if (forcedirty || win->vt.dirty)
   {
     if (forcedirty || (win->vt.dirty & 2))
     {
-      // render (just) frame
+      /* render (just) frame */
+
       r = win->windowrect;
       r.h = WINTITLEBAR;
       bb.halftoneform = &BlackMask;
@@ -321,7 +338,7 @@ int forcedirty;
       r.h = WINBORDER;
       RectDrawX(&r, &bb);
 
-      // some accent lines
+      /* some accent lines */
       bb.halftoneform = &WhiteMask;
       r = win->windowrect;
       r.h = WINTITLEBAR;
@@ -345,19 +362,16 @@ int forcedirty;
 #endif
 
       /* render centered title */
-      j = StringWidth(win->title, NULL);
+      j = StringWidth(win->title, font);
       origin.x = win->windowrect.x + win->windowrect.w / 2 - j/2;
-      origin.y = win->windowrect.y + 4;
-      StringDrawX(win->title, &origin, &bb);
+      origin.y = win->windowrect.y + 4 + glyph.h;
+      StringDrawX(win->title, &origin, &bb, font);
     }
 
-    // render contents
+    /* render contents */
     if (forcedirty || (win->vt.dirty & 1))
     {
-      /* size of single glyph */
-      RCToRect(&r, 0, 0);
-
-      origin.y = win->contentrect.y;
+      origin.y = win->contentrect.y + glyph.h;
       for(j=0; j<win->vt.rows; j++)
       {
         origin.x = win->contentrect.x;
@@ -368,7 +382,7 @@ int forcedirty;
         r.w = win->contentrect.w;
         if (RectIntersects(&r, &bb.cliprect))
         {
-          // NB we may have embedded \0 where cursor has been warped as well as handle style attributes
+          /* NB we may have embedded \0 where cursor has been warped as well as handle style attributes */
           style = win->vt.attrib[win->vt.cols*j];
           bb.rule = style & 2 ? bbnS : bbS;
           n = 0;
@@ -379,18 +393,18 @@ int forcedirty;
             {
               /* flush so far */
               line[n] = '\0';
-              StringDrawX(line, &origin, &bb);
+              StringDrawX(line, &origin, &bb, font);
 
               /* bold needs drawing again */
               if (style & 1)
               {
                 origin.x += 1;
                 bb.rule = bbSorD;
-                StringDrawX(line, &origin, &bb);
+                StringDrawX(line, &origin, &bb, font);
                 origin.x -= 1;
               }
 
-              origin.x += n * 8;
+              origin.x += n * glyph.w;
               n = 0;
 
               style = win->vt.attrib[win->vt.cols*j+k];
@@ -405,23 +419,23 @@ int forcedirty;
           }
 
           line[n] = '\0';
-          StringDrawX(line, &origin, &bb);
+          StringDrawX(line, &origin, &bb, font);
         }
         
-        origin.y += r.h;
+        origin.y += glyph.h;
       }
       
       bb.rule = bbS;
     }
     
-#ifndef BLINK
+#if 0
     if ((win == wintopmost) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
     {
         RCToRect(&r, win->vt.cy, win->vt.cx);
         origin.x = win->contentrect.x + r.x;
         origin.y = win->contentrect.y + r.y;
         cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
-        CharDrawX(' '+95, &origin, &bb);
+        CharDrawX(' '+95, &origin, &bb, font);
     }
 #endif
   }
@@ -440,7 +454,7 @@ int forcedirty;
       if (!cursor)
         cursor = ' ';
 
-      CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb);
+      CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb, font);
 
       oldtime = newtime;
     }
@@ -467,16 +481,12 @@ int forcedirty;
   /* paint desktop */
   if (win == NULL)
   {
-    bb.cliprect.x = 0;
-    bb.cliprect.y = 0;
-    bb.cliprect.w = ScrWidth;
-    bb.cliprect.h = ScrHeight;
     bb.halftoneform =  &GrayMask;
 
     if ((counter & 1) == 0)
     {
       i = rand() & 255;
-  //    RectDebug(r, i,i,i);
+  /*    RectDebug(r, i,i,i); */
     }
     
     RectDrawX(r, &bb);
@@ -491,12 +501,14 @@ int forcedirty;
       WindowRender(win, forcedirty);
       if ((counter & 1) == 0)
       {
-      //  RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
+      /*  RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255); */
       }
     }
 
     /* recurse for parts outside this window */
+    quadrect.next = 0;
     RectAreasOutside(r, &win->windowrect, &quadrect);
+fprintf(stderr, "%c[2H quad %d\n", 0x1b, quadrect.next);
     for(i=0; i<quadrect.next; i++)
     {
       Paint(win->next, &quadrect.region[i], forcedirty);
@@ -504,7 +516,8 @@ int forcedirty;
   }
 }
 
-int WindowMin(Window *win)
+int WindowMin(win)
+Window *win;
 {
   if (win->windowrect.h == WINTITLEBAR)
   {
@@ -544,7 +557,7 @@ int wid;
       else
         wintopmost = allwindows[wid].next;
       
-      // continue walking so we determine last/bottom window
+      /* continue walking so we determine last/bottom window */
     }
     
     prevwin = awin;
@@ -578,13 +591,16 @@ int wid;
 }
 
 void
-cleanup(int sig)
+cleanup(sig)
+int sig;
 {
   exit(2);
 }
 
 int
-main(int argc, char *argv[])
+main(argc, argv)
+int argc;
+char **argv;
 {
   int n,i,j,k,rc;
   fd_set fd_in;
@@ -595,31 +611,51 @@ main(int argc, char *argv[])
   struct POINT origin,offset, p;
   struct QUADRECT quadrect;
   struct sgttyb new_term_settings;
+  struct DISPSTATE ds;
+  union EVENTUNION ev;
 
   /* how do we detect child is dead? */
   signal(SIGHUP, cleanup);
   signal(SIGDEAD, cleanup);
   signal(SIGABORT, cleanup);
 
+
+  SaveDisplayState(&ds);
+
+  font = FontOpen("/fonts/DarkFixed812.font");
+  fprintf(stderr, "name: %s: face: %s\n", font->name, font->face);
+  fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
+  fprintf(stderr, "fixed: %d\n", font->maps->fixed);
+
+sleep(1);
+
   InitGraphics(TRUE);
 
-  /* for controllering clipping etc */
+  /* for controlling clipping etc */
   BbcomDefault(&bb);
 
   /* clear desktop */
-  bb.halftoneform = &GrayMask;
+  bb.halftoneform = &DarkGrayMask;
   RectDrawX(&bb.cliprect, &bb);
 
-  EventEnable();
-  SetKBCode(0);
+  CursorVisible(1);
+  CursorTrack(1);
 
-  // window chain
+#if 1
+  EventEnable();
+  SetKBCode(1);
+#endif
+
+  /* window chain */
   wintopmost = NULL;
   numwindows = 0;
-  
-  // create a logger of /var/log/system.log OR run a shell
-  //WindowCreate("SysLog", 50, 50, TRUE);
+ 
+  /* create a logger of /var/log/system.log OR run a shell */
+#if 0 
+  WindowCreate("SysLog", 50, 50, TRUE);
+#else
   WindowCreate("Console", 50, 50, FALSE);
+#endif
 
   /* CBREAK input */
   rc = gtty(0, &new_term_settings);
@@ -639,7 +675,9 @@ main(int argc, char *argv[])
   {
     /* check any outputs from master sides and track highest fd */
     FD_ZERO(&fd_in);
+#if 0
     FD_SET(0, &fd_in);
+#endif
     n = 0;
     for(i=0; i<numwindows; i++)
     {
@@ -648,67 +686,85 @@ main(int argc, char *argv[])
         n = allwindows[i].pfd[1];
     }
 
+#if 0
     /* 20Hz updating */
     timeout.tv_sec = 0;
     timeout.tv_usec = 50000;
-    rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+    rc = select(n + 1, &fd_in, NULL, NULL, NULL);
+#else
+    /* timeout on select never returns, so do nothing for now */
+    rc = 1;
+#endif
+
     if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
     {
         fprintf(stderr, "select() error %d\n", errno);
         exit(23);
     }
-	  else
-	  if (rc > 0)
-	  {
-		  /* read any stdio input and send to topwindow input */
-		  if (FD_ISSET(0, &fd_in))
-		  {
-			  n = (int)read(0, inputbuffer, sizeof(inputbuffer));
-        if (wintopmost)
-          n = (int)write(wintopmost->pfd[1], inputbuffer, n);
-		  }
+  else
+  if (rc > 0)
+  {
+    /* read any stdio input and send to topwindow input */
+    if (FD_ISSET(0, &fd_in))
+    {
+      n = (int)read(0, inputbuffer, sizeof(inputbuffer));
+     if (wintopmost)
+       n = (int)write(wintopmost->pfd[1], inputbuffer, n);
+    }
 
-      /* read any output from window process */
-		  for(i=0; i<numwindows; i++)
-		  {
-        if (FD_ISSET(allwindows[i].pfd[1], &fd_in))
+    /* read any output from window process */
+    for(i=0; i<numwindows; i++)
+    {
+      n = control_pty(allwindows[i].pfd[1], PTY_INQUIRY, 0);
+      if ((n & PTY_OUTPUT_QUEUED) && FD_ISSET(allwindows[i].pfd[1], &fd_in))
+      {
+        n = (int)read(allwindows[i].pfd[1], inputbuffer, sizeof(inputbuffer));
+
+        /* window process terminated */
+        if (n > 0)
         {
-          n = (int)read(allwindows[i].pfd[1], inputbuffer, sizeof(inputbuffer));
-
-          /* window process terminated */
-          if (n > 0)
-          {
-            WindowOutput(i, inputbuffer, n);
-          }
-          else
-          if (n == 0)
-          {
-            fprintf(stderr,"window%d destroyed\n", i);
-            WindowDestroy(i);
-            break;
-          }
+          WindowOutput(i, inputbuffer, n);
         }
-		  }
-	  }
-	  else  /* manage windows */
-	  {
+        else
+        if (n == 0)
+        {
+          fprintf(stderr,"window%d destroyed\n", i);
+          WindowDestroy(i);
+          break;
+        }
+      }
+    }
+  }
+    /* manage windows */
+  {
+
+#if 1
       /* tek4404 event system only used for keypress input */
-      union EVENTUNION ev = (union EVENTUNION)EGetNext();
+      ev = (union EVENTUNION)EGetNext();
       if (ev.estruct.etype == E_PRESS)
       {
         char ch = ev.estruct.eparam;
         if (wintopmost)
           n = (int)write(wintopmost->pfd[1], &ch, 1);
       }
+#endif
+
+
+if (GetButtons() & M_MIDDLE)
+{
+  break;
+}
 
       if (GetButtons() & M_LEFT)
       {
         /* walk from frontmost windows back to find which we are over */
         GetMPosition(&origin);
+
         win = wintopmost;
         while (win)
         {
-          if (RectContainsPoint(&win->windowrect, &origin))
+          /* docs wrong; returns 0 if contained */
+         if (!RectContainsPoint(&win->windowrect, &origin))
           {
             WindowTop(win);
 
@@ -720,11 +776,13 @@ main(int argc, char *argv[])
             while (GetButtons() & M_LEFT)
             {
               GetMPosition(&p);
+fprintf(stderr, "%c[H %d %d\n", 0x1b, p.x, p.y);
 
               r2 = win->windowrect;
               if (WindowMove(win, p.x - offset.x, p.y - offset.y))
               {
                 /* repaint only difference of old and new */
+                quadrect.next = 0;
                 RectAreasOutside(&r2, &win->windowrect, &quadrect);
                 for(j=0; j<quadrect.next; j++)
                   Paint(wintopmost, &quadrect.region[j], TRUE);
@@ -732,7 +790,9 @@ main(int argc, char *argv[])
                 bb.cliprect = win->windowrect;
                 WindowRender(win, FALSE);
                 
+#ifdef __clang__
                 SDLrefreshwin();
+#endif
               }
             }
             
@@ -755,7 +815,7 @@ main(int argc, char *argv[])
       else
       if (GetButtons() & M_RIGHT)
       {
-          // pop up menu
+          /* pop up menu */
 
           while (GetButtons() & M_RIGHT);
 
@@ -765,22 +825,27 @@ main(int argc, char *argv[])
 
       /* repaint any dirty windows */
       win = wintopmost;
-		  while(win)
-		  {
-        if (win->vt.dirty)
-        {
+     while(win)
+     {
+       if (win->vt.dirty)
+       {
           Paint(wintopmost, &win->windowrect, FALSE);
           win->vt.dirty = 0;
-        }
+       }
 
         win = win->next;
-		  }
+     }
     
       /* this is need in SDL emulator to flip window buffer */
+#ifdef __clang__
       SDLrefreshwin();
+#endif
 
-	  }
+    }
   }
-  
+  EventDisable();
   ExitGraphics();
+  FontClose(font);
+  RestoreDisplayState(&ds);
+  fprintf(stderr, "Done\n");
 }
