@@ -1,12 +1,10 @@
-//
-//  vtemu.c
-//  winprocmgr
-//
-//  Created by Adam Billyard on 05/08/2023.
-//
+/*
+  vtemu.c
+  winprocmgr
 
-// 4-bit attrib[]
-
+  Created by Adam Billyard on 05/08/2023.
+ TODO: 4-bit attrib[]
+*/
 
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +13,20 @@
 #include "vtemu.h"
 
 extern int write();
+#ifndef __clang__
+int memmove(dst, src, len)
+char *dst;
+char *src;
+int len;
+{
+  memcpy(dst, src, len);
+
+  return(0);
+
+}
+#endif
+
+
 
 void VTreset(vt)
 VTemu *vt;
@@ -22,6 +34,7 @@ VTemu *vt;
   vt->state = 0;
   vt->wrapping = 0;
   vt->hidecursor = 0;
+  vt->focusblur = 0;
   vt->style = 0;
 	vt->cx = 0;
 	vt->cy = 0;
@@ -91,6 +104,30 @@ int fdout;
 char c;
 {
    write(fdout, &c, 1);
+}
+
+void VTfocus(vt, fdout)
+VTemu *vt;
+int fdout;
+{
+    if (vt->focusblur)
+    {
+      reply(fdout, 0x1b);
+      reply(fdout,'[');
+      reply(fdout,'I');
+    }
+}
+
+void VTblur(vt, fdout)
+VTemu *vt;
+int fdout;
+{
+    if (vt->focusblur)
+    {
+      reply(fdout, 0x1b);
+      reply(fdout,'[');
+      reply(fdout,'O');
+    }
 }
 
 void VTsetstyle(vt, i)
@@ -301,7 +338,7 @@ int fdout;
             VTsetstyle(vt, asciinum(vt->escseq+2, 0));
             if (strchr(vt->escseq+2, ';'))
               VTsetstyle(vt, asciinum2(vt->escseq+2, 0));
-            //printf("%.*s   style = %d\n", vt->state, vt->escseq, vt->style);
+            /* printf("%.*s   style = %d\n", vt->state, vt->escseq, vt->style); */
             break;
 
             case 'n':
@@ -351,7 +388,8 @@ int fdout;
                   /* Normal Cursor Keys (DECCKM) */
                   
                   /* this is not correct but mostly useful to reset margins */
-                  VTreset(vt);
+                  vt->margintop = 0;
+                  vt->marginbot = vt->rows - 1;
                 }
               }
               if (i == 7)
@@ -367,6 +405,12 @@ int fdout;
                 /* we dont implement saved screen */
                 VTclearlines(vt, 0, vt->rows);
                 vt->cx = vt->cy = 0;
+              }
+              if (i == 1004)
+              {
+                /* has focus / lost focus */
+                vt->focusblur = (c=='l');
+                VTfocus(vt, fdout);
               }
               if (i == 1049)
               {
