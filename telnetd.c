@@ -344,10 +344,6 @@ char **argv;
     n |= PTY_REMOTE_MODE;
 #if 0
     n |= PTY_READ_WAIT; 
-/* 
-FIXME: causes client input to block 
-weirdly, this make the select on the network socket never become ready too
-*/
 #endif
     control_pty(fdmaster, PTY_SET_MODE, n );
 
@@ -371,12 +367,13 @@ weirdly, this make the select on the network socket never become ready too
      }
 
     /* Close the slave side of the PTY */
-/*
     close(fdslave);
-*/
-    last_was_cr = 0;
+    
+   last_was_cr = 0;
     while (1)
     {
+      /* Uniflex select appears to only expect actual socket fds */
+      /* having stdin in the FD_SET wreaks havoc */
       timeout.tv_sec = 1;
       timeout.tv_usec = 0;
       FD_ZERO(&fd_in);
@@ -408,8 +405,6 @@ weirdly, this make the select on the network socket never become ready too
               continue;
             }
 
-fprintf(stderr, "read %d bytes from socket\n", n);
-
 #ifndef WHY_DO_WE_NEED_THIS
             /* Convert cr nul to cr lf. */
             for (i = 0; i < n; ++i) {
@@ -429,7 +424,6 @@ fprintf(stderr, "read %d bytes from socket\n", n);
         /* Application ready to receive */
         if (ts.bi.start != ts.bi.end)
         {
-fprintf(stderr,"wrote %d bytes to fdmaster\n", ts.bi.end - ts.bi.start);
             n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
             if (n < 0)
             {
@@ -445,7 +439,8 @@ fprintf(stderr,"wrote %d bytes to fdmaster\n", ts.bi.end - ts.bi.start);
       }
 
       /* read any slave output and send to socket */
-      if (FD_ISSET(fdmaster, &fd_in))
+      n = control_pty(fdmaster, PTY_INQUIRY, 0);
+      if ((n & PTY_OUTPUT_QUEUED) && FD_ISSET(fdmaster, &fd_in))
       {
         /* Data arrived from application */
         if (ts.bo.start == ts.bo.end) 
@@ -490,7 +485,6 @@ fprintf(stderr,"wrote %d bytes to fdmaster\n", ts.bi.end - ts.bi.start);
 
         if (ts.bo.start != ts.bo.end) 
         {
-fprintf(stderr,"wrote %d bytes to socket\n", ts.bo.end - ts.bo.start);
           n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
           if (n < 0)
           {
@@ -506,9 +500,8 @@ fprintf(stderr,"wrote %d bytes to socket\n", ts.bo.end - ts.bo.start);
     /* CHILD */
 
     /* Close the master side of the PTY */
-/*
     close(fdmaster);
-*/
+
     /* Save the defaults parameters of the slave side of the PTY */
     rc = gtty(fdslave, &slave_orig_term_settings);
 
