@@ -16,12 +16,9 @@
 #include <net/in.h>
 #include <net/socket.h>
 
+#include "fdset.h"
+
 typedef int socklen_t;
-typedef int fd_set;
-#define FD_SET(A,SET)	*SET |= (1<<A)
-#define FD_CLR(A,SET)	*SET &= ~(1<<A)
-#define FD_ZERO(SET)	*SET = 0
-#define FD_ISSET(A,SET)	(*SET & (1<<A))
 
 void setsid() {}
 
@@ -472,10 +469,11 @@ char **argv;
           else
           {
             fprintf(stderr, "after %d spins, read %d bytes from fdmaster:\n", readspin, n);
+#ifdef DEBUG
             for(i=0; i<n; i++)
               fprintf(stderr, "0x%s ", int2hex((int)ts.bo.data[i]));
             fprintf(stderr, "\n");
-
+#endif
             readspin = 0;
           }
 
@@ -507,14 +505,13 @@ char **argv;
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
-    new_term_settings.sg_flag |= RAW;
     /*
     new_term_settings.sg_flag |= XTABS;
     new_term_settings.sg_flag |= CNTRL;
+    new_term_settings.sg_flag |= RAW;
   */
  
     new_term_settings.sg_flag |= CBREAK;
-    new_term_settings.sg_flag |= CRMOD;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
     fprintf(stderr,"terminal sg_flag(%x)\n", new_term_settings.sg_flag);
@@ -600,13 +597,7 @@ char **argv;
     return 1;
   }
 
-#ifndef __clang__
-  opt.so_optlen = sizeof(reuse);
-  opt.so_optdata = (char *)&reuse;
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt);
-#else
   setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-#endif
 
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
