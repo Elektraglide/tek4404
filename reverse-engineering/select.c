@@ -66,6 +66,7 @@ struct el *cmds;
 	n = (struct el *)cmds->e1_u1 - cmds;
 
 	/ * WHAT IS THIS MAGIC? */
+    /* hypothesis:  socket descriptors are at some set offset from internal tables? */
 	if (write(fd, cmds, n + 0x00007ff4) >= 0)
 	{
 		return 0;
@@ -153,8 +154,10 @@ struct timeval *timeout;
 	}
 
 	setptr = set;
-	for(i=0;	i<nfds;  i++, setptr++)
+	for(i=0;	i<nfds;  i++)
 	{
+		setptr->se_flags = 0;
+
 		if (fdread)
 		{
 			mask = 1 << (i & 31);
@@ -184,6 +187,12 @@ struct timeval *timeout;
 				setptr->se_flags |= F_SE_OTHER;
 			}
 		}
+
+		if (setptr->se_flags)
+		{
+			setptr->se_fd = i;
+			setptr++;
+		}
 	}
 
 	n = setptr - set;
@@ -194,7 +203,7 @@ struct timeval *timeout;
 		{
 			if (fdread)
 			{
-				if (setptr->se_flags & F_SE_READ)
+				if (!(setptr->se_flags & F_SE_CREAD))
 				{
 					mask = 1 << (setptr->se_fd & 31);
 					fdread[setptr->se_fd/32] &= ~mask;
@@ -202,7 +211,7 @@ struct timeval *timeout;
 			}
 			if (fdwrite)
 			{
-				if (setptr->se_flags & F_SE_READ)
+				if (!(setptr->se_flags & F_SE_CWRITE))
 				{
 					mask = 1 << (setptr->se_fd & 31);
 					fdwrite[setptr->se_fd/32] &= ~mask;
@@ -210,7 +219,7 @@ struct timeval *timeout;
 			}
 			if (fdexcep)
 			{
-				if (setptr->se_flags & F_SE_READ)
+				if (!(setptr->se_flags & F_SE_COTHER))
 				{
 					mask = 1 << (setptr->se_fd & 31);
 					fdexcep[setptr->se_fd/32] &= ~mask;
