@@ -1,31 +1,6 @@
 #include <net/netioc.h>
 #include <net/select.h>
 
-int setsockopt(fd, type, cmd, param, size)
-int fd;
-int type;
-int cmd;
-char *param;
-int size;
-{
-	struct el cmds[EL_MAX_SIZE];
-    struct el *elp;
-
-	elp = _el_init(cmds, ELC_SETOPT,  0);
-
-	elp = _elc(cmds, EL_P0,  4,  F_EL_STRUCTURED);
-	elp->e1_u1 = type;
-
-	elp = _elc(cmds, EL_P1,  4,  F_EL_STRUCTURED);
-	elp->e1_u1 = cmd;
-
-	elp = _elc(cmds, EL_DATA,  size,  F_EL_IN);
-	elp->e1_u1 = param;
-
-	_net_ioctl(fd, cmds);
-}
-
-
 
 struct el *_elc_init(elp, cmd, flags)
 struct el *elp;
@@ -65,9 +40,8 @@ struct el *cmds;
 
 	n = (struct el *)cmds->e1_u1 - cmds;
 
-	/ * WHAT IS THIS MAGIC? */
-    /* hypothesis:  socket descriptors are at some set offset from internal tables? */
-	if (write(fd, cmds, n + 0x00007ff4) >= 0)
+	/* dont understand this passing a magic length... */
+	if (write(fd, cmds, el_ioc(cmds)) >= 0)
 	{
 		return 0;
 	}
@@ -76,6 +50,31 @@ struct el *cmds;
 		return -1;
 	}
 }
+
+int setsockopt(fd, type, cmd, param, size)
+int fd;
+int type;
+int cmd;
+char *param;
+int size;
+{
+	struct el cmds[EL_MAX_SIZE];
+    struct el *elp;
+
+	elp = _el_init(cmds, ELC_SETOPT,  0);
+
+	elp = _elc(cmds, EL_P0,  4,  F_EL_STRUCTURED);
+	elp->e1_u1 = type;
+
+	elp = _elc(cmds, EL_P1,  4,  F_EL_STRUCTURED);
+	elp->e1_u1 = cmd;
+
+	elp = _elc(cmds, EL_DATA,  size,  F_EL_IN);
+	elp->e1_u1 = param;
+
+	_net_ioctl(fd, cmds);
+}
+
 
 int nselect(set, count, timeout)
 struct sel *set;
