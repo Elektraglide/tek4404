@@ -25,6 +25,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o dhcp  dhcp.c
 #include <net/btypes.h>
 #include <net/select.h>
 #include <net/enet.h>
+#include <net/netioc.h>
 #define ETHER_ADDR_LEN 6
 #define ETHERTYPE_IP            0x0800  /* IP protocol */
 #define ETH_P_IP                0x0800
@@ -42,14 +43,11 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o dhcp  dhcp.c
 #include <net/in.h>
 #include <net/socket.h>
 
+#include "fdset.h"
+
 #define SO_BROADCAST 0x20
 
 typedef int socklen_t;
-typedef int fd_set;
-#define FD_SET(A,SET)	*SET |= (1<<A)
-#define FD_CLR(A,SET)	*SET &= ~(1<<A)
-#define FD_ZERO(SET)	*SET = 0
-#define FD_ISSET(A,SET)	(*SET & (1<<A))
 
 void setsid() {}
 
@@ -135,9 +133,9 @@ typedef struct dhcp
 
 #define DHCP_MAGIC_COOKIE   0x63825363
 
-char DHCP_SERVER[20] = "192.168.1.1";
+char DHCP_SERVER[20] = "255.255.255.255";
 
-int verbose = 1;
+int verbose = 0;
 int sock = -1;
 int ip;
 int packet_xid;
@@ -168,12 +166,12 @@ static void
 brd_host_addr(addr)
 char *addr;
 {
-  addr[0] = 0x08;
-  addr[1] = 0x00;
-  addr[2] = 0x11;
-  addr[3] = 0x00;
-  addr[4] = 0x04;
-  addr[5] = 0xb6;
+ addr[0] = 0x08;
+ addr[1] = 0x00;
+ addr[2] = 0x11;
+ addr[3] = 0x00;
+ addr[4] = 0x04;
+ addr[5] = 0xb6;
 }
 
 /*
@@ -248,9 +246,13 @@ int *len;
     packet_xid = htonl(rand());
     dhcp->xid = packet_xid;
     dhcp->secs = htons(0xFF);
-    
+#ifdef __clang__
     /* tell server it should broadcast its response */
+
+    /* cannot get Uniflex to do BROADCAST, so disable */
+
     dhcp->flags = htons(DHCP_BROADCAST_FLAG);
+#endif
 
     dhcp->magic_cookie = htonl(DHCP_MAGIC_COOKIE);
 }
@@ -292,10 +294,8 @@ dhcp_t *dhcp;
     option = DHCP_OPTION_DISCOVER;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
 
-#ifdef REQUEST_EXISTING
-    req_ip = htonl(0xc0a80040); /* 192.168.0.64 */
+    req_ip = htonl(0xc0a8013d); /* 192.168.0.64 */
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
-#endif
 
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_PARAMETER_REQ_LIST, (unsigned char *)&parameter_req_list, sizeof(parameter_req_list));
 
@@ -340,10 +340,11 @@ unsigned char *mac;
     server.sin_addr.s_addr = inet_addr(DHCP_SERVER);
 #endif
 
+      if (verbose)
       fprintf(stderr, "Sending %d bytes to %s : %d\n", len, inet_ntoa(server.sin_addr.s_addr), ntohs(server.sin_port));
     print_buffer(packet, len);
 
-    if (sendto(sock, packet, len, 0, (struct sockaddr *)&server, sizeof(server)) != len)
+    if (sendto(sock, packet, len, MSG_FDBROADCAST, (struct sockaddr *)&server, sizeof(server)) != len)
     {
       fprintf(stderr, "sendto: %s\n",strerror(errno));
       return errno;
@@ -364,9 +365,6 @@ char **argv;
   char *dev;
   unsigned char mac[6];
   struct sockaddr_in client;
-#ifndef __clang__
-  socketopt opt;
-#endif
   socklen_t src_addr_len;
   dhcp_t *dhcp;
 
@@ -382,15 +380,9 @@ char **argv;
   }
 
   reuse = 1;
-#ifndef __clang__
-  opt.so_optlen = sizeof(reuse);
-  opt.so_optdata = (char *)&reuse;
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt);
-  setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt);
-#else
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-  setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (char *)&reuse, sizeof(reuse));
-#endif
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  rc = setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &reuse, sizeof(reuse));
+  fprintf(stderr,"BROADCAST %d\n", rc);
 
   memset(&client, 0, sizeof(client));
   client.sin_family = AF_INET;
@@ -424,9 +416,10 @@ char **argv;
     client.sin_port = htons(DHCP_CLIENT_PORT);
     client.sin_addr.s_addr = htonl(INADDR_ANY);
     src_addr_len = sizeof(client);
-    
+   
+
     memset(buffer, 0, sizeof(buffer));
-    rc = (int)recvfrom(sock, buffer, sizeof(buffer), 0, (struct sockaddr *)&client, &src_addr_len);
+    rc = (int)recvfrom(sock, buffer, sizeof(buffer), MSG_FDBROADCAST, (struct sockaddr *)&client, &src_addr_len);
     if (verbose)
       fprintf(stderr, "recvfrom: len=%d src=%s port=%d\n", rc, inet_ntoa(client.sin_addr.s_addr),ntohs(client.sin_port));
     print_buffer((unsigned char *)buffer, rc);
@@ -441,7 +434,7 @@ char **argv;
     if (dhcp->opcode == DHCP_OPTION_OFFER && dhcp->xid == packet_xid)
     {
       ip = ntohl(dhcp->yiaddr);
-      printf("%s\n", inet_ntoa(dhcp->yiaddr));
+      printf("%s", inet_ntoa(dhcp->yiaddr));
       break;
     }
   }

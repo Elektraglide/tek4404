@@ -18,11 +18,7 @@
 
 #else
 
-typedef int fd_set;
-#define FD_SET(A,SET)	*SET |= (1<<A)
-#define FD_CLR(A,SET)	*SET &= ~(1<<A)
-#define FD_ZERO(SET)	*SET = 0
-#define FD_ISSET(A,SET)	(*SET & (1<<A))
+#include "../fdset.h"
 
 void setsid() {}
 
@@ -215,13 +211,15 @@ int islogger;
   VTreset(&win->vt);
 
   /* size of text block */
-  RCToRect(&r, win->vt.rows, win->vt.cols+1);
+  RCToRect(&r, win->vt.rows, win->vt.cols);
+  r.x = win->vt.cols * font->maps->maxw;
+  r.y = win->vt.rows * font->maps->line;
   
   /* bounds of content */
-	win->contentrect.x = x;
-	win->contentrect.y = y;
-	win->contentrect.w = r.x;
-	win->contentrect.h = r.y;
+  win->contentrect.x = x;
+  win->contentrect.y = y;
+  win->contentrect.w = r.x;
+  win->contentrect.h = r.y;
 
   /* outset for window border */
   win->windowrect = win->contentrect;
@@ -317,7 +315,8 @@ int forcedirty;
   
   /* size of single glyph */
   RCToRect(&glyph, 0, 0);
-
+  glyph.w = font->maps->maxw;
+  glyph.h = font->maps->line;
   if (forcedirty || win->vt.dirty)
   {
     if (forcedirty || (win->vt.dirty & 2))
@@ -334,7 +333,7 @@ int forcedirty;
       r.x += win->windowrect.w - WINBORDER;
       RectDrawX(&r, &bb);
       r = win->windowrect;
-      r.y += win->windowrect.h - WINBORDER;;
+      r.y += win->windowrect.h - WINBORDER;
       r.h = WINBORDER;
       RectDrawX(&r, &bb);
 
@@ -367,6 +366,11 @@ int forcedirty;
       origin.y = win->windowrect.y + 4 + glyph.h;
       StringDrawX(win->title, &origin, &bb, font);
     }
+
+if (forcedirty)
+{
+  return 0;
+}
 
     /* render contents */
     if (forcedirty || (win->vt.dirty & 1))
@@ -508,7 +512,6 @@ int forcedirty;
     /* recurse for parts outside this window */
     quadrect.next = 0;
     RectAreasOutside(r, &win->windowrect, &quadrect);
-fprintf(stderr, "%c[2H quad %d\n", 0x1b, quadrect.next);
     for(i=0; i<quadrect.next; i++)
     {
       Paint(win->next, &quadrect.region[i], forcedirty);
@@ -594,6 +597,7 @@ void
 cleanup(sig)
 int sig;
 {
+  fprintf(stderr, "cleanup on %d\n", sig);
   exit(2);
 }
 
@@ -602,9 +606,9 @@ main(argc, argv)
 int argc;
 char **argv;
 {
-  int n,i,j,k,rc;
+  int n,i,j,k,rc,fdtty;
   fd_set fd_in;
-  char inputbuffer[4096];
+  char ch, inputbuffer[512];
   struct timeval timeout;
   Window *win;
   struct RECT r,r2;
@@ -619,15 +623,23 @@ char **argv;
   signal(SIGDEAD, cleanup);
   signal(SIGABORT, cleanup);
 
+  /* watchdog */
+  signal(SIGALRM, cleanup);
+  alarm(120);
 
   SaveDisplayState(&ds);
 
-  font = FontOpen("/fonts/DarkFixed812.font");
+  font = FontOpen("/fonts/MagnoliaFixed8.font");
   fprintf(stderr, "name: %s: face: %s\n", font->name, font->face);
   fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
-  fprintf(stderr, "fixed: %d\n", font->maps->fixed);
+  fprintf(stderr, "fixed: %d width:%d height:%d\n", 
+      font->maps->fixed,font->maps->maxw, font->maps->line);
 
-sleep(1);
+  /* keyboard */
+  fdtty = open(ttyname(fileno(stdin)), O_RDWR);
+  fprintf(stderr, "reading %d from %s\n", fdtty, ttyname(fileno(stdin)));
+
+sleep(2);
 
   InitGraphics(TRUE);
 
@@ -641,9 +653,9 @@ sleep(1);
   CursorVisible(1);
   CursorTrack(1);
 
-#if 1
-  EventEnable();
-  SetKBCode(1);
+#if 0
+  EventEnable(1);
+  SetKBCode(0);
 #endif
 
   /* window chain */
@@ -676,7 +688,7 @@ sleep(1);
     /* check any outputs from master sides and track highest fd */
     FD_ZERO(&fd_in);
 #if 0
-    FD_SET(0, &fd_in);
+    FD_SET(fdtty, &fd_in);
 #endif
     n = 0;
     for(i=0; i<numwindows; i++)
@@ -686,9 +698,9 @@ sleep(1);
         n = allwindows[i].pfd[1];
     }
 
-#if 0
+#if 1
     /* 20Hz updating */
-    timeout.tv_sec = 0;
+    timeout.tv_sec = 1;
     timeout.tv_usec = 50000;
     rc = select(n + 1, &fd_in, NULL, NULL, NULL);
 #else
@@ -705,10 +717,10 @@ sleep(1);
   if (rc > 0)
   {
     /* read any stdio input and send to topwindow input */
-    if (FD_ISSET(0, &fd_in))
+    if (FD_ISSET(fdtty, &fd_in))
     {
-      n = (int)read(0, inputbuffer, sizeof(inputbuffer));
-     if (wintopmost)
+      n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
+     if (n && wintopmost)
        n = (int)write(wintopmost->pfd[1], inputbuffer, n);
     }
 
@@ -738,7 +750,8 @@ sleep(1);
     /* manage windows */
   {
 
-#if 1
+#if 0
+     /*  THIS CALL TOTALLY HANGS THE MACHINE */
       /* tek4404 event system only used for keypress input */
       ev = (union EVENTUNION)EGetNext();
       if (ev.estruct.etype == E_PRESS)
@@ -748,7 +761,6 @@ sleep(1);
           n = (int)write(wintopmost->pfd[1], &ch, 1);
       }
 #endif
-
 
 if (GetButtons() & M_MIDDLE)
 {
@@ -776,7 +788,6 @@ if (GetButtons() & M_MIDDLE)
             while (GetButtons() & M_LEFT)
             {
               GetMPosition(&p);
-fprintf(stderr, "%c[H %d %d\n", 0x1b, p.x, p.y);
 
               r2 = win->windowrect;
               if (WindowMove(win, p.x - offset.x, p.y - offset.y))

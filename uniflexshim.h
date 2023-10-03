@@ -37,7 +37,7 @@ int control_pty(int fd, int code, int cval)
   
 	if (code ==  PTY_INQUIRY)
 	{
-		return 0;
+		return PTY_OUTPUT_QUEUED;
   }
 
 	if (code == PTY_SET_MODE)
@@ -125,6 +125,8 @@ extern void RestoreDisplayStat(struct DISPSTATE *state);
 extern int BbcomDefault(struct BBCOM *bbcom);
 
 extern void ClearScreen();
+extern void CursorVisible(int mode) {};
+extern void CursorTrack(int mode) {};
 
 extern int ReleaseCursor();
 extern int ProtectCursor(struct RECT *rl,struct RECT *r2);
@@ -133,10 +135,10 @@ extern int PanDiskEnable(int mode);
 
 extern int CharWidth(char ch, struct FontHeader *font);
 extern int CharDraw(char ch, struct POINT *loc);
-extern int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom);
+extern int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font);
 extern int StringWidth(char *string,struct FontHeader *font);
 extern int StringDraw(char *ch, struct POINT *loc);
-extern int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom);
+extern int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font);
 
 extern int SetKBCode(int val);
 extern int EGetCount();

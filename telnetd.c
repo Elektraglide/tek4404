@@ -31,7 +31,7 @@ char *telnetprocess[] = {"shell", NULL};
 extern int open();
 
 #define in_sockaddr sockaddr_in
-#define	IPO_TELNET		23
+#define  IPO_TELNET	  23
 char *telnetprocess[] = {"sh", NULL};
 
 #include "uniflexshim.h"
@@ -95,9 +95,9 @@ struct buffer {
 #define TERM_VT100 1
 
 typedef struct {
-	int type;
-	int cols,lines;
-	int ttyin, ttyout;
+  int type;
+  int cols,lines;
+  int ttyin, ttyout;
 } termparams;
 
 struct termstate {
@@ -392,6 +392,7 @@ char **argv;
         if (ts.bi.start == ts.bi.end)
         {
             n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
+fprintf(stderr, "read %d bytes\n", n);
             if (n < 0)
             {
               if (errno != EINTR)

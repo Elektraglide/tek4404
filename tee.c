@@ -12,7 +12,7 @@ char **argv;
     int pipe_fd[2],reader,writer;
     char *fname;
     FILE *logFile;
-	  int pid;
+    int pid;
     char ch;
 
     fname = argv[1];
