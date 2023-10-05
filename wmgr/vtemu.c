@@ -12,6 +12,9 @@
 #include <errno.h>
 #include "vtemu.h"
 
+#define UNICR  0x0d
+#define UNILF  0x0a
+
 extern int write();
 #ifndef __clang__
 int memmove(dst, src, len)
@@ -36,29 +39,43 @@ VTemu *vt;
   vt->hidecursor = 0;
   vt->focusblur = 0;
   vt->style = 0;
-	vt->cx = 0;
-	vt->cy = 0;
-  vt->dirty = 1;
+  vt->cx = 0;
+  vt->cy = 0;
+  vt->dirty = 0xffffffff;
   vt->margintop = 0;
   vt->marginbot = vt->rows - 1;
   
   memset(vt->buffer, 0, vt->rows*vt->cols);
   memset(vt->attrib, 0, vt->rows*vt->cols);
+  vt->dirty |= 0xffffffff;
 }
 
 void VTmovelines(vt, dst, src, n)
 VTemu *vt;
 int dst,src,n;
 {
+  int i;
+
     memmove(vt->buffer+vt->cols*dst, vt->buffer+vt->cols*src, vt->cols*n);
     memmove(vt->attrib+vt->cols*dst, vt->attrib+vt->cols*src, vt->cols*n);
+    for(i=0; i<n; i++)
+    {
+      vt->dirty |= (1 << (dst+i));
+      vt->dirty |= (1 << (src+i));
+    }
 }
 void VTclearlines(vt, dst, n)
 VTemu *vt;
 int dst,n;
 {
+  int i;
+
     memset(vt->buffer+vt->cols*dst, 0, vt->cols*n);
     memset(vt->attrib+vt->cols*dst, 0, vt->cols*n);
+    for(i=0; i<n; i++)
+    {
+      vt->dirty |= (1 << (dst+i));
+    }
 }
 
 void VTnewline(vt)
@@ -74,6 +91,7 @@ VTemu *vt;
     VTclearlines(vt,vt->marginbot,1);
     vt->cy--;
   }
+  vt->dirty |= (1<<vt->cy);
 }
 
 int asciinum(msg, defval)
@@ -178,7 +196,6 @@ int fdout;
   char c;
   int i,j;
 
-  vt->dirty |= 1;
   while (n--)
   {
     c = *msg++;
@@ -230,6 +247,7 @@ int fdout;
             {
               memset(vt->buffer, 0, vt->cols*vt->cy+vt->cx);
               memset(vt->attrib, 0, vt->cols*vt->cy+vt->cx);
+              vt->dirty |= 0xffffffff;
             }
             else
             if (i == 2)
@@ -241,6 +259,7 @@ int fdout;
               i = vt->cols * vt->rows;
               memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
               memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
+              vt->dirty |= 0xffffffff;
             }
             vt->cx = 0;
             vt->cy = 0;
@@ -251,6 +270,7 @@ int fdout;
             {
               memset(vt->buffer+vt->cols*vt->cy, 0, vt->cx);
               memset(vt->attrib+vt->cols*vt->cy, 0, vt->cx);
+              vt->dirty |= (1<<vt->cy);
             }
             else
             if (i == 2)
@@ -266,6 +286,7 @@ int fdout;
             {
               memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
               memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
+              vt->dirty |= (1<<vt->cy);
             }
             break;
 
@@ -376,7 +397,7 @@ int fdout;
             {
               /* private attribs */
               i = asciinum(vt->escseq+3, 1);
-              fprintf(stderr,"private mode attrib %d = %s\n", i, c=='h' ?"on" : "off");
+              /* fprintf(stderr,"private mode attrib %d = %s\n", i, c=='h' ?"on" : "off"); */
               if (i == 1)
               {
                 if (c=='h')
@@ -423,7 +444,7 @@ int fdout;
             {
               /* set mode */
               i = asciinum(vt->escseq+3, 1);
-              fprintf(stderr,"set mode %d\n", i);
+              /* fprintf(stderr,"set mode %d\n", i); */
               
               if (i == 7)
               {
@@ -497,19 +518,19 @@ int fdout;
         else
         if (c == '=')
         {
-          fprintf(stderr,"Application Keypad (DECKPAM)\n");
+          /* fprintf(stderr,"Application Keypad (DECKPAM)\n"); */
         }
         else
         if (c == '>')
         {
-          fprintf(stderr,"Normal Keypad (DECKPNM)\n");
+          /* fprintf(stderr,"Normal Keypad (DECKPNM)\n"); */
         }
         else
         {
           /* unhandled */
           n = n;
         }
-	      vt->state = 0;
+	vt->state = 0;
       }
     }
     else
@@ -523,15 +544,16 @@ int fdout;
     if (c == 0x08)
     {
       if (vt->cx)
-	      vt->cx--;
+      vt->cx--;
+      vt->dirty |= (1 << vt->cy);
     }
     else
-    if (c == '\r')
+    if (c == UNICR)
     {
       vt->cx = 0;
     }
     else
-    if (c == '\n')
+    if (c == UNILF)
     {
       VTnewline(vt);
     }
@@ -560,6 +582,7 @@ int fdout;
       {
         vt->buffer[vt->cy*vt->cols+vt->cx] = c;
         vt->attrib[vt->cy*vt->cols+vt->cx] = vt->style;
+        vt->dirty |= (1<<vt->cy);
       }
       vt->cx++;
       if (vt->wrapping && vt->cx >= vt->cols)

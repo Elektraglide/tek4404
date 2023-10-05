@@ -17,7 +17,7 @@ typedef struct
   char buffer[80*32];
   char attrib[80*32];
   short cx,cy;
-  int dirty;
+  int dirty;      /* mask of which lines are dirty so we can skip rendering */
 } VTemu;
 
 extern void VTreset();
