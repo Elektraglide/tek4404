@@ -1,6 +1,8 @@
 /* tek4404 executable header */
 
-/* probably 64 bytes */
+#pragma pack(push, 1)
+
+/* probably 64 bytes, big endian */
 typedef struct
 {
   short magic;    /* 0x0400 */
@@ -12,13 +14,22 @@ typedef struct
   int xferaddress;
   int textstart;
   int datastart;
-  short minpage;
-  short maxpage;
-  short stacksize;  
-  short symbolsize;
+  char minpage;
+  char maxpage;
+  char stacksize;
+  char initialstack;
+  int symbolsize;
+
   short commentsize;
+  short rcssize;
+
+  short flags;    // 0x8000 = no mc68881   0x0040 = core dump, 0x0020 = not clear BSS
   
-  int rcssize;
-  int namesize;
- 
+  int unknown2[3];
+  
+  int data2;      // eg 0x00020000
+  int data3;      // eg 0x00040000
 } PH;
+
+#pragma pack(pop)
+
