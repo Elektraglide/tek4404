@@ -162,17 +162,6 @@ int len;
     fprintf(stderr,"\n");
 }
 
-static void
-brd_host_addr(addr)
-char *addr;
-{
- addr[0] = 0x08;
- addr[1] = 0x00;
- addr[2] = 0x11;
- addr[3] = 0x00;
- addr[4] = 0x04;
- addr[5] = 0xb6;
-}
 
 /*
  * Get MAC address of given link(dev_name)
@@ -182,11 +171,18 @@ get_mac_address(dev_name, mac)
 char *dev_name;
 unsigned char *mac;
 {
-
 #ifndef __clang__
-    unsigned char address[ETHER_ADDR_LEN];
-    brd_host_addr(&address); /* MAC */
-    memcpy((void *)mac, address, ETHER_ADDR_LEN);
+int n;
+char *ifbuffer;
+
+    /* behold this crazy magic NRC voodoo */
+
+    n = ldiddle("ndevsw");
+    ifbuffer = malloc(n);
+    rdiddle("ndevsw", ifbuffer, n);
+    memcpy((void *)mac, ifbuffer + 0x26e, ETHER_ADDR_LEN);
+    free(ifbuffer);
+
 #else
     struct ifaddrs *ifap, *p;
 
@@ -227,6 +223,7 @@ dhcp_t *dhcp;
 unsigned char *mac;
 int *len;
 {
+ struct in_addr ipaddr;
 
     /* NB clearing from top of structure leaving bp_options[] intact */
     *len += sizeof(dhcp_t)-4;
@@ -238,7 +235,8 @@ int *len;
     memcpy(dhcp->chaddr, mac, ETHER_ADDR_LEN); /* mac[] is smaller than DHCP_CHADDR_LEN */
 
 #ifndef __clang__
-    dhcp->siaddr = (int)*inet_addr(DHCP_SERVER); 
+    /* inet_addr() adds +2 to location of IP result! */ 
+    str_2_ipa(DHCP_SERVER, (char *)(&dhcp->siaddr) - 2);
 #else
     dhcp->siaddr = inet_addr(DHCP_SERVER);
 #endif
@@ -310,7 +308,7 @@ dhcp_t *dhcp;
 /*
  * Send DHCP DISCOVERY packet
  */
-static int
+int
 dhcp_discovery(mac)
 unsigned char *mac;
 {
@@ -319,6 +317,7 @@ unsigned char *mac;
     unsigned char *packet;
     dhcp_t *dhcp_payload;
     struct sockaddr_in server;
+    struct in_addr ipaddr;
 
     if (verbose)
       fprintf(stderr, "Sending DHCP_DISCOVERY\n");
@@ -335,7 +334,8 @@ unsigned char *mac;
     server.sin_family = AF_INET;
     server.sin_port = htons(DHCP_SERVER_PORT);
 #ifndef __clang__
-    server.sin_addr.s_addr = (int)*inet_addr(DHCP_SERVER);
+    /* inet_addr() adds +2 to location of IP result! */ 
+    str_2_ipa(DHCP_SERVER, (char *)(&server.sin_addr.s_addr) - 2);
 #else
     server.sin_addr.s_addr = inet_addr(DHCP_SERVER);
 #endif
