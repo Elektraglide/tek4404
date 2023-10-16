@@ -1,9 +1,12 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <ctype.h>
 #include <memory.h>
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
-
+#include <sys/stat.h>
+#include <sys/errno.h>
+  
 #include "elf.h"
 #include "ph.h"
 
@@ -16,11 +19,6 @@
 
 #define min(A,B)  (A < B ? A : B)
 
-extern int open(char *filename, int mode);
-extern int read(int fd, void *buff, int len);
-extern int write(int fd, void *buff, int len);
-extern int lseek(int fd, int offset, int whence);
-extern void close(int fd);
 
 #pragma pack(1)
 
@@ -117,10 +115,10 @@ char *typename;
 
   /* writing ELF */
   sprintf(buffer, "%s.elf", argv[1]);
-  elf_fd = open(buffer, O_WRONLY | O_CREAT | O_TRUNC);
+  elf_fd = open(buffer, O_RDWR | O_TRUNC| O_CREAT, 0666);
   if (elf_fd < 0)
   {
-    fprintf(stderr, "%s: failed to create\n", buffer);
+    fprintf(stderr, "%s: failed to create: %s\n", buffer, strerror(errno));
     return(1);
   }
   
@@ -144,15 +142,15 @@ char *typename;
   elfheader.e_version = htonl(EV_CURRENT);
   elfheader.e_entry = ph.xferaddress;
   elfheader.e_phoff = htonl(adddata(sizeof(Elf32_Phdr) * 2));  // [0].text, [1].data
-  elfheader.e_shoff = htonl(adddata(sizeof(Elf32_Shdr) * 4));  // [0].text, [1].data, [2]strings, [3]symbols
+  elfheader.e_shoff = htonl(adddata(sizeof(Elf32_Shdr) * 5));  // [0].text, [1].data, [2].bss, [3]strings, [4]symbols
   elfheader.e_flags = 0;
   elfheader.e_ehsize = htons(sizeof(elfheader));
 
   elfheader.e_phentsize = htons(sizeof(Elf32_Phdr));
   elfheader.e_phnum = htons(2);
   elfheader.e_shentsize = htons(sizeof(Elf32_Shdr));
-  elfheader.e_shnum = htons(4);
-  elfheader.e_shstrndx =  htons(2);
+  elfheader.e_shnum = htons(5);
+  elfheader.e_shstrndx =  htons(3);
   fprintf(stderr,"wrote %d bytes (ElfHeader)\n", (int)sizeof(elfheader));
   write(elf_fd, &elfheader, sizeof(elfheader));
 
@@ -161,7 +159,7 @@ char *typename;
   prog[0].p_type = htonl(PT_LOAD);
   prog[0].p_offset = htonl(adddata(ntohl(ph.textsize)));
   prog[0].p_vaddr = ph.textstart;
-  prog[0].p_paddr = ph.textstart;
+  prog[0].p_paddr = 0;
   prog[0].p_filesz = ph.textsize;
   prog[0].p_memsz = ph.textsize;
   prog[0].p_flags = htonl(PF_X | PF_R);
@@ -170,20 +168,21 @@ char *typename;
   prog[1].p_type = htonl(PT_LOAD);
   prog[1].p_offset = htonl(adddata(ntohl(ph.datasize)));
   prog[1].p_vaddr = ph.datastart;
-  prog[1].p_paddr = ph.datastart;
+  prog[1].p_paddr = 0;
   prog[1].p_filesz = ph.datasize;
   prog[1].p_memsz = ph.datasize;
   prog[1].p_flags = htonl(PF_W | PF_R);
-  prog[1].p_align = htonl(4);
+  prog[1].p_align = 0;
   
-  fprintf(stderr,"wrote %d bytes (ProgHeader: %d %d)\n", (int)sizeof(prog), prog[0].p_offset, prog[0].p_memsz);
+  fprintf(stderr,"wrote %d bytes (ProgHeader: %d %d)\n", (int)sizeof(prog), ntohl(prog[0].p_offset), ntohl(prog[0].p_memsz));
   write(elf_fd, prog, sizeof(prog));
 
-  Elf32_Shdr sect[4];
+  Elf32_Shdr sect[5];
   sect[0].sh_name = htonl(addstring(".text"));
   sect[1].sh_name = htonl(addstring(".data"));
-  sect[2].sh_name = htonl(addstring(".strtab"));
-  sect[3].sh_name = htonl(addstring(".symtab"));
+  sect[2].sh_name = htonl(addstring(".bss"));
+  sect[3].sh_name = htonl(addstring(".strtab"));
+  sect[4].sh_name = htonl(addstring(".symtab"));
 
   // section 0: .text
   sect[0].sh_type = htonl(SHT_PROGBITS);
@@ -207,7 +206,19 @@ char *typename;
   sect[1].sh_addralign = 0;
   sect[1].sh_entsize = 0;
 
-#if 0
+  // section 2: .bss
+  sect[2].sh_type = htonl(SHT_NOBITS);
+  sect[2].sh_flags = htonl(SHF_ALLOC | SHF_WRITE);
+  sect[2].sh_addr = htonl(ntohl(ph.datastart) + ntohl(ph.datasize));    // follows .data
+  sect[2].sh_offset = 0;
+  sect[2].sh_size = htonl(ntohl(ph.bsssize) + 0x40);
+  sect[2].sh_link = 0;
+  sect[2].sh_info = 0;
+  sect[2].sh_addralign = 0;
+  sect[2].sh_entsize = 0;
+
+
+#if 1
   // symbol#0 is reserved
   symbols[numsymbols].st_name = 0;
   symbols[numsymbols].st_value = 0;
@@ -221,8 +232,7 @@ char *typename;
   /* seek to symbols (offset from end) */
   n = lseek(fd, 0, SEEK_END);
   //fprintf(stderr, "total length = %08x\n", n);
-  lseek(fd, -ntohs(ph.commentsize), SEEK_CUR);
-  n = lseek(fd, -ntohl(ph.symbolsize), SEEK_CUR);
+  n = lseek(fd, 0x40 + ntohl(ph.textsize)+ntohl(ph.datasize), SEEK_SET);
   fprintf(stderr, "symbolstart = %08X\n", n);
   lseek(fd, n, SEEK_SET);
   
@@ -234,10 +244,17 @@ char *typename;
     sym.kind = readshort(fd);
     sym.offset = readlong(fd);
     sym.segment = readshort(fd);
+
+    // HACK: ensure we dont read invalid data..
+    if (sym.segment > 15)
+      break;
+      
     sym.len = readshort(fd);
     read(fd, buffer, sym.len);
 
     /* peek to see if is there more because sometimes the len field is just wrong */
+    if (sym.len > 9)
+    {
     read(fd, &buffer[sym.len], 1);
     sym.len++;
 
@@ -265,68 +282,73 @@ char *typename;
     {
       sym.len--;
     }
-
+    }
+    
     buffer[sym.len] = '\0';
     switch(sym.segment)
     {
       case 8:
         typename = "ABS";
+        n = 1;
         break;
       case 9:
         typename = "TEXT";
+        n = 0;
         break;
       case 10:
         typename = "DATA";
+        n = 1;
         break;
       case 11:
         typename = "BSS";
+        n = 2;
         break;
     }
-    printf("%32s:  %s  %08x\n", buffer, typename, sym.offset);
+    fprintf(stderr, "%32s:  %s  %08x\n", buffer, typename, sym.offset);
     
     symbols[numsymbols].st_name = htonl(addstring(buffer));
     symbols[numsymbols].st_value = htonl(sym.offset);
-    symbols[numsymbols].st_size = htonl(strlen(buffer));
+    symbols[numsymbols].st_size = 0;
     symbols[numsymbols].st_info = ELF32_ST_INFO(STB_GLOBAL, sym.segment == 9 ? STT_FUNC : STT_OBJECT);
     symbols[numsymbols].st_other = STV_DEFAULT;
-    symbols[numsymbols].st_shndx = sym.segment == 9 ? htons(0) : htons(1) ;
+    symbols[numsymbols].st_shndx = htons(n);
     numsymbols++;
     
     i += sym.len;
   }
 
   // section 2: strings
-  sect[2].sh_type = htonl(SHT_STRTAB);
-  sect[2].sh_flags = htonl(SHF_STRINGS);
-  sect[2].sh_addr = htonl(0x8000);
-  sect[2].sh_offset = htonl(adddata(stringoffset));
-  sect[2].sh_size = htonl(stringoffset);
-  sect[2].sh_link = 0;
-  sect[2].sh_info = 0;
-  sect[2].sh_addralign = 0;
-  sect[2].sh_entsize = htonl(1);
-
-  // section 3: symbols
-  sect[3].sh_type = htonl(SHT_SYMTAB);
-  sect[3].sh_flags = 0;
-  sect[3].sh_addr = htonl(0x9000);
-  sect[3].sh_offset = htonl(adddata(sizeof(Elf32_Sym) * numsymbols));
-  sect[3].sh_size = htonl(sizeof(Elf32_Sym) * numsymbols);
-  sect[3].sh_link = htonl(2);
+  sect[3].sh_type = htonl(SHT_STRTAB);
+  sect[3].sh_flags = htonl(SHF_STRINGS);
+  sect[3].sh_addr = 0;
+  sect[3].sh_offset = htonl(adddata(stringoffset));
+  sect[3].sh_size = htonl(stringoffset);
+  sect[3].sh_link = 0;
   sect[3].sh_info = 0;
   sect[3].sh_addralign = 0;
-  sect[3].sh_entsize = htonl(sizeof(Elf32_Sym));
+  sect[3].sh_entsize = htonl(1);
+
+  // section 3: symbols
+  sect[4].sh_type = htonl(SHT_SYMTAB);
+  sect[4].sh_flags = 0;
+  sect[4].sh_addr = 0;
+  sect[4].sh_offset = htonl(adddata(sizeof(Elf32_Sym) * numsymbols));
+  sect[4].sh_size = htonl(sizeof(Elf32_Sym) * numsymbols);
+  sect[4].sh_link = htonl(3);   // string table
+  sect[4].sh_info = 0;
+  sect[4].sh_addralign = 0;
+  sect[4].sh_entsize = htonl(sizeof(Elf32_Sym));
 
   // completed section headers
-  for (i=0; i<4; i++)
+  for (i=0; i<5; i++)
   {
-    fprintf(stderr,"wrote %d bytes (Section%d %d %d)\n", (int)sizeof(sect[0]), i, sect[i].sh_offset, sect[i].sh_size);
+    fprintf(stderr,"wrote %d bytes (Section%d %d %d)\n", (int)sizeof(sect[0]), i, ntohl(sect[i].sh_offset), ntohl(sect[i].sh_size));
     write(elf_fd, &sect[i], sizeof(sect[0]));
   }
   
-  // write text
+  // write text (starts after header)
   n = lseek(elf_fd, 0, SEEK_CUR);
-  lseek(fd, ntohl(ph.textstart) + 0x40, SEEK_SET);
+  lseek(fd, 0x000 + 0x40, SEEK_SET);
   i = ntohl(ph.textsize);
   fprintf(stderr,"wrote %d bytes at %d (.text)\n", i, n);
   while ((i > 0) && (n = read(fd, buffer,  min(i,sizeof(buffer)) )) > 0)
@@ -335,9 +357,9 @@ char *typename;
     i -= n;
   }
 
-  // write data
+  // write data (starts after text)
   n = lseek(elf_fd, 0, SEEK_CUR);
-  lseek(fd, ntohl(ph.datastart) + 0x40, SEEK_SET);
+  lseek(fd, ntohl(ph.textsize) + 0x40, SEEK_SET);
   i = ntohl(ph.datasize);
   fprintf(stderr,"wrote %d bytes at %d (.data)\n", i, n);
   while ((i > 0) && (n = read(fd, buffer, min(i,sizeof(buffer)) )) > 0)
