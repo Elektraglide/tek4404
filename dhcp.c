@@ -135,7 +135,7 @@ typedef struct dhcp
 
 char DHCP_SERVER[20] = "255.255.255.255";
 
-int verbose = 0;
+int verbose = 1;
 int sock = -1;
 int ip;
 int packet_xid;
@@ -162,6 +162,29 @@ int len;
     fprintf(stderr,"\n");
 }
 
+/* inet_addr() appears to return a struct isockaddr (ie 2 bytes + ip4) */
+int my_inet_addr(name)
+char *name;
+{
+  int i,p;
+  int addr = 0;
+
+  for(i=0;  i<4; i++)
+  {
+   p = 0;
+   while (p <= 255 && *name != '.' && *name != '\0')
+   {
+      p *= 10;
+      p += (*name++ - '0') & 15;
+   }
+   name++;
+     
+   addr <<= 8;
+   addr |= p & 255;
+  }
+
+  return addr;
+}
 
 /*
  * Get MAC address of given link(dev_name)
@@ -172,7 +195,7 @@ char *dev_name;
 unsigned char *mac;
 {
 #ifndef __clang__
-int n;
+int n, nde_size;
 char *ifbuffer;
 
     /* behold this crazy magic NRC voodoo */
@@ -180,7 +203,8 @@ char *ifbuffer;
     n = ldiddle("ndevsw");
     ifbuffer = malloc(n);
     rdiddle("ndevsw", ifbuffer, n);
-    memcpy((void *)mac, ifbuffer + 0x26e, ETHER_ADDR_LEN);
+    rdiddle("nde_size", &nde_size, sizeof(nde_size));
+    memcpy((void *)mac, ifbuffer + nde_size + 0x2e, ETHER_ADDR_LEN);
     free(ifbuffer);
 
 #else
@@ -235,8 +259,7 @@ int *len;
     memcpy(dhcp->chaddr, mac, ETHER_ADDR_LEN); /* mac[] is smaller than DHCP_CHADDR_LEN */
 
 #ifndef __clang__
-    /* inet_addr() adds +2 to location of IP result! */ 
-    str_2_ipa(DHCP_SERVER, (char *)(&dhcp->siaddr) - 2);
+    dhcp->siaddr = my_inet_addr(DHCP_SERVER);
 #else
     dhcp->siaddr = inet_addr(DHCP_SERVER);
 #endif
@@ -334,8 +357,7 @@ unsigned char *mac;
     server.sin_family = AF_INET;
     server.sin_port = htons(DHCP_SERVER_PORT);
 #ifndef __clang__
-    /* inet_addr() adds +2 to location of IP result! */ 
-    str_2_ipa(DHCP_SERVER, (char *)(&server.sin_addr.s_addr) - 2);
+    server.sin_addr.s_addr = my_inet_addr(DHCP_SERVER);
 #else
     server.sin_addr.s_addr = inet_addr(DHCP_SERVER);
 #endif
@@ -380,7 +402,8 @@ char **argv;
   }
 
   reuse = 1;
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  fprintf(stderr,"REUSEADDR %d\n", rc);
   rc = setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &reuse, sizeof(reuse));
   fprintf(stderr,"BROADCAST %d\n", rc);
 
