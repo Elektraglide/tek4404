@@ -43,11 +43,11 @@ netdev *ptr;
   printf("-----\nIF name: %s (%s)\n", 
     ptr->nd_name, ptr->nd_flags & F_N_ONLINE ? "ONLINE" : "");
 
-  i = *(unsigned int *)ptr->nd_addrs[AF_INET].sa_data;
+  i = *(unsigned int *)(ptr->nd_addrs[AF_INET].sa_data + 2);
   printf("local addr: %s\n", inet_ntoa(i));
 
   /* ptr->nd_lladdr.a_len == 6 */
-  printf("MAC: %2x:%2x:%2x:%2x:%02x:%02x\n",
+  printf("MAC: %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
       (unsigned char)ptr->nd_lladdr.a_ena.a6[0],
       (unsigned char)ptr->nd_lladdr.a_ena.a6[1],
       (unsigned char)ptr->nd_lladdr.a_ena.a6[2],
