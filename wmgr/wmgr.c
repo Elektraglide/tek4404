@@ -18,6 +18,8 @@
 
 #else
 
+#include <net/in.h>
+#include <net/socket.h>
 #include "../fdset.h"
 
 void setsid() {}
@@ -28,6 +30,12 @@ void setsid() {}
 
 extern int rand();
 extern int open();
+
+#ifdef __clang__
+#define NOTPOLLING
+#else
+#define POLLING
+#endif
 
 /**********************************/
 #define WINTITLEBAR 24
@@ -56,7 +64,7 @@ typedef struct _win
 Window *wintopmost;
 Window allwindows[32];
 int numwindows = 0;
-char *winprocess[] = {"shell", NULL};
+char *winprocess[] = {"sh", NULL};
 char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
 char welcome[] = "Welcome to Tektronix 4404\r\n";
@@ -648,7 +656,10 @@ main(argc, argv)
 int argc;
 char **argv;
 {
-  int n,i,j,k,rc,fdtty;
+  int n,i,j,k,rc,fdtty, dummysock;
+#ifndef __clang__
+  struct in_sockaddr serv_addr;
+#endif
   fd_set fd_in;
   char ch, inputbuffer[512];
   struct timeval timeout;
@@ -661,11 +672,11 @@ char **argv;
   int framenum = 0;
 
   /* how do we detect child is dead? */
-  signal(SIGHUP, cleanup);
-  signal(SIGDEAD, cleanup);
+  signal(SIGINT, cleanup);
+  signal(SIGTERM, cleanup);
   signal(SIGABORT, cleanup);
 
-#ifdef __clang__
+#ifdef __clang__XXXX
   /* watchdog */
   signal(SIGALRM, cleanup);
   alarm(120);
@@ -699,8 +710,10 @@ sleep(2);
 
 #ifdef __clang__
   EventEnable();
-#endif
+  SetKBCode(0);
+#else
   SetKBCode(1);
+#endif
 
   /* window chain */
   wintopmost = NULL;
@@ -729,60 +742,73 @@ sleep(2);
   tcsetattr(fdtty, TCSANOW, &t);
 #endif
 
-   /* experiment with nonm-blocking reading of stdn */
+   /* experiment with non-blocking reading of stdin */
 /*
    fcntl(fdtty, FNOBLOCK,0);
 */
    signal(SIGINPUT, handleinput);
    signal(SIGEVT, handleinput);
 
+#ifndef __clang__
+  /* this is just so we can get a ms timeout! */
+  dummysock = socket(AF_INET, SOCK_STREAM, 0);
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_port = 12345;
+  bind(dummysock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+#else
+  dummysock = fdtty;
+#endif
+  
   /* mainloop */
   while (1)
   {
-/*
      framenum++;
-     printf("%c[Hframe(%d)  \n",0x1b, framenum);
-*/
+     i = EGetCount();
+     if (i > 0)
+     {
 
 
+     }
+
+     printf("%c[Hframe(%d) ev(%d) %d %d \n",0x1b, framenum, ev.evalue, EGetTime(), i);
 
     /* check any outputs from master sides and track highest fd */
     FD_ZERO(&fd_in);
-#if 0
-    FD_SET(fdtty, &fd_in);
-#endif
-    n = 0;
+    FD_SET(dummysock, &fd_in);
+    n = dummysock;
+#ifdef NOTPOLLING
     for(i=0; i<numwindows; i++)
     {
       FD_SET(allwindows[i].pfd[1], &fd_in);
       if (allwindows[i].pfd[1] > n)
         n = allwindows[i].pfd[1];
     }
-
-#if 0
+#endif
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec = 250000;
+    timeout.tv_usec = 200000;
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
-#else
-    /* timeout on select never returns, so do nothing for now */
-    rc = 1;
-#endif
 
-    if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
-    {
-        fprintf(stderr, "select(%d) error %d\n", n, errno);
-        exit(23);
-    }
+  if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
+  {
+    fprintf(stderr, "select(%d) error %d\n", n, errno);
+    exit(23);
+  }
   else
+#ifdef NOTPOLLING
   if (rc > 0)
+#else
+  if (rc == 0)
+#endif
   {
     /* read any stdio input and send to topwindow input */
-/*
+#ifdef NOTPOLLING
     if (FD_ISSET(fdtty, &fd_in))
-*/
+#else
     gtty(fdtty, &new_term_settings);
     if (new_term_settings.sg_speed & INCHR)
+#endif
     {
       n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
      if (n>0 && wintopmost)
@@ -793,7 +819,11 @@ sleep(2);
     for(i=0; i<numwindows; i++)
     {
       n = control_pty(allwindows[i].pfd[1], PTY_INQUIRY, 0);
-      if ((n & PTY_OUTPUT_QUEUED) && FD_ISSET(allwindows[i].pfd[1], &fd_in))
+#ifdef NOTPOLLING
+      if (FD_ISSET(allwindows[i].pfd[1], &fd_in))
+#else
+      if ((n & PTY_OUTPUT_QUEUED))
+#endif
       {
         n = (int)read(allwindows[i].pfd[1], inputbuffer, sizeof(inputbuffer));
 
@@ -920,6 +950,7 @@ if (GetButtons() & M_MIDDLE)
 
     }
   }
+  SetKBCode(1);
   EventDisable();
   ExitGraphics();
   FontClose(font);
