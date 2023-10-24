@@ -40,6 +40,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o dhcp  dhcp.c
 #ifndef __clang__
 
 #define B42_COMPATIBLE
+#include <net/netdev.h>
 #include <net/in.h>
 #include <net/socket.h>
 
@@ -148,7 +149,7 @@ int len;
   int i;
   if (!verbose)
     return;
- 
+  if (len > 64) len = 64; 
  
   for (i = 0; i < len; i++)
   {
@@ -196,7 +197,7 @@ unsigned char *mac;
 {
 #ifndef __clang__
 int n, nde_size;
-char *ifbuffer;
+netdev *ifbuffer;
 
     /* behold this crazy magic NRC voodoo */
 
@@ -204,7 +205,8 @@ char *ifbuffer;
     ifbuffer = malloc(n);
     rdiddle("ndevsw", ifbuffer, n);
     rdiddle("nde_size", &nde_size, sizeof(nde_size));
-    memcpy((void *)mac, ifbuffer + nde_size + 0x2e, ETHER_ADDR_LEN);
+    /* NB assumes second entry is our NIC */
+    memcpy((void *)mac, ifbuffer[1].nd_lladdr.a_ena.a6, ETHER_ADDR_LEN);
     free(ifbuffer);
 
 #else
