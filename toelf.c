@@ -84,6 +84,7 @@ symbolheader sym;
 char buffer[1024];
 char *typename;
 
+
   /* should we seek to .data */
   fd = open(argv[1], O_RDONLY);
   if (fd < 0)
@@ -94,7 +95,7 @@ char *typename;
 
   // think this should be 0x40 bytes long as offsets are from after the header
   read(fd, &ph, sizeof(PH));
-  if (ntohs(ph.magic) != 0x400)
+  if (ph.magic[0] != 0x04) // what does ph.magic[1] mean?
   {
     fprintf(stderr, "%s: not an executable  (%04x)\n", argv[1], ph.magic);
     return(1);
@@ -211,7 +212,7 @@ char *typename;
   sect[2].sh_flags = htonl(SHF_ALLOC | SHF_WRITE);
   sect[2].sh_addr = htonl(ntohl(ph.datastart) + ntohl(ph.datasize));    // follows .data
   sect[2].sh_offset = 0;
-  sect[2].sh_size = htonl(ntohl(ph.bsssize) + 0x40);
+  sect[2].sh_size = ph.bsssize;
   sect[2].sh_link = 0;
   sect[2].sh_info = 0;
   sect[2].sh_addralign = 0;

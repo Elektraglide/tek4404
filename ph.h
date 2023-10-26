@@ -5,7 +5,7 @@
 /* probably 64 bytes, big endian */
 typedef struct
 {
-  short magic;    /* 0x0400 */
+  unsigned char magic[2];    /* 0x04, 0x00 */
   int textsize;
   int datasize;
   int bsssize;
