@@ -16,18 +16,55 @@
 #define UNILF  0x0a
 
 extern int write();
-#ifndef __clang__
-int memmove(dst, src, len)
-char *dst;
-char *src;
+
+extern void movedisplaylines();
+
+/* clear region of both character and attribute buffer */
+int clearregion(vt, off, len)
+VTemu *vt;
+int off;
 int len;
 {
-  memcpy(dst, src, len);
+  if (off+len <= 80*25)
+  {
+    memset(vt->buffer+off, 0, len);
+    memset(vt->attrib+off, 0, len);
+  }
+  else
+  {
+    fprintf(stderr, "clearregion(%d, %d)\n", off,len);
+  }
+
+  return 0;	
+}
+
+/* move region of both character and attribute buffer */
+int moveregion(vt, dst, src, len)
+VTemu *vt;
+int dst;
+int src;
+int len;
+{
+  int i;
+
+  if (dst < src)
+  {
+    /* assumes a low-to-high copy direction */
+    memcpy(vt->buffer+dst, vt->buffer+src, len);
+    memcpy(vt->attrib+dst, vt->attrib+src, len);
+  }
+  else
+  {
+    while(len-- > 0)
+    {
+      vt->buffer[dst+len] = vt->buffer[src+len];
+      vt->attrib[dst+len] = vt->attrib[src+len];
+    }
+  }
 
   return(0);
 
 }
-#endif
 
 
 
@@ -39,14 +76,13 @@ VTemu *vt;
   vt->hidecursor = 0;
   vt->focusblur = 0;
   vt->style = 0;
-  vt->cx = 0;
-  vt->cy = 0;
+  vt->cx = vt->sx = 0;
+  vt->cy = vt->sy = 0;
   vt->dirty = 0xffffffff;
   vt->margintop = 0;
   vt->marginbot = vt->rows - 1;
   
-  memset(vt->buffer, 0, vt->rows*vt->cols);
-  memset(vt->attrib, 0, vt->rows*vt->cols);
+  clearregion(vt, 0, vt->rows*vt->cols);
   vt->dirty |= 0xffffffff;
 }
 
@@ -56,12 +92,44 @@ int dst,src,n;
 {
   int i;
 
-    memmove(vt->buffer+vt->cols*dst, vt->buffer+vt->cols*src, vt->cols*n);
-    memmove(vt->attrib+vt->cols*dst, vt->attrib+vt->cols*src, vt->cols*n);
+    moveregion(vt, vt->cols*dst, vt->cols*src, vt->cols*n);
+    
+    /* move dirtylines too */
     for(i=0; i<n; i++)
     {
-      vt->dirty |= (1 << (dst+i));
-      vt->dirty |= (1 << (src+i));
+      if (vt->dirty & (1 << (src+n)))
+      {
+        vt->dirty |= (1 << (dst+n));
+      }
+    }
+    
+    
+    /* need to copy pixels */
+    if (dst < src)
+    {
+#if 0
+      movedisplaylines(vt, dst, src, n);
+      
+      /* skip redrawing */
+      for(i=dst; i<src; i++)
+      {
+        vt->dirty &= ~(1 << i);
+      }
+#endif
+      /* need redrawing */
+      for(i=dst+n; i<src+n; i++)
+      {
+        vt->dirty |= (1 << i);
+      }
+
+    }
+    else
+    {
+
+      for(i=src; i<dst; i++)
+      {
+        vt->dirty |= (1 << i);
+      }
     }
 }
 void VTclearlines(vt, dst, n)
@@ -70,8 +138,7 @@ int dst,n;
 {
   int i;
 
-    memset(vt->buffer+vt->cols*dst, 0, vt->cols*n);
-    memset(vt->attrib+vt->cols*dst, 0, vt->cols*n);
+    clearregion(vt, vt->cols*dst, vt->cols*n);
     for(i=0; i<n; i++)
     {
       vt->dirty |= (1 << (dst+i));
@@ -82,6 +149,7 @@ void VTnewline(vt)
 VTemu *vt;
 {
   /* scroll only region inside margintop/marginbot */
+  vt->dirty |= (1<<vt->cy);
   vt->cx = 0;
   vt->cy++;
   if (vt->cy > vt->marginbot)
@@ -160,18 +228,18 @@ int i;
         
       /* BOLD */
       case 1:
-        vt->style |= 1;
+        vt->style |= vtBOLD;
         break;
       case 21:
-        vt->style &= ~1;
+        vt->style &= ~vtBOLD;
         break;
 
       /* INVERSE */
       case 7:
-        vt->style |= 2;
+        vt->style |= vtINVERTED;
         break;
       case 27:
-        vt->style &= ~2;
+        vt->style &= ~vtINVERTED;
         break;
 
       case 30:
@@ -215,10 +283,14 @@ int fdout;
           switch(c)
           {
             case 'A':
+            vt->dirty |= (1 << vt->cy);
             vt->cy -= asciinum(vt->escseq+2, 1);
+            vt->dirty |= (1 << vt->cy);
             break;
             case 'B':
+            vt->dirty |= (1 << vt->cy);
             vt->cy += asciinum(vt->escseq+2, 1);
+            vt->dirty |= (1 << vt->cy);
             break;
             case 'C':
             vt->cx += asciinum(vt->escseq+2, 1);
@@ -227,38 +299,43 @@ int fdout;
             vt->cx -= asciinum(vt->escseq+2, 1);
             break;
             case 'E':
+            vt->dirty |= (1 << vt->cy);
             vt->cy += asciinum(vt->escseq+2, 1);
             vt->cx = 0;
+            vt->dirty |= (1 << vt->cy);
             break;
             case 'F':
+            vt->dirty |= (1 << vt->cy);
             vt->cy -= asciinum(vt->escseq+2, 1);
             vt->cx = 0;
+            vt->dirty |= (1 << vt->cy);
             break;
             case 'G':
             vt->cx = asciinum(vt->escseq+2, 1) - 1;
             break;
             case 'H':
+            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
             vt->cx = asciinum2(vt->escseq+2, 1) - 1;
+            vt->dirty |= (1 << vt->cy);
             break;
             case 'J':
             i = asciinum(vt->escseq+2, 0);
             if (i == 1)
             {
-              memset(vt->buffer, 0, vt->cols*vt->cy+vt->cx);
-              memset(vt->attrib, 0, vt->cols*vt->cy+vt->cx);
+              clearregion(vt, 0, vt->cols*vt->cy+vt->cx);
               vt->dirty |= 0xffffffff;
             }
             else
             if (i == 2)
             {
               VTclearlines(vt, 0, vt->rows);
+              vt->dirty |= 0xffffffff;
             }
             else
             {
               i = vt->cols * vt->rows;
-              memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
-              memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, i - (vt->cy*vt->cols+vt->cx));
+              clearregion(vt, vt->cols*vt->cy+vt->cx, i - (vt->cy*vt->cols+vt->cx));
               vt->dirty |= 0xffffffff;
             }
             vt->cx = 0;
@@ -268,8 +345,7 @@ int fdout;
             i = asciinum(vt->escseq+2, 0);
             if (i == 1)
             {
-              memset(vt->buffer+vt->cols*vt->cy, 0, vt->cx);
-              memset(vt->attrib+vt->cols*vt->cy, 0, vt->cx);
+              clearregion(vt, vt->cols*vt->cy, vt->cx);
               vt->dirty |= (1<<vt->cy);
             }
             else
@@ -284,44 +360,38 @@ int fdout;
             }
             else
             {
-              memset(vt->buffer+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
-              memset(vt->attrib+vt->cols*vt->cy+vt->cx, 0, vt->cols-vt->cx);
+              clearregion(vt, vt->cols*vt->cy+vt->cx, vt->cols-vt->cx);
               vt->dirty |= (1<<vt->cy);
             }
             break;
 
             case 'L':
             i = asciinum(vt->escseq+2, 1);
-            memmove(vt->buffer+vt->cols*(vt->cy+i), vt->buffer+vt->cols*vt->cy, vt->cols*i);
-            memmove(vt->attrib+vt->cols*(vt->cy+i), vt->attrib+vt->cols*vt->cy, vt->cols*i);
+            VTmovelines(vt, vt->cy+i, vt->cy, i);
             VTclearlines(vt, vt->cy, i);
 
             break;
             case 'M':
             i = asciinum(vt->escseq+2, 1);
-            memmove(vt->buffer+vt->cols*vt->cy, vt->buffer+vt->cols*(vt->cy+i), vt->cols*i);
-            memmove(vt->attrib+vt->cols*vt->cy, vt->attrib+vt->cols*(vt->cy+i), vt->cols*i);
-            memset(vt->buffer+vt->cols*(vt->cy+i), 0, vt->cols*(vt->rows-vt->cy-i));
-            memset(vt->attrib+vt->cols*(vt->cy+i), 0, vt->cols*(vt->rows-vt->cy-i));
+            VTmovelines(vt, vt->cy, vt->cy+i, i);
+            VTclearlines(vt, vt->cy+i, vt->rows-vt->cy-i);
             break;
 
             case 'P':
             i = asciinum(vt->escseq+2, 1);
             j = vt->cols - vt->cx - i;
-            memmove(vt->buffer+vt->cols*vt->cy+vt->cx,vt->buffer+vt->cols*vt->cy+vt->cx+i,j);
-            memmove(vt->attrib+vt->cols*vt->cy+vt->cx,vt->attrib+vt->cols*vt->cy+vt->cx+i,j);
+            moveregion(vt, vt->cols*vt->cy+vt->cx, vt->cols*vt->cy+vt->cx+i,j);
+            vt->dirty |= (1<<vt->cy);
             break;
 
             case 'S':
             i = asciinum(vt->escseq+2, 1);
-            memmove(vt->buffer, vt->buffer+vt->cols*i, vt->cols*i);
-            memmove(vt->attrib, vt->attrib+vt->cols*i, vt->cols*i);
+            VTmovelines(vt, 0, i, i);
             VTclearlines(vt, vt->rows-i, i);
             break;
             case 'T':
             i = asciinum(vt->escseq+2, 1);
-            memmove(vt->buffer+vt->cols*i, vt->buffer, vt->cols*i);
-            memmove(vt->attrib+vt->cols*i, vt->attrib, vt->cols*i);
+            VTmovelines(vt, i, 0, i);
             VTclearlines(vt, 0, i);
             break;
 
@@ -346,12 +416,16 @@ int fdout;
             break;
 
             case 'd':
+            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
+            vt->dirty |= (1 << vt->cy);
             break;
 
             case 'f':
+            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
             vt->cx = asciinum2(vt->escseq+2, 1) - 1;
+            vt->dirty |= (1 << vt->cy);
             break;
 
             case 'm':
@@ -477,22 +551,23 @@ int fdout;
         if (c == 'D')
         {
           i = vt->marginbot - vt->margintop;
-          VTmovelines(vt, vt->margintop, vt->margintop+1, vt->marginbot - vt->margintop);
+          VTmovelines(vt, vt->margintop, vt->margintop+1, i);
           VTclearlines(vt, vt->marginbot, 1);
         }
         else
         if (c == 'M')
         {
           i = vt->marginbot - vt->margintop;
-          memmove(vt->buffer+vt->cols*(vt->margintop+1), vt->buffer+vt->cols*vt->margintop, vt->cols*i);
-          memmove(vt->attrib+vt->cols*(vt->margintop+1), vt->attrib+vt->cols*vt->margintop, vt->cols*i);
+          VTmovelines(vt, vt->margintop+1, vt->margintop, i);
           VTclearlines(vt, vt->margintop, 1);
         }
         else
         if (c == 'E')
         {
+          vt->dirty |= (1 << vt->cy);
           if (vt->cy < vt->rows)
             vt->cy++;
+          vt->dirty |= (1 << vt->cy);
         }
         else
         if (c == 'c')
@@ -511,9 +586,11 @@ int fdout;
         else
         if (c == '8')
         {
-            /* restore cursor */
+          /* restore cursor */
+          vt->dirty |= (1 << vt->cy);
           vt->cx = vt->sx;
           vt->cy = vt->sy;
+          vt->dirty |= (1 << vt->cy);
         }
         else
         if (c == '=')
@@ -544,7 +621,7 @@ int fdout;
     if (c == 0x08)
     {
       if (vt->cx)
-      vt->cx--;
+        vt->cx--;
       vt->dirty |= (1 << vt->cy);
     }
     else

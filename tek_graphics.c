@@ -60,7 +60,7 @@ void SaveDisplayState(struct DISPSTATE *state)
 {
 }
 
-void RestoreDisplayStat(struct DISPSTATE *state)
+void RestoreDisplayState(struct DISPSTATE *state)
 {
 }
 
@@ -117,7 +117,7 @@ int CharDraw(char ch, struct POINT *loc)
   return 0;
 }
 
-int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom)
+int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font)
 {
   SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
@@ -185,10 +185,10 @@ int StringDraw(char *ch, struct POINT *loc)
   return 0;
 }
 
-int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
+int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect dst = {loc->x,loc->y - FONTHEIGHT,FONTWIDTH,FONTHEIGHT};   // we use topleft not bottomleft
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   SDL_Rect cr;
   
@@ -215,13 +215,40 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom)
 
   // dirty area
   dst.w = dst.x - loc->x;
-  dst.h = dst.y - loc->y + FONTHEIGHT;
+  dst.h = FONTHEIGHT;
   dst.x = loc->x;
-  dst.y = loc->y;
+  dst.y = loc->y - FONTHEIGHT;
 
   updatewin(&dst);
   
   return 0;
+}
+
+int BitBlt(struct BBCOM *bbcom)
+{
+  // just does 
+  SDL_Rect dst,src,cr;
+
+  dst.x = bbcom->destrect.x;
+  dst.y = bbcom->destrect.y;
+  dst.w = bbcom->destrect.w;
+  dst.h = bbcom->destrect.h;
+
+  src.x = bbcom->srcpoint.x;
+  src.y = bbcom->srcpoint.y;
+  src.w = bbcom->destrect.w;
+  src.h = bbcom->destrect.h;
+
+  cr.x = bbcom->cliprect.x;
+  cr.y = bbcom->cliprect.y;
+  cr.w = bbcom->cliprect.w;
+  cr.h = bbcom->cliprect.h;
+  SDL_RenderSetClipRect(renderer, &cr);
+
+  SDL_BlitSurface(framebuffer, &src, framebuffer, &dst);
+
+  updatewin(&dst);
+
 }
 
 int SetKBCode(int val)
@@ -239,19 +266,19 @@ int specialkey(SDL_Scancode key, int updown)
 {
   switch(key)
   {
-	case SDL_SCANCODE_UP:
+  case SDL_SCANCODE_UP:
     if(updown) pandisc &= ~1; else pandisc |= 1;
-		break;
-	case SDL_SCANCODE_DOWN:
+	  break;
+  case SDL_SCANCODE_DOWN:
     if(updown) pandisc &= ~2; else pandisc |= 2;
-		break;
-	case SDL_SCANCODE_LEFT:
+	  break;
+  case SDL_SCANCODE_LEFT:
     if(updown) pandisc &= ~4; else pandisc |= 4;
-		break;
-	case SDL_SCANCODE_RIGHT:
+	  break;
+  case SDL_SCANCODE_RIGHT:
     if(updown) pandisc &= ~8; else pandisc |= 8;
-		break;
-	default:
+	  break;
+  default:
     return keyboardenable;
     break;
   }
@@ -275,17 +302,17 @@ unsigned long EGetNext()
   if (pandisc)
     updatewin(&vport);
 
-	SDL_Event event;
+  SDL_Event event;
   while (SDL_PollEvent(&event))
   {
     if (eventsenable)
-		switch (event.type)
-		{
-			case SDL_WINDOWEVENT:
-			break;
-			case SDL_QUIT:
+	  switch (event.type)
+	  {
+  	  case SDL_WINDOWEVENT:
+  	  break;
+  	  case SDL_QUIT:
         exit(0);
-				break;
+	  	  break;
 
 #if 0
       case SDL_TEXTINPUT:
@@ -295,10 +322,10 @@ unsigned long EGetNext()
           eventqueue[ewrite].estruct.eparam = event.text.text[0];
           ewrite = (ewrite + 1) & 31;
         }
-				break;
+	  	  break;
 #endif
 
-			case SDL_KEYDOWN:
+  	  case SDL_KEYDOWN:
         if (specialkey(event.key.keysym.scancode, 0))
         {
           if (event.key.keysym.scancode == SDL_SCANCODE_RETURN)
@@ -453,23 +480,23 @@ unsigned long EGetNext()
             ewrite = (ewrite + 1) & 31;
           }
         }
-				break;
+	  	  break;
 
-			case SDL_KEYUP:
+  	  case SDL_KEYUP:
         if (specialkey(event.key.keysym.scancode, 1))
         {
 
         }
-				break;
+	  	  break;
 
-			case SDL_MOUSEMOTION:
+  	  case SDL_MOUSEMOTION:
         // create a single dummy event
         mousex = event.motion.x;
         mousey = event.motion.y;
         break;
         
-			case SDL_MOUSEBUTTONDOWN:
-			{
+  	  case SDL_MOUSEBUTTONDOWN:
+  	  {
         int tek4404buttoncode;
         if (event.button.button == SDL_BUTTON_LEFT)
           tek4404buttoncode = 4;
@@ -484,10 +511,10 @@ unsigned long EGetNext()
         //eventqueue[ewrite].estruct.eparam = tek4404buttoncode;
         //ewrite = (ewrite + 1) & 31;
 
-				break;
-			}
-			case SDL_MOUSEBUTTONUP:
-			{
+	  	  break;
+  	  }
+  	  case SDL_MOUSEBUTTONUP:
+  	  {
         int tek4404buttoncode;
         if (event.button.button == SDL_BUTTON_LEFT)
           tek4404buttoncode = 4;
@@ -500,15 +527,15 @@ unsigned long EGetNext()
         eventqueue[ewrite].estruct.etype = E_RELEASE;
         eventqueue[ewrite].estruct.eparam = tek4404buttoncode;
         ewrite = (ewrite + 1) & 31;
-				break;
-			}
-			case SDL_MOUSEWHEEL:
-				break;
+	  	  break;
+  	  }
+  	  case SDL_MOUSEWHEEL:
+	  	  break;
 
-			default:
-				break;
-		}
-	}
+  	  default:
+	  	  break;
+	  }
+  }
 
   rc = 0;
   if (EGetCount() > 0)
@@ -557,14 +584,25 @@ int FontClose(struct FontHeader *font)
 
 struct FontHeader * FontOpen(char *filename)
 {
+  static struct FontMap map;
+  static struct FontHeader header;
 
-  return 0;
+  map.fixed = 1;
+  map.maxw = FONTWIDTH;
+  map.line = FONTSPACING;
+  header.maps = &map;
+
+  strcpy(header.name, "built-in");
+  header.ptsize = FONTHEIGHT;
+  header.resolution = FONTHEIGHT;
+  
+  return &header;
 }
 
 static void refreshmousestate()
 {
   /* refresh mouse state */
-	SDL_Event event;
+  SDL_Event event;
   while (SDL_PollEvent(&event))
   {
       if (event.type == SDL_MOUSEMOTION)
@@ -652,7 +690,7 @@ int PointDistance(struct POINT *point1, struct POINT *point2)
 
 int PointFromUser(struct POINT *point)
 {
-	SDL_Event event;
+  SDL_Event event;
   while (SDL_PollEvent(&event))
   {
       if (event.type == SDL_MOUSEMOTION)
@@ -793,11 +831,12 @@ int RectBoxDrawX(struct RECT *rect, int width, struct BBCOM *bbcom)
 
 int RectContainsPoint(struct RECT *rect, struct POINT *point)
 {
+  // NB docs are wrong
   if (point->x > rect->x && point->x < rect->x + rect->w &&
       point->y > rect->y && point->y < rect->y + rect->h)
-    return 1;
+    return 0;
     
-  return 0;
+  return 1;
 }
     
 int RectContainsRect(struct RECT *rectl, struct RECT *rect2)
@@ -977,23 +1016,23 @@ void ExitGraphics()
 
 struct FORM *InitGraphics(int mode)
 {
-	if (SDL_Init(SDL_INIT_VIDEO) < 0)
-	{
-		printf("Couldn't initialize SDL: %s\n", SDL_GetError());
-		exit(1);
-	}
+  if (SDL_Init(SDL_INIT_VIDEO) < 0)
+  {
+	  printf("Couldn't initialize SDL: %s\n", SDL_GetError());
+	  exit(1);
+  }
 
   ScrWidth = 1024;
   ScrHeight = 1024;
   ViewWidth = 640;
   ViewHeight = 480;
 
-	window = SDL_CreateWindow("Tek4404", 10, 10, ViewWidth, ViewHeight, SDL_WINDOW_SHOWN);
-	if (!window)
-	{
-		printf("Failed to open %d x %d window: %s\n", ViewWidth, ViewHeight, SDL_GetError());
-		exit(2);
-	}
+  window = SDL_CreateWindow("Tek4404", 10, 10, ViewWidth, ViewHeight, SDL_WINDOW_SHOWN);
+  if (!window)
+  {
+	  printf("Failed to open %d x %d window: %s\n", ViewWidth, ViewHeight, SDL_GetError());
+	  exit(2);
+  }
  
   /* CPU pixel buffer */
   framebuffer = SDL_CreateRGBSurfaceWithFormat(0, ScrWidth, ScrHeight, 32, SDL_PIXELFORMAT_BGR888);
@@ -1006,20 +1045,13 @@ struct FORM *InitGraphics(int mode)
   vport.w = ViewWidth;
   vport.h = ViewHeight;
   
-  if (mode)
-  {
-    // clear screen etc
-    ClearScreen();
-    
-    
-  }
-
   SDL_ShowWindow(window);
   
   // events
   eread = 0;
   ewrite = 0;
-
+  keyboardenable = 0;
+  
   Screen.addr = framebuffer->pixels;
   Screen.w = ScrWidth;
   Screen.h = ScrHeight;
@@ -1041,6 +1073,14 @@ struct FORM *InitGraphics(int mode)
   SDL_FreeSurface( bitmap );
 
   font8x16 = font8x16_normal;
+
+  SDL_UpdateWindowSurface(window);
   
-  return 0;
+  if (mode)
+  {
+    // clear screen etc
+    ClearScreen();
+  }
+
+  return &Screen;
 }

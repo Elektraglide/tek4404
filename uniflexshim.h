@@ -9,11 +9,11 @@
 #include <util.h>
 // #include <sys/sgtty.h> filename clashes with Tek4404 header so we need to include its contents
 #include <sys/cdefs.h>
-#define	USE_OLD_TTY
+#define  USE_OLD_TTY
 #define _SGTTYB_
 #include <sys/ioctl.h>
-#define	gtty(fd, buf)	ioctl(fd, TIOCGETP, buf)
-#define	stty(fd, buf)	ioctl(fd, TIOCSETP, buf)
+#define  gtty(fd, buf)  ioctl(fd, TIOCGETP, buf)
+#define  stty(fd, buf)  ioctl(fd, TIOCSETP, buf)
 
 
 // unix kernel calls without stdlib.h
@@ -25,8 +25,8 @@ extern void exit();
 int create_pty(int *ptfd)
 {
 
-	// NB master,slave is reverse of slave,master on Tek
-	return openpty(&ptfd[1], &ptfd[0], NULL, NULL, NULL);;
+  // NB master,slave is reverse of slave,master on Tek
+  return openpty(&ptfd[1], &ptfd[0], NULL, NULL, NULL);;
 }
 
 #ifdef sgtty_h
@@ -35,63 +35,64 @@ int control_pty(int fd, int code, int cval)
 {
   int i;
   
-	if (code ==  PTY_INQUIRY)
-	{
-		return PTY_OUTPUT_QUEUED;
+  if (code ==  PTY_INQUIRY)
+  {
+    // should be only if PTY_READ_WAIT
+    return PTY_OUTPUT_QUEUED;
   }
 
-	if (code == PTY_SET_MODE)
+  if (code == PTY_SET_MODE)
   {
-		if (cval & PTY_REMOTE_MODE)
+	  if (cval & PTY_REMOTE_MODE)
     {
       i = (cval & PTY_REMOTE_MODE);
-			//ioctl(fd, TIOCREMOTE, &i);
+  	  //ioctl(fd, TIOCREMOTE, &i);
     }
 
-		if (cval & PTY_READ_WAIT)
+	  if (cval & PTY_READ_WAIT)
       tcdrain(fd);
 
 #if 0
-		if (cval & PTY_HANDSHAKE_MODE)
-			ioctl_tty(fd, TIOCGPKT, 0);
+	  if (cval & PTY_HANDSHAKE_MODE)
+  	  ioctl_tty(fd, TIOCGPKT, 0);
 
-		if (cval & PTY_SLAVE_HOLD)
-			ioctl_tty(fd, TIOCGPKT, 0);
+	  if (cval & PTY_SLAVE_HOLD)
+  	  ioctl_tty(fd, TIOCGPKT, 0);
 
-		if (cval & PTY_EOF)
-			ioctl_tty(fd, TIOCGPKT, 0);
+	  if (cval & PTY_EOF)
+  	  ioctl_tty(fd, TIOCGPKT, 0);
 
-		if (cval & PTY_OUTPUT_QUEUED)
-			ioctl_tty(fd, TIOCGPKT, 0);
+	  if (cval & PTY_OUTPUT_QUEUED)
+  	  ioctl_tty(fd, TIOCGPKT, 0);
 
-		if (cval & PTY_INPUT_QUEUED)
-			ioctl_tty(fd, TIOCGPKT, 0);
+	  if (cval & PTY_INPUT_QUEUED)
+  	  ioctl_tty(fd, TIOCGPKT, 0);
 #endif
-	    return(0);
+      return(0);
     }
 
-	if (code == PTY_START_OUTPUT)
+  if (code == PTY_START_OUTPUT)
   {
       ioctl(fd, TIOCSTART , 0);
-	    return(0);
+      return(0);
   }
 
-	if (code == PTY_STOP_OUTPUT)
+  if (code == PTY_STOP_OUTPUT)
   {
       ioctl(fd, TIOCSTOP , 0);
-	    return(0);
+      return(0);
   }
 
-	if (code == PTY_FLUSH_READ)
+  if (code == PTY_FLUSH_READ)
   {
       tcflush(fd, TCIFLUSH);
-	    return(0);
+      return(0);
   }
 
-	if (code == PTY_FLUSH_WRITE)
+  if (code == PTY_FLUSH_WRITE)
   {
       tcflush(fd, TCOFLUSH);
-	    return(0);
+      return(0);
   }
 
     return 0;
@@ -100,7 +101,7 @@ int control_pty(int fd, int code, int cval)
 
 char *phys(int code)
 {
-	switch(code)
+  switch(code)
     {
       // framebuffer memory
       case 1:
@@ -120,7 +121,7 @@ char *phys(int code)
 extern void SDLrefreshwin();
 
 extern void SaveDisplayState(struct DISPSTATE *state);
-extern void RestoreDisplayStat(struct DISPSTATE *state);
+extern void RestoreDisplayState(struct DISPSTATE *state);
 
 extern int BbcomDefault(struct BBCOM *bbcom);
 
@@ -139,6 +140,8 @@ extern int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom, struct Fon
 extern int StringWidth(char *string,struct FontHeader *font);
 extern int StringDraw(char *ch, struct POINT *loc);
 extern int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font);
+
+extern int BitBlt(struct BBCOM *bbcom);
 
 extern int SetKBCode(int val);
 extern int EGetCount();

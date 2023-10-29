@@ -2,6 +2,12 @@
 #ifndef vtemu_h
 #define vtemu_h
 
+enum VTstyle
+{
+  vtBOLD = 1,
+  vtINVERTED = 2
+};
+
 typedef struct
 {
   char state;
@@ -14,8 +20,8 @@ typedef struct
   short margintop,marginbot;
 
   short cols,rows;
-  char buffer[80*32];
-  char attrib[80*32];
+  char buffer[132*32];
+  char attrib[132*32];
   short cx,cy;
   int dirty;      /* mask of which lines are dirty so we can skip rendering */
 } VTemu;
