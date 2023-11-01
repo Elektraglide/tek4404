@@ -16,7 +16,7 @@ SDL_Rect vport;
 SDL_Texture *font8x16;
 SDL_Texture *font8x16_normal,*font8x16_invert;
 #define FONTWIDTH 8
-#define FONTHEIGHT 16
+#define FONTHEIGHT 14
 #define FONTSPACING 14
 
 struct FORM Screen;
@@ -55,6 +55,100 @@ struct FORM WhiteMask;
 
 #define min(A,B)  ((A) < (B) ? (A) : (B))
 #define max(A,B)  ((A) > (B) ? (A) : (B))
+
+struct FileFontHeader
+{				/* the header of a font file */
+    int   magic;		/* number to identify this as a font */
+    char   name[32];		/* name of this font family */
+    char   face[32];		/* style of this font (ie bold, italic, etc) */
+
+    short  type;		/* indicates ASCII vs Icon vs Greek, etc */
+    short  compatibility;	/* indicates consistency with other format */
+
+    short  ptsize;		/* indicates intended image size */
+    short  resolution;		/* assumed resolution for ptsize (pixels/inch)*/
+
+    short mul;			/* mul/div provides scaling between */
+    short div;			/* "distances" (used below) and screen pixels */
+
+    unsigned int comment;		/* 1) pointer to copyright information */
+    unsigned int  maps;	/* 1) pointer to info about xtable */
+    unsigned int info;	/* 1) pointer to misc hints (optional) */
+    unsigned int xtable;		/* 1) ptr to table of chr locations in bitmap */
+    unsigned int spare_ptr[4];		/* spare pointers for possible future use */
+
+    unsigned int bitmap;		/* 1) 2) ptr to bitmap */
+    short  width;		/* width (in pixels) of font bitmap */
+    short  height;		/* height (in scan lines) of font bitmap */
+    short  offsetw;		/* horizontal offset - normally 0 */
+    short  offseth;		/* vertical offset - normally maps->baseline */
+    short  inc;			/* bytes per scan line of bitmap (even) */
+    short  depth;		/* number of bits per pixel in the bitmap */
+
+    short  rotation;		/* 3) font orientation - degrees cw from norm */
+    short  undef_char;		/* char to be printed for any undefined char */
+
+    short  boldinfo;		/* info for making bold, 0 if not bold-able */
+    short  italicinfo;		/* info for making italic, 0 if not italic-able */
+
+    int spare[4];		/* Just in case we forgot something */
+};
+
+readtekfont(char *filename)
+{
+  int i,j,k;
+  char dumpname[150];
+  
+  // read font
+  FILE *ff = fopen(filename, "r");
+  struct FileFontHeader *fdata;
+  fseek(ff, 0, SEEK_END);
+  i = ftell(ff);
+  fdata = (struct FileFontHeader *)malloc(i);
+  fseek(ff, 0, SEEK_SET);
+  fread(fdata, i, 1, ff);
+  fclose(ff);
+  
+  // dump font
+  sprintf(dumpname, "tekfont_%s_%d.pnm", fdata->name, ntohs(fdata->ptsize));
+  FILE *fp = fopen(dumpname, "w");
+  fprintf(fp, "P1 %d %d %d\n", ntohs(fdata->width), ntohs(fdata->height), 1);
+  fflush(fp);
+
+  int maps = ntohl(fdata->maps);
+  int info = ntohl(fdata->info);
+  int xtable = ntohl(fdata->xtable);
+  int bitmap = ntohl(fdata->bitmap);
+  printf("bitmap %d %d at offset:0x%x\n",ntohs(fdata->width), ntohs(fdata->height), bitmap);
+
+  // how many characters defined
+  struct FontMap *fm = (struct FontMap *)((char *)fdata + maps);
+  printf("%d maxw\n",ntohs(fm->maxw));
+  printf("%d line\n",ntohs(fm->line));
+  printf("%d chars [%d %d]\n",ntohs(fm->last) - ntohs(fm->first) + 1, ntohs(fm->first), ntohs(fm->last));
+  printf("calculated chars %d\n", ntohs(fdata->width) / ntohs(fm->maxw));
+  
+  char *bits = ((char *)fdata) + bitmap;  // + (ntohs(fdata->width) / ntohs(fm->maxw));
+  for (j=0; j<ntohs(fdata->height); j++)
+  {
+    for (i=0; i<ntohs(fdata->width) / 8; i++)
+    {
+      unsigned char eightbits = bits[j * ntohs(fdata->inc) + i];
+      for(k=0; k<8; k++)
+      {
+        fprintf(fp, "%d ", (eightbits & 0x80) ? 1 : 0);
+        eightbits <<= 1;
+      }
+      
+      if ((i % 8) == 7)
+        fprintf(fp, "\n");
+    }
+  }
+  fclose(fp);
+ 
+  free(fdata);
+}
+
 
 void SaveDisplayState(struct DISPSTATE *state)
 {
@@ -104,11 +198,11 @@ int CharWidth(char ch, struct FontHeader *font)
 
 int CharDraw(char ch, struct POINT *loc)
 {
-  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect dst = {loc->x,loc->y - FONTSPACING,FONTWIDTH,FONTHEIGHT};
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
 
-  src.x = ((ch - ' ') % 18) * FONTWIDTH;
-  src.y = ((ch - ' ') / 18) * FONTHEIGHT;
+  src.x = ch * FONTWIDTH;
+  src.y = 0;
   SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
@@ -119,7 +213,7 @@ int CharDraw(char ch, struct POINT *loc)
 
 int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font)
 {
-  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect dst = {loc->x,loc->y - FONTSPACING,FONTWIDTH,FONTHEIGHT};
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   SDL_Rect cr;
   
@@ -134,10 +228,9 @@ int CharDrawX(char ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader
 
   // any blending?
   SDL_SetTextureBlendMode(font8x16, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_MOD : SDL_BLENDMODE_NONE);
-
-
-  src.x = ((ch - ' ') % 18) * FONTWIDTH;
-  src.y = ((ch - ' ') / 18) * FONTHEIGHT;
+  
+  src.x = ch * FONTWIDTH;
+  src.y = 0;
   SDL_RenderCopy(renderer, font8x16, &src, &dst);
 
   // dirty area
@@ -163,13 +256,13 @@ int StringWidth(char *string,struct FontHeader *font)
 int StringDraw(char *ch, struct POINT *loc)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y,FONTWIDTH,FONTHEIGHT};
+  SDL_Rect dst = {loc->x,loc->y - FONTSPACING,FONTWIDTH,FONTHEIGHT};
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * FONTWIDTH;
-    src.y = ((c - ' ') / 18) * FONTHEIGHT;
+    src.x = c * FONTWIDTH;
+    src.y = 0;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
     dst.x += 8;
   }
@@ -178,7 +271,7 @@ int StringDraw(char *ch, struct POINT *loc)
   dst.w = dst.x - loc->x;
   dst.h = dst.y - loc->y + FONTHEIGHT;
   dst.x = loc->x;
-  dst.y = loc->y;
+  dst.y = loc->y - FONTSPACING;
 
   updatewin(&dst);
   
@@ -188,7 +281,7 @@ int StringDraw(char *ch, struct POINT *loc)
 int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHeader *font)
 {
   char c;
-  SDL_Rect dst = {loc->x,loc->y - FONTHEIGHT,FONTWIDTH,FONTHEIGHT};   // we use topleft not bottomleft
+  SDL_Rect dst = {loc->x,loc->y - FONTSPACING,FONTWIDTH,FONTHEIGHT};   // we use topleft not bottomleft
   SDL_Rect src = {0,0,FONTWIDTH,FONTHEIGHT};
   SDL_Rect cr;
   
@@ -204,20 +297,25 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHea
   // any blending?
   SDL_SetTextureBlendMode(font8x16, (bbcom->rule == bbSorD) ? SDL_BLENDMODE_MOD : SDL_BLENDMODE_NONE);
 
+
+  SDL_BlendMode bm = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE_MINUS_SRC_COLOR,SDL_BLENDFACTOR_SRC_COLOR, SDL_BLENDOPERATION_ADD,
+  SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDFACTOR_ZERO, SDL_BLENDOPERATION_ADD);
+  SDL_SetTextureBlendMode(font8x16, bm);
+  
+
   while((c = *ch++) != '\0')
   {
-    src.x = ((c - ' ') % 18) * FONTWIDTH;
-    src.y = ((c - ' ') / 18) * FONTHEIGHT;
+    src.x = c * FONTWIDTH;
+    src.y = 0;
     SDL_RenderCopy(renderer, font8x16, &src, &dst);
     dst.x += FONTWIDTH;
   }
-  
 
   // dirty area
   dst.w = dst.x - loc->x;
   dst.h = FONTHEIGHT;
   dst.x = loc->x;
-  dst.y = loc->y - FONTHEIGHT;
+  dst.y = loc->y - FONTSPACING;
 
   updatewin(&dst);
   
@@ -244,8 +342,11 @@ int BitBlt(struct BBCOM *bbcom)
   cr.w = bbcom->cliprect.w;
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
+SDL_SetSurfaceColorMod( framebuffer, 255,0,0);
 
-  SDL_BlitSurface(framebuffer, &src, framebuffer, &dst);
+  SDL_LowerBlit(framebuffer, &src, framebuffer, &dst);
+
+SDL_SetSurfaceColorMod( framebuffer, 255,255,255);
 
   updatewin(&dst);
 
@@ -1060,13 +1161,16 @@ struct FORM *InitGraphics(int mode)
   Screen.inc = ScrWidth / 8;
   
   // fonts 8x16
-  SDL_Surface *bitmap = SDL_LoadBMP("char8x16.bmp");
+  
+  //readtekfont("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/fonts/DarkFixed711.font");
+  
+  SDL_Surface *bitmap = SDL_LoadBMP("charMagnoliaFixed_7.bmp");
   font8x16_normal =  SDL_CreateTextureFromSurface(renderer, bitmap);
   SDL_SetTextureColorMod(font8x16_normal, 255,255,255);
   SDL_SetTextureBlendMode(font8x16_normal, SDL_BLENDMODE_NONE);
   SDL_FreeSurface( bitmap );
 
-  bitmap = SDL_LoadBMP("char8x16_invert.bmp");
+  bitmap = SDL_LoadBMP("charMagnoliaFixed_7_invert.bmp");
   font8x16_invert =  SDL_CreateTextureFromSurface(renderer, bitmap);
   SDL_SetTextureColorMod(font8x16_invert, 255,255,255);
   SDL_SetTextureBlendMode(font8x16_invert, SDL_BLENDMODE_NONE);
