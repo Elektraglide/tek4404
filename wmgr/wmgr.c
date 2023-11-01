@@ -47,6 +47,9 @@ struct FontHeader *font;
 struct BBCOM bb;
 struct FORM *screen;
 
+long newtime,oldtime = 0;
+char cursor;
+
 typedef struct _win
 {
   /* term emulator; NB always first so we can cast it to a Window */
@@ -185,32 +188,6 @@ int islogger;
   return pid;
 }
 
-void movedisplaylines(vt, dst, src, n)
-VTemu *vt;
-int dst;
-int src;
-int n;
-{
-  struct POINT cur;
-  
-  Window *win = (Window *)vt;
-
-  // blit block of lines somewhere
-  bb.srcform = bb.destform = screen;
-  bb.cliprect = win->windowrect;
-  bb.destrect.x = win->contentrect.x;
-  bb.destrect.y = win->contentrect.y + dst  * font->maps->line;
-  bb.destrect.w = win->contentrect.w;
-  bb.destrect.h = n * font->maps->line;
-  bb.halftoneform = NULL;
-  bb.rule = bbS;
-
-  bb.srcpoint.x = win->contentrect.x;
-  bb.srcpoint.y = win->contentrect.y + src  * font->maps->line;
-  
-  BitBlt(&bb);
-}
-
 int WindowTop(win)
 Window *win;
 {
@@ -245,7 +222,7 @@ Window *win;
     VTfocus(win->vt, win->master);
 
     win->dirty |= 2;
-    win->vt.dirty |= 0xffffffff;
+    win->vt.dirtylines |= (1 << win->vt.rows) - 1;
   }
   
   bb.cliprect = win->windowrect;
@@ -318,7 +295,7 @@ int islogger;
 
     /* needs rendering */
     win->dirty = 2;
-    win->vt.dirty = 0xffffffff;
+    win->vt.dirtylines = (1 << win->vt.rows) - 1;
 
     /* link it */
     win->next = wintopmost;
@@ -351,17 +328,15 @@ int x, y;
   if (x != win->windowrect.x || win->windowrect.y != y)
   {
     /* byte boundary for faster blit? */
+    win->contentrect.x = (x + WINBORDER) & -8;
+    win->contentrect.y = y + WINTITLEBAR;
 
-    win->windowrect.x = x;
-    win->windowrect.y = y;
-
-    /* update window content too */
-    win->contentrect.x = win->windowrect.x + WINBORDER;
-    win->contentrect.y = win->windowrect.y + WINTITLEBAR;
+    win->windowrect.x = win->contentrect.x - WINBORDER;
+    win->windowrect.y = win->contentrect.y - WINTITLEBAR;
 
     /* frame is dirty */
     win->dirty |= 2;
-    win->vt.dirty |= 0xffffffff;
+    win->vt.dirtylines |= (1 << win->vt.rows) - 1;
     
     return 1;
   }
@@ -375,24 +350,21 @@ int WindowRender(win, forcedirty)
 Window *win;
 int forcedirty;
 {
-#ifdef BLINK
-  static long newtime,oldtime = 0;
-#endif
   struct RECT r,glyph;
   struct POINT origin;
-  int i,j,k,n,style;
+  int i,j,k,n,style,numlines;
   char line[128];
-  char cursor;
   
   /* size of single glyph */
   RCToRect(&glyph, 0, 0);
   glyph.w = font->maps->maxw;
   glyph.h = font->maps->line;
-  if (forcedirty || win->dirty || win->vt.dirty)
+  if (forcedirty || win->dirty || win->vt.dirtylines)
   {
     if (forcedirty || (win->dirty & 2))
     {
       /* render (just) frame */
+      bb.rule = bbS;
 
       r = win->windowrect;
       r.h = WINTITLEBAR;
@@ -446,10 +418,11 @@ int forcedirty;
     }
 
     /* render contents */
-    if (forcedirty || (win->vt.dirty))
+    if (forcedirty || (win->vt.dirtylines))
     {
       bb.halftoneform = NULL;
     
+      numlines = 0;
       origin.y = win->contentrect.y + glyph.h;
       for(j=0; j<win->vt.rows; j++)
       {
@@ -460,7 +433,7 @@ int forcedirty;
         r.y = origin.y - glyph.h;
         r.w = win->contentrect.w;
         r.h = glyph.h;
-        if ((win->vt.dirty & (1<<j)) && RectIntersects(&r, &bb.cliprect))
+        if ((win->vt.dirtylines & (1<<j)) && RectIntersects(&r, &bb.cliprect))
         {
           /* NB we may have embedded \0 where cursor has been warped as well as handle style attributes */
           style = win->vt.attrib[win->vt.cols*j];
@@ -509,47 +482,97 @@ int forcedirty;
           }
 #endif
           
+          numlines++;
         }
         
         origin.y += glyph.h;
       }
       
+      fprintf(stderr, "updated %d lines out of %d\n", numlines, win->vt.rows);
+      
       bb.rule = bbS;
     }
-    
-#ifndef BLINK
-    if ((win == wintopmost) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
-    {
-        origin.x = win->contentrect.x + win->vt.cx * glyph.w;
-        origin.y = win->contentrect.y + win->vt.cy * glyph.h - 2;
-        cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
-        CharDrawX(' '+95, &origin, &bb, font);
-    }
-#endif
   }
 
-  /* focus window has blinking cursor regardless of whether its dirty */
-#ifdef BLINK
-  if ((win == winchain) && (win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
+  return 0;
+}
+
+void addcursor(win)
+Window *win;
+{
+  struct POINT origin;
+
+  if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
   {
-    newtime = EGetTime() / 256;
+    newtime = EGetTime() / 204;
     if (oldtime != newtime)
     {
-      origin.x = win->contentrect.x + win->vt.cx * glyph.w;
-      origin.y = win->contentrect.y + win->vt.cy * glyph.h + glyph.h;
+      origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
+      origin.y = win->contentrect.y + win->vt.cy * font->maps->line + font->maps->line;
       cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
+
       if (!cursor)
         cursor = ' ';
 
-      CharDrawX(newtime & 1 ? ' '+95 : cursor, &origin, &bb, font);
+      bb.cliprect = win->windowrect;
+      CharDrawX(newtime & 1 ? 0x7f : cursor, &origin, &bb, font);
 
       oldtime = newtime;
     }
   }
-#endif
-  
-  return 0;
 }
+
+void removecursor(win)
+Window *win;
+{
+  struct POINT origin;
+
+  if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
+  {
+    origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
+    origin.y = win->contentrect.y + win->vt.cy * font->maps->line + font->maps->line;
+    cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
+    if (!cursor)
+      cursor = ' ';
+
+    bb.cliprect = win->windowrect;
+    CharDrawX(cursor, &origin, &bb, font);
+  }
+}
+
+
+void movedisplaylines(vt, dst, src, n)
+VTemu *vt;
+int dst;
+int src;
+int n;
+{
+struct POINT cur;
+  
+  Window *win = (Window *)vt;
+
+  if (win != wintopmost)
+    return;
+
+  /* flush any dirty lines before we blit */
+  removecursor(win);
+  WindowRender(win, FALSE);
+  
+  bb.srcform = bb.destform = screen;
+  bb.cliprect = win->windowrect;
+  bb.destrect.x = win->contentrect.x;
+  bb.destrect.y = win->contentrect.y + dst  * font->maps->line;
+  bb.destrect.w = win->contentrect.w;
+  bb.destrect.h = n * font->maps->line;
+  bb.halftoneform = NULL;
+  bb.rule = bbS;
+
+  bb.srcpoint.x = win->contentrect.x;
+  bb.srcpoint.y = win->contentrect.y + src  * font->maps->line;
+  
+  BitBlt(&bb);
+}
+
 
 static int counter;
 
@@ -698,6 +721,7 @@ int sig;
   printf("handleinput on %d\n", sig);
   
 }
+
 
 int
 main(argc, argv)
@@ -959,7 +983,7 @@ if (GetButtons() & M_MIDDLE)
             }
             
             /* content is dirty */
-            win->vt.dirty |= 0xffffffff;
+            win->vt.dirtylines |= 0xffffffff;
             
             /* now has focus */
             break;
@@ -979,39 +1003,45 @@ if (GetButtons() & M_MIDDLE)
           WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
       }
 
-// show dirty lines
-bb.cliprect.x = 0;
-bb.cliprect.y = 0;
-bb.cliprect.w = 32;
-bb.cliprect.h = 32 * font->maps->line;
-for (i=0; i<25; i++)
-{
-      /* render closebox */
-      bb.halftoneform = wintopmost->vt.dirty & (1<<i) ? &DarkGrayMask : &WhiteMask;
-      r.x = 0;
-      r.y = font->maps->line * i;
-      r.w = font->maps->line;
-      r.h = font->maps->line;
-      RectDrawX(&r, &bb);
-      bb.halftoneform = &BlackMask;
-      RectBoxDrawX(&r, 1, &bb);
-}
+    /* debugging dirtylines */
+    if (wintopmost)
+    {
+      // show dirty lines
+      bb.cliprect = wintopmost->contentrect;
+      bb.cliprect.x -= WINBORDER + font->maps->line;
+      for (i=0; i<25; i++)
+      {
+        /* render closebox */
+        bb.halftoneform = wintopmost->vt.dirtylines & (1<<i) ? &DarkGrayMask : &WhiteMask;
+        r.x = bb.cliprect.x;
+        r.y = bb.cliprect.y + font->maps->line * i;
+        r.w = font->maps->line;
+        r.h = font->maps->line;
+        RectDrawX(&r, &bb);
+        bb.halftoneform = &BlackMask;
+        RectBoxDrawX(&r, 1, &bb);
+      }
+    }
+
+  /* repaint any dirty windows */
+  win = wintopmost;
+  while(win)
+  {
+    if (win->dirty || win->vt.dirtylines)
+    {
+      Paint(wintopmost, &win->windowrect, FALSE);
+      win->dirty = 0;
+      win->vt.dirtylines = 0;
+    }
+
+    win = win->next;
+  }
+
+  /* focus cursor */
+  if (wintopmost)
+    addcursor(wintopmost);
 
 
-      /* repaint any dirty windows */
-      win = wintopmost;
-     while(win)
-     {
-       if (win->dirty || win->vt.dirty)
-       {
-          Paint(wintopmost, &win->windowrect, FALSE);
-          win->dirty = 0;
-          win->vt.dirty = 0;
-       }
-
-        win = win->next;
-     }
-    
       /* this is need in SDL emulator to flip window buffer */
 #ifdef __clang__
       SDLrefreshwin();

@@ -66,8 +66,6 @@ int len;
 
 }
 
-
-
 void VTreset(vt)
 VTemu *vt;
 {
@@ -78,12 +76,12 @@ VTemu *vt;
   vt->style = 0;
   vt->cx = vt->sx = 0;
   vt->cy = vt->sy = 0;
-  vt->dirty = 0xffffffff;
+  vt->dirtylines = 0;
   vt->margintop = 0;
   vt->marginbot = vt->rows - 1;
   
   clearregion(vt, 0, vt->rows*vt->cols);
-  vt->dirty |= 0xffffffff;
+  vt->dirtylines |= (1 << vt->rows) - 1;
 }
 
 void VTmovelines(vt, dst, src, n)
@@ -92,46 +90,40 @@ int dst,src,n;
 {
   int i;
 
+    /* move the existing pixels */
+    movedisplaylines(vt, dst, src, n);
+
+    /* move the underlying buffer */
     moveregion(vt, vt->cols*dst, vt->cols*src, vt->cols*n);
     
     /* move dirtylines too */
     for(i=0; i<n; i++)
     {
-      if (vt->dirty & (1 << (src+n)))
+      if (vt->dirtylines & (1 << (src+i)))
       {
-        vt->dirty |= (1 << (dst+n));
+        vt->dirtylines |= (1 << (dst+i));
       }
     }
     
-    
-    /* need to copy pixels */
+    /* outside dst region is dirty */
     if (dst < src)
     {
-#if 0
-      movedisplaylines(vt, dst, src, n);
-      
-      /* skip redrawing */
-      for(i=dst; i<src; i++)
-      {
-        vt->dirty &= ~(1 << i);
-      }
-#endif
       /* need redrawing */
       for(i=dst+n; i<src+n; i++)
       {
-        vt->dirty |= (1 << i);
+        vt->dirtylines |= (1 << i);
       }
 
     }
     else
     {
-
       for(i=src; i<dst; i++)
       {
-        vt->dirty |= (1 << i);
+        vt->dirtylines |= (1 << i);
       }
     }
 }
+
 void VTclearlines(vt, dst, n)
 VTemu *vt;
 int dst,n;
@@ -141,7 +133,7 @@ int dst,n;
     clearregion(vt, vt->cols*dst, vt->cols*n);
     for(i=0; i<n; i++)
     {
-      vt->dirty |= (1 << (dst+i));
+      vt->dirtylines |= (1 << (dst+i));
     }
 }
 
@@ -149,7 +141,7 @@ void VTnewline(vt)
 VTemu *vt;
 {
   /* scroll only region inside margintop/marginbot */
-  vt->dirty |= (1<<vt->cy);
+  vt->dirtylines |= (1<<vt->cy);
   vt->cx = 0;
   vt->cy++;
   if (vt->cy > vt->marginbot)
@@ -159,7 +151,7 @@ VTemu *vt;
     VTclearlines(vt,vt->marginbot,1);
     vt->cy--;
   }
-  vt->dirty |= (1<<vt->cy);
+  vt->dirtylines |= (1<<vt->cy);
 }
 
 int asciinum(msg, defval)
@@ -283,14 +275,10 @@ int fdout;
           switch(c)
           {
             case 'A':
-            vt->dirty |= (1 << vt->cy);
             vt->cy -= asciinum(vt->escseq+2, 1);
-            vt->dirty |= (1 << vt->cy);
             break;
             case 'B':
-            vt->dirty |= (1 << vt->cy);
             vt->cy += asciinum(vt->escseq+2, 1);
-            vt->dirty |= (1 << vt->cy);
             break;
             case 'C':
             vt->cx += asciinum(vt->escseq+2, 1);
@@ -299,44 +287,38 @@ int fdout;
             vt->cx -= asciinum(vt->escseq+2, 1);
             break;
             case 'E':
-            vt->dirty |= (1 << vt->cy);
             vt->cy += asciinum(vt->escseq+2, 1);
             vt->cx = 0;
-            vt->dirty |= (1 << vt->cy);
             break;
             case 'F':
-            vt->dirty |= (1 << vt->cy);
             vt->cy -= asciinum(vt->escseq+2, 1);
             vt->cx = 0;
-            vt->dirty |= (1 << vt->cy);
             break;
             case 'G':
             vt->cx = asciinum(vt->escseq+2, 1) - 1;
             break;
             case 'H':
-            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
             vt->cx = asciinum2(vt->escseq+2, 1) - 1;
-            vt->dirty |= (1 << vt->cy);
             break;
             case 'J':
             i = asciinum(vt->escseq+2, 0);
             if (i == 1)
             {
               clearregion(vt, 0, vt->cols*vt->cy+vt->cx);
-              vt->dirty |= 0xffffffff;
+              vt->dirtylines |= (1 << vt->rows) - 1;
             }
             else
             if (i == 2)
             {
               VTclearlines(vt, 0, vt->rows);
-              vt->dirty |= 0xffffffff;
+              vt->dirtylines |= (1 << vt->rows) - 1;
             }
             else
             {
               i = vt->cols * vt->rows;
               clearregion(vt, vt->cols*vt->cy+vt->cx, i - (vt->cy*vt->cols+vt->cx));
-              vt->dirty |= 0xffffffff;
+              vt->dirtylines |= (1 << vt->rows) - 1;
             }
             vt->cx = 0;
             vt->cy = 0;
@@ -346,7 +328,7 @@ int fdout;
             if (i == 1)
             {
               clearregion(vt, vt->cols*vt->cy, vt->cx);
-              vt->dirty |= (1<<vt->cy);
+              vt->dirtylines |= (1<<vt->cy);
             }
             else
             if (i == 2)
@@ -361,7 +343,7 @@ int fdout;
             else
             {
               clearregion(vt, vt->cols*vt->cy+vt->cx, vt->cols-vt->cx);
-              vt->dirty |= (1<<vt->cy);
+              vt->dirtylines |= (1<<vt->cy);
             }
             break;
 
@@ -381,7 +363,7 @@ int fdout;
             i = asciinum(vt->escseq+2, 1);
             j = vt->cols - vt->cx - i;
             moveregion(vt, vt->cols*vt->cy+vt->cx, vt->cols*vt->cy+vt->cx+i,j);
-            vt->dirty |= (1<<vt->cy);
+            vt->dirtylines |= (1<<vt->cy);
             break;
 
             case 'S':
@@ -416,16 +398,12 @@ int fdout;
             break;
 
             case 'd':
-            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
-            vt->dirty |= (1 << vt->cy);
             break;
 
             case 'f':
-            vt->dirty |= (1 << vt->cy);
             vt->cy = asciinum(vt->escseq+2, 1) - 1;
             vt->cx = asciinum2(vt->escseq+2, 1) - 1;
-            vt->dirty |= (1 << vt->cy);
             break;
 
             case 'm':
@@ -564,10 +542,8 @@ int fdout;
         else
         if (c == 'E')
         {
-          vt->dirty |= (1 << vt->cy);
           if (vt->cy < vt->rows)
             vt->cy++;
-          vt->dirty |= (1 << vt->cy);
         }
         else
         if (c == 'c')
@@ -587,10 +563,8 @@ int fdout;
         if (c == '8')
         {
           /* restore cursor */
-          vt->dirty |= (1 << vt->cy);
           vt->cx = vt->sx;
           vt->cy = vt->sy;
-          vt->dirty |= (1 << vt->cy);
         }
         else
         if (c == '=')
@@ -607,7 +581,8 @@ int fdout;
           /* unhandled */
           n = n;
         }
-	vt->state = 0;
+        
+        vt->state = 0;
       }
     }
     else
@@ -622,7 +597,7 @@ int fdout;
     {
       if (vt->cx)
         vt->cx--;
-      vt->dirty |= (1 << vt->cy);
+      vt->dirtylines |= (1 << vt->cy);
     }
     else
     if (c == UNICR)
@@ -659,7 +634,7 @@ int fdout;
       {
         vt->buffer[vt->cy*vt->cols+vt->cx] = c;
         vt->attrib[vt->cy*vt->cols+vt->cx] = vt->style;
-        vt->dirty |= (1<<vt->cy);
+        vt->dirtylines |= (1<<vt->cy);
       }
       vt->cx++;
       if (vt->wrapping && vt->cx >= vt->cols)
