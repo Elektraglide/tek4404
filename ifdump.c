@@ -42,14 +42,14 @@ netdev *ptr;
 {
   int i;
 
-  printf("-----\nIF name: %s (%s)\n", 
-    ptr->nd_name, ptr->nd_flags & F_N_ONLINE ? "ONLINE" : "");
+  printf("IF name: %s (%s)\n", 
+    ptr->nd_name, ptr->nd_flags & F_N_ONLINE ? "ONLINE" : "OFFLINE");
 
   i = *(unsigned int *)(ptr->nd_addrs[AF_INET].sa_data + 2);
-  printf("local addr: %s\n", inet_ntoa(i));
+  printf("\tinet: %s\n", inet_ntoa(i));
 
   /* ptr->nd_lladdr.a_len == 6 */
-  printf("MAC: %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
+  printf("\tether: %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x\n",
       (unsigned char)ptr->nd_lladdr.a_ena.a6[0],
       (unsigned char)ptr->nd_lladdr.a_ena.a6[1],
       (unsigned char)ptr->nd_lladdr.a_ena.a6[2],
@@ -57,15 +57,15 @@ netdev *ptr;
       (unsigned char)ptr->nd_lladdr.a_ena.a6[4],
       (unsigned char)ptr->nd_lladdr.a_ena.a6[5]);
 
-  printf("recv count: %d\n", ptr->nd_stat.sb_rcnt);
-  printf("xmit count: %d\n", ptr->nd_stat.sb_xcnt);
-  printf("recv error: %d\n", ptr->nd_stat.sb_recnt);
-  printf("xmit error: %d\n", ptr->nd_stat.sb_xecnt);
-  printf("-----\n");
-  
+  printf("\trecv count: %d\n", ptr->nd_stat.sb_rcnt);
+  printf("\txmit count: %d\n", ptr->nd_stat.sb_xcnt);
+  printf("\trecv error: %d\n", ptr->nd_stat.sb_recnt);
+  printf("\txmit error: %d\n", ptr->nd_stat.sb_xecnt);
+#if 0  
   printf("nd_sop: %8x\n", ptr->nd_sop);
   printf("nd_ioctl: %8x\n", ptr->nd_ioctl);
   printf("nd_next: %8x\n", ptr->nd_next);
+#endif
 }
 
 void printsetting(name)
@@ -102,11 +102,12 @@ char **argv;
   printf("fusion_db = %s\n",filepath);
 
   printf("\nkernel settings\n");
+  printsettingstring("sock_prefix");
   printsetting("so_cnt");
+  printf("\n");
   printsetting("nc_hsize");
   printsetting("t_resolution");
   printsetting("re_cnt");
-  printsettingstring("sock_prefix");
   printf("\n");
   printsetting("tcp_sq_max");
   printsetting("tcp_try_max");
