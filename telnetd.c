@@ -15,7 +15,6 @@
 #ifndef __clang__
 #include <net/in.h>
 #include <net/socket.h>
-
 #include "fdset.h"
 
 typedef int socklen_t;
@@ -330,8 +329,8 @@ char **argv;
     fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
 
     sessionsock = socket;
-    signal(SIGQUIT, cleanup2);
-    signal(SIGHUP, cleanup2);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
     signal(SIGINT, cleanup2);
     signal(SIGTERM, cleanup2);
     signal(SIGPIPE, cleanup2);
