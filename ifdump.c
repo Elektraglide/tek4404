@@ -1,3 +1,5 @@
+
+
 #include <stdio.h>
 #include <errno.h> 
 #include <signal.h>
@@ -66,21 +68,66 @@ netdev *ptr;
   printf("nd_next: %8x\n", ptr->nd_next);
 }
 
+void printsetting(name)
+char *name;
+{
+int value;
+
+  rdiddle(name, &value, sizeof(value));
+  printf("%s(%d) ", name, value);
+}
+
+void printsettingstring(name)
+char *name;
+{
+char value[128];
+
+  rdiddle(name, value, sizeof(value));
+  printf("%s(%s) ", name, value);
+}
+
 main(argc,argv)
 int argc;
 char **argv;
 {
   int n,rc,i,j,nde_size;
   unsigned char *ptr;
-
+  char filepath[256];
+  
   n = ldiddle("ndevsw");
-  printf("network interface buffer size => %d\n", n);
-
   ptr = rdiddle("ndevsw", dbuffer, n);
-  printf("read network interface buffer => %x\n", ptr);
-
   rdiddle("nde_size", &nde_size, sizeof(nde_size));
   printf("nde_size(0x%x) netdev_size(0x%x)\n", nde_size, sizeof(netdev));
+  rdiddle("fusion_db_name", filepath, sizeof(filepath), 0);
+  printf("fusion_db = %s\n",filepath);
+
+  printf("\nkernel settings\n");
+  printsetting("so_cnt");
+  printsetting("nc_hsize");
+  printsetting("t_resolution");
+  printsetting("re_cnt");
+  printsettingstring("sock_prefix");
+  printf("\n");
+  printsetting("tcp_sq_max");
+  printsetting("tcp_try_max");
+  printsetting("tcp_ttl");
+  printf("\n");
+  printsetting("tcp_debug");
+  printsetting("tcp_trace");
+  printsetting("tcp_taccept");
+  printsetting("tcp_tbind");
+  printsetting("tcp_tclose");
+  printsetting("tcp_tlinger");
+  printf("\n");
+
+  printsetting("udp_debug");
+  printsetting("udp_trace");
+  printsetting("ip_debug");
+  printsetting("ip_trace");
+  printsetting("icmp_debug");
+  printsetting("icmp_trace");
+  printf("\n");
+
 
   /* start of network interface blocks of nde_size bytes each */
   ptr = dbuffer;
