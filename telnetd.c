@@ -15,6 +15,7 @@
 #ifndef __clang__
 #include <net/in.h>
 #include <net/socket.h>
+
 #include "fdset.h"
 
 typedef int socklen_t;
@@ -331,7 +332,7 @@ char **argv;
     sessionsock = socket;
     signal(SIGQUIT, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
-    signal(SIGINT, cleanup2);
+    signal(SIGINT, SIG_IGN);
     signal(SIGTERM, cleanup2);
     signal(SIGPIPE, cleanup2);
     signal(SIGDEAD, cleanup2);
@@ -660,10 +661,9 @@ char **argv;
     return errno;
   }
 
-    signal(SIGQUIT, cleanup);
-    signal(SIGHUP, cleanup);
-    signal(SIGINT, cleanup);
-    signal(SIGTERM, cleanup);
+   signal(SIGINT, SIG_IGN);
+   signal(SIGQUIT, cleanup);
+   signal(SIGTERM, cleanup);
 
   rc = listen(sock, 5);
   if (rc < 0) {
