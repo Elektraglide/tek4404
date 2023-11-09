@@ -18,6 +18,7 @@
 extern int write();
 
 extern void movedisplaylines();
+extern void cleardisplaylines();
 
 /* clear region of both character and attribute buffer */
 int clearregion(vt, off, len)
@@ -25,7 +26,7 @@ VTemu *vt;
 int off;
 int len;
 {
-  if (off+len <= 80*25)
+  if (off+len <= MAXTERMCOLS*MAXTERMROWS)
   {
     memset(vt->buffer+off, 0, len);
     memset(vt->attrib+off, 0, len);
@@ -45,7 +46,6 @@ int dst;
 int src;
 int len;
 {
-  int i;
 
   if (dst < src)
   {
@@ -80,7 +80,8 @@ VTemu *vt;
   vt->margintop = 0;
   vt->marginbot = vt->rows - 1;
   
-  clearregion(vt, 0, vt->rows*vt->cols);
+  clearregion(vt, 0, MAXTERMROWS*MAXTERMCOLS);
+  memset(vt->linelengths, 0, MAXTERMROWS);
   vt->dirtylines |= (1 << vt->rows) - 1;
 }
 
@@ -90,36 +91,47 @@ int dst,src,n;
 {
   int i;
 
-    /* move the existing pixels */
-    movedisplaylines(vt, dst, src, n);
+  if (dst < 0 || dst + n > 25)
+  {
+    fprintf(stderr,"VTmovelines(%d %d)\n",dst,n);
+    return;
+  }
 
-    /* move the underlying buffer */
-    moveregion(vt, vt->cols*dst, vt->cols*src, vt->cols*n);
-    
-    /* move dirtylines too */
+    /* move the existing pixels */
+    movedisplaylines(vt, dst, src, n);   
+
+    /* dst lines are now clean */
     for(i=0; i<n; i++)
     {
-      if (vt->dirtylines & (1 << (src+i)))
-      {
-        vt->dirtylines |= (1 << (dst+i));
-      }
+        vt->dirtylines &= ~(1 << (dst+i));
     }
     
+    /* move the underlying buffer */
+    moveregion(vt, RC2OFF(dst, 0),RC2OFF(src, 0), MAXTERMCOLS*n);
+
     /* outside dst region is dirty */
     if (dst < src)
     {
+      memcpy(vt->linelengths+dst, vt->linelengths+src, n);
+    
       /* need redrawing */
       for(i=dst+n; i<src+n; i++)
       {
         vt->dirtylines |= (1 << i);
+        vt->linelengths[i] = 0;
       }
-
     }
     else
     {
+      while(n--)
+      {
+        vt->linelengths[dst+n] = vt->linelengths[src+n];
+      }
+    
       for(i=src; i<dst; i++)
       {
         vt->dirtylines |= (1 << i);
+        vt->linelengths[i] = 0;
       }
     }
 }
@@ -130,27 +142,46 @@ int dst,n;
 {
   int i;
 
-    clearregion(vt, vt->cols*dst, vt->cols*n);
+  if (dst < 0 || dst + n > 25)
+  {
+    fprintf(stderr,"VTclearlines(%d %d)\n",dst,n);
+    return;
+  }
+
+    cleardisplaylines(vt, dst,n);
+    
+    clearregion(vt, RC2OFF(dst,0), MAXTERMCOLS*n);
+
+    /* dst lines are now clean */
     for(i=0; i<n; i++)
     {
-      vt->dirtylines |= (1 << (dst+i));
+      vt->dirtylines &= ~(1 << (dst+i));
+      vt->linelengths[i] = 0;
     }
 }
 
-void VTnewline(vt)
+void VTnewline(vt, fastscroll)
 VTemu *vt;
+int fastscroll;
 {
+  int numlines = fastscroll ? 4 : 1;
+  if (numlines >= (vt->marginbot - vt->margintop))
+    numlines = 1;
+
+    numlines = 1;
+
   /* scroll only region inside margintop/marginbot */
   vt->dirtylines |= (1<<vt->cy);
   vt->cx = 0;
   vt->cy++;
   if (vt->cy > vt->marginbot)
   {
+    vt->cy -= numlines;
     /* scroll up */
-    VTmovelines(vt, vt->margintop, vt->margintop+1, vt->marginbot - vt->margintop);
-    VTclearlines(vt,vt->marginbot,1);
-    vt->cy--;
+    VTmovelines(vt, vt->margintop, vt->margintop+numlines, vt->marginbot - vt->margintop + 1 - numlines);
+    VTclearlines(vt,vt->marginbot+1-numlines,numlines);
   }
+  
   vt->dirtylines |= (1<<vt->cy);
 }
 
@@ -158,11 +189,19 @@ int asciinum(msg, defval)
 char *msg;
 int defval;
 {
+  int c = 0;
   int i = 0;
-  while (isdigit(*msg))
+  for(c=0; c<4; c++)
   {
-    i *= 10;
-    i += *msg++ - '0';
+    if (isdigit(msg[c]))
+    {
+      i *= 10;
+      i += msg[c] - '0';
+    }
+    else
+    {
+      break;
+    }    
   }
   return i ? i : defval;
   
@@ -172,8 +211,17 @@ int asciinum2(msg, defval)
 char *msg;
 int defval;
 {
-  while(*msg++ != ';');
-  return asciinum(msg, defval);
+  int c = 0;
+
+  for(c=0; c<8; c++)
+  {
+    if (msg[c] == ';')
+      return asciinum(msg+c+1, defval);
+    if (msg[c] >= 0x40)
+      break;	
+  }
+
+  return defval;
 }
 
 
@@ -305,20 +353,23 @@ int fdout;
             i = asciinum(vt->escseq+2, 0);
             if (i == 1)
             {
-              clearregion(vt, 0, vt->cols*vt->cy+vt->cx);
-              vt->dirtylines |= (1 << vt->rows) - 1;
+              clearregion(vt, 0, RC2OFF(vt->cy,vt->cx));
             }
             else
             if (i == 2)
             {
               VTclearlines(vt, 0, vt->rows);
-              vt->dirtylines |= (1 << vt->rows) - 1;
             }
             else
             {
-              i = vt->cols * vt->rows;
-              clearregion(vt, vt->cols*vt->cy+vt->cx, i - (vt->cy*vt->cols+vt->cx));
-              vt->dirtylines |= (1 << vt->rows) - 1;
+              i = MAXTERMCOLS * MAXTERMROWS - RC2OFF(vt->cy,vt->cx);
+              clearregion(vt, RC2OFF(vt->cy,vt->cx), i);
+              for (i=vt->cy; i<vt->rows; i++)
+              {
+                vt->dirtylines |= (1 << i);
+                vt->linelengths[i] = 0;
+              }
+              vt->linelengths[vt->cy] = vt->cx;
             }
             vt->cx = 0;
             vt->cy = 0;
@@ -327,7 +378,7 @@ int fdout;
             i = asciinum(vt->escseq+2, 0);
             if (i == 1)
             {
-              clearregion(vt, vt->cols*vt->cy, vt->cx);
+              clearregion(vt, RC2OFF(vt->cy,0), vt->cx);
               vt->dirtylines |= (1<<vt->cy);
             }
             else
@@ -342,7 +393,7 @@ int fdout;
             }
             else
             {
-              clearregion(vt, vt->cols*vt->cy+vt->cx, vt->cols-vt->cx);
+              clearregion(vt, RC2OFF(vt->cy,vt->cx), vt->cols-vt->cx);
               vt->dirtylines |= (1<<vt->cy);
             }
             break;
@@ -351,18 +402,20 @@ int fdout;
             i = asciinum(vt->escseq+2, 1);
             VTmovelines(vt, vt->cy+i, vt->cy, i);
             VTclearlines(vt, vt->cy, i);
-
+            printf("case L:\n");
             break;
+            
             case 'M':
             i = asciinum(vt->escseq+2, 1);
             VTmovelines(vt, vt->cy, vt->cy+i, i);
             VTclearlines(vt, vt->cy+i, vt->rows-vt->cy-i);
+            printf("case M:\n");
             break;
 
             case 'P':
             i = asciinum(vt->escseq+2, 1);
             j = vt->cols - vt->cx - i;
-            moveregion(vt, vt->cols*vt->cy+vt->cx, vt->cols*vt->cy+vt->cx+i,j);
+            moveregion(vt, RC2OFF(vt->cy, vt->cx), RC2OFF(vt->cy, vt->cx+i),j);
             vt->dirtylines |= (1<<vt->cy);
             break;
 
@@ -607,7 +660,7 @@ int fdout;
     else
     if (c == UNILF)
     {
-      VTnewline(vt);
+      VTnewline(vt, n > 50);
     }
     else
     if (c == '\t')
@@ -625,21 +678,23 @@ int fdout;
 
       i = vt->rows - vt->cy;
       while (i--)
-        VTnewline(vt);
+        VTnewline(vt, 1);
     }
     else
     if (isprint(c))
     {
       if (vt->cx < vt->cols)
       {
-        vt->buffer[vt->cy*vt->cols+vt->cx] = c;
-        vt->attrib[vt->cy*vt->cols+vt->cx] = vt->style;
+        vt->buffer[RC2OFF(vt->cy,vt->cx)] = c;
+        vt->attrib[RC2OFF(vt->cy,vt->cx)] = vt->style;
         vt->dirtylines |= (1<<vt->cy);
+        if (vt->cx > vt->linelengths[vt->cy])
+          vt->linelengths[vt->cy] = vt->cx;
       }
       vt->cx++;
       if (vt->wrapping && vt->cx >= vt->cols)
       {
-        VTnewline(vt);
+        VTnewline(vt, n > 32);
       }
     }
     else

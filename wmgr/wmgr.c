@@ -46,7 +46,9 @@ struct DISPSTATE ds;
 struct FontHeader *font;
 struct BBCOM bb;
 struct FORM *screen;
+struct RECT screenrect;
 
+int usecustomblit = 0;
 long newtime,oldtime = 0;
 char cursor;
 
@@ -78,6 +80,13 @@ char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
 char welcome[] = "Welcome to Tektronix 4404\r\n";
 
+void SetClip(r)
+struct RECT *r;
+{
+    /* always bound by screenrect */
+    RectIntersect(r, &screenrect, &bb.cliprect);
+}
+
 void RectInset(r, d)
 struct RECT *r;
 int d;
@@ -100,6 +109,24 @@ struct POINT *point;
    return 1;
 }
 
+int myRectIntersects(r1,r2)
+struct RECT *r1;
+struct RECT *r2;
+{
+  if (r1->x < r2->x+r2->w &&
+      r2->x < r1->x+r1->w &&
+      r1->y < r2->y+r2->h &&
+      r2->y < r1->y+r1->h)
+    return 1;
+    
+  return 0;	
+}
+
+int cleanup2(sig)
+int sig;
+{
+  fprintf(stderr," child dead of %d\n", getpid());
+}
 
 int window_session(ptfd, islogger)
 int *ptfd;
@@ -128,12 +155,13 @@ int islogger;
   {
   
     /* PARENT */
+    signal(SIGDEAD, cleanup2);
 
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
 
     /* Close the slave side of the PTY */
-    //close(fdslave);
+    close(fdslave);
   }
   else
   {
@@ -169,7 +197,7 @@ int islogger;
     /* FIXME ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    close(fdslave);
+    //close(fdslave);
 
     /* Make the current process a new session leader */
     setsid();
@@ -225,7 +253,7 @@ Window *win;
     win->vt.dirtylines |= (1 << win->vt.rows) - 1;
   }
   
-  bb.cliprect = win->windowrect;
+  SetClip(&win->windowrect);
 
   return 0;
 }
@@ -259,7 +287,6 @@ int islogger;
   VTreset(&win->vt);
 
   /* size of text block */
-  RCToRect(&r, win->vt.rows, win->vt.cols);
   r.x = win->vt.cols * font->maps->maxw;
   r.y = win->vt.rows * font->maps->line;
   
@@ -291,7 +318,7 @@ int islogger;
     fprintf(stderr, "WindowCreate pty(%d, %d)\n", win->slave, win->master);
  */
    
-    sprintf(win->title, "%s %s [pid:%d]", title, ttyname(win->master), pid);
+    sprintf(win->title, "%s %s [pid:%d]", title, ttyname(win->slave), pid);
 
     /* needs rendering */
     win->dirty = 2;
@@ -322,7 +349,7 @@ int x, y;
 
   if (win == wintopmost)
   {
-    bb.cliprect = win->windowrect;
+    SetClip(&win->windowrect);
   }
 
   if (x != win->windowrect.x || win->windowrect.y != y)
@@ -346,15 +373,41 @@ int x, y;
   }
 }
 
+void renderstring(line, n, ox, oy)
+char *line;
+int n,ox,oy;
+{
+  register int j,k,rows,ch;
+  register unsigned char *src,*dst;
+  
+  /* assumes font is fixed 8px and font bitmap stride=1024 and framebuffer stride=1024 */
+  src = (unsigned char *)font->bitmap;
+  dst = (unsigned char *)screen->addr + ((oy-12)<<7) + (ox>>3);
+  for(k=0; k<n; k++)
+  {
+    /* subtract makes no sense but needed on Tek */
+    ch = line[k] - 1;
+
+    j = 0;
+    rows = 12;
+    while(rows-- > 0)
+    {
+      dst[k+j] = src[ch+j];
+      j += 128;
+    }
+  }
+}
+
 int WindowRender(win, forcedirty)
 Window *win;
 int forcedirty;
 {
   struct RECT r,glyph;
   struct POINT origin;
-  int i,j,k,n,style,numlines;
-  char line[128];
-  
+  int i,j,k,n,style,numlines,ch,rows;
+  char line[160];
+  unsigned char *src,*dst;
+
   /* size of single glyph */
   RCToRect(&glyph, 0, 0);
   glyph.w = font->maps->maxw;
@@ -409,6 +462,10 @@ int forcedirty;
       origin.x = win->windowrect.x + win->windowrect.w / 2 - j/2;
       origin.y = win->windowrect.y + (WINTITLEBAR - glyph.h)/2 + glyph.h;
       StringDrawX(win->title, &origin, &bb, font);
+
+      r = win->contentrect;
+      bb.halftoneform = &WhiteMask;
+      RectDrawX(&r, &bb);
     }
 
     /* during dragging do not update content */
@@ -420,8 +477,9 @@ int forcedirty;
     /* render contents */
     if (forcedirty || (win->vt.dirtylines))
     {
-      bb.halftoneform = NULL;
+      bb.halftoneform = &BlackMask;
     
+      ProtectCursor(&win->contentrect, NULL);
       numlines = 0;
       origin.y = win->contentrect.y + glyph.h;
       for(j=0; j<win->vt.rows; j++)
@@ -433,16 +491,17 @@ int forcedirty;
         r.y = origin.y - glyph.h;
         r.w = win->contentrect.w;
         r.h = glyph.h;
-        if ((win->vt.dirtylines & (1<<j)) && RectIntersects(&r, &bb.cliprect))
+        if ((win->vt.dirtylines & (1<<j)) && myRectIntersects(&r, &bb.cliprect))
         {
           /* NB we may have embedded \0 where cursor has been warped as well as handle style attributes */
           style = win->vt.attrib[win->vt.cols*j];
           bb.rule = style & vtINVERTED ? bbnS : bbS;
           n = 0;
-          for(k=0; k<win->vt.cols; k++)
+          /* NB <= because linelengths[] is actually last cursorx */
+          for(k=0; k<=win->vt.linelengths[j]; k++)
           {
             /* change of style */
-            if (win->vt.attrib[win->vt.cols*j+k] != style)
+            if (win->vt.attrib[RC2OFF(j,k)] != style)
             {
               /* flush so far */
               line[n] = '\0';
@@ -460,11 +519,11 @@ int forcedirty;
               origin.x += n * glyph.w;
               n = 0;
 
-              style = win->vt.attrib[win->vt.cols*j+k];
+              style = win->vt.attrib[RC2OFF(j,k)];
               bb.rule = style & vtINVERTED ? bbnS : bbS;
             }
             
-            line[n] = win->vt.buffer[win->vt.cols*j+k];
+            line[n] = win->vt.buffer[RC2OFF(j,k)];
             if (line[n] == 0)
               line[n] = ' ';
 
@@ -472,24 +531,22 @@ int forcedirty;
           }
 
           line[n] = '\0';
-          StringDrawX(line, &origin, &bb, font);
-          
-#if 0
-          dst = (char *)screen->addr + screen->inc * origin.y + origin.x/8;
-          for(k=0; k<n; k++)
+          if (usecustomblit && !style)
           {
-             dst[k] = line[k];
+            renderstring(line, n, origin.x, origin.y);
           }
-#endif
+          else
+          {
+            StringDrawX(line, &origin, &bb, font);
+          }
           
           numlines++;
         }
         
         origin.y += glyph.h;
       }
-      
-      fprintf(stderr, "updated %d lines out of %d\n", numlines, win->vt.rows);
-      
+      ReleaseCursor();
+            
       bb.rule = bbS;
     }
   }
@@ -501,6 +558,8 @@ void addcursor(win)
 Window *win;
 {
   struct POINT origin;
+
+return;
 
   if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
   {
@@ -514,8 +573,8 @@ Window *win;
       if (!cursor)
         cursor = ' ';
 
-      bb.cliprect = win->windowrect;
-      CharDrawX(newtime & 1 ? 0x7f : cursor, &origin, &bb, font);
+      SetClip(&win->contentrect);
+      CharDrawX(newtime & 1 ? 0x5f : cursor, &origin, &bb, font);
 
       oldtime = newtime;
     }
@@ -527,6 +586,8 @@ Window *win;
 {
   struct POINT origin;
 
+return;
+
   if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
   {
     origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
@@ -535,7 +596,7 @@ Window *win;
     if (!cursor)
       cursor = ' ';
 
-    bb.cliprect = win->windowrect;
+    SetClip(&win->contentrect);
     CharDrawX(cursor, &origin, &bb, font);
   }
 }
@@ -554,23 +615,51 @@ struct POINT cur;
   if (win != wintopmost)
     return;
 
+  SetClip(&win->contentrect);
+
   /* flush any dirty lines before we blit */
   removecursor(win);
   WindowRender(win, FALSE);
   
   bb.srcform = bb.destform = screen;
-  bb.cliprect = win->windowrect;
   bb.destrect.x = win->contentrect.x;
   bb.destrect.y = win->contentrect.y + dst  * font->maps->line;
   bb.destrect.w = win->contentrect.w;
   bb.destrect.h = n * font->maps->line;
-  bb.halftoneform = NULL;
+  bb.halftoneform = &BlackMask;
   bb.rule = bbS;
 
   bb.srcpoint.x = win->contentrect.x;
-  bb.srcpoint.y = win->contentrect.y + src  * font->maps->line;
+  bb.srcpoint.y = win->contentrect.y + src * font->maps->line;
   
   BitBlt(&bb);
+  
+  bb.srcform = NULL;
+  bb.srcpoint.x = 0;
+  bb.srcpoint.y = 0; 
+}
+
+void cleardisplaylines(vt, dst, n)
+VTemu *vt;
+int dst;
+int n;
+{
+struct RECT r;
+  
+  Window *win = (Window *)vt;
+
+  if (win != wintopmost)
+    return;
+
+  SetClip(&win->contentrect);
+  bb.halftoneform = &LightGrayMask;
+  bb.rule = bbS;
+
+  r.x = win->contentrect.x;
+  r.y = win->contentrect.y + dst * font->maps->line;
+  r.w = win->contentrect.w;
+  r.h = n * font->maps->line;
+  RectDrawX(&r, &bb);
 }
 
 
@@ -608,7 +697,7 @@ int forcedirty;
     RectIntersect(r, &win->windowrect, &overlap);
     if (overlap.w > 0 && overlap.h > 0)
     {
-      bb.cliprect = overlap;
+      SetClip(&overlap);
       WindowRender(win, forcedirty);
       if ((counter & 1) == 0)
       {
@@ -704,7 +793,7 @@ void
 cleanup(sig)
 int sig;
 {
-  printf( "cleanup on %d\n", sig);
+  fprintf(stderr, "cleanup on %d\n", sig);
   
   EventDisable();
   ExitGraphics();
@@ -761,7 +850,13 @@ char **argv;
   fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
   fprintf(stderr, "fixed: %d width:%d height:%d\n", 
       font->maps->fixed,font->maps->maxw, font->maps->line);
+  fprintf(stderr, "bitmap: %8.8x (%d x %d)\n", 
+      font->bitmap, font->width, font->height);
 
+  /* can we use a custom text render? */
+  usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
+  fprintf(stderr,"usecustom=%d\n",usecustomblit);
+   
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
   fprintf(stderr, "reading %d from %s\n", fdtty, ttyname(fileno(stdin)));
@@ -769,7 +864,11 @@ char **argv;
 sleep(2);
 
   screen = InitGraphics(TRUE);
-
+  screenrect.x = 0;
+  screenrect.y = 0;
+  screenrect.w = screen->w;
+  screenrect.h = screen->h;
+  
   /* for controlling clipping etc */
   BbcomDefault(&bb);
 
@@ -844,7 +943,7 @@ sleep(2);
 
      }
 
-     printf("%c[Hframe(%d) ev(%d) %d %d \n",0x1b, framenum, ev.evalue, EGetTime(), i);
+     printf("\023[Hframe(%d) ev(%d) %d %d \n", framenum, ev.evalue, EGetTime(), i);
 #endif
 
     /* check any outputs from master sides and track highest fd */
@@ -861,7 +960,7 @@ sleep(2);
 #endif
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec = 200000;
+    timeout.tv_usec = 120000;
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
@@ -967,7 +1066,7 @@ if (GetButtons() & M_MIDDLE)
                 for(j=0; j<quadrect.next; j++)
                   Paint(wintopmost->next, &quadrect.region[j], TRUE);
 
-                bb.cliprect = win->windowrect;
+                SetClip(&win->windowrect);
                 WindowRender(win, TRUE);
                 
 #ifdef __clang__
@@ -1004,24 +1103,35 @@ if (GetButtons() & M_MIDDLE)
       }
 
     /* debugging dirtylines */
+#if 0
     if (wintopmost)
     {
-      // show dirty lines
-      bb.cliprect = wintopmost->contentrect;
-      bb.cliprect.x -= WINBORDER + font->maps->line;
+      /* show dirty lines */
+
+      r = wintopmost->contentrect;
+      r.x -= WINBORDER + font->maps->line + 64;
+      SetClip(&r);
+
       for (i=0; i<25; i++)
       {
-        /* render closebox */
+        /* render status box */
         bb.halftoneform = wintopmost->vt.dirtylines & (1<<i) ? &DarkGrayMask : &WhiteMask;
-        r.x = bb.cliprect.x;
+        r.x = wintopmost->contentrect.x - WINBORDER - font->maps->line ;
         r.y = bb.cliprect.y + font->maps->line * i;
         r.w = font->maps->line;
         r.h = font->maps->line;
         RectDrawX(&r, &bb);
         bb.halftoneform = &BlackMask;
         RectBoxDrawX(&r, 1, &bb);
+        
+        sprintf(inputbuffer, "%3d", wintopmost->vt.linelengths[i]);
+        r.x -= font->maps->maxw * 3;
+        r.y += font->maps->line;
+        StringDrawX(inputbuffer, (struct POINT *)&r, &bb, font);
+        
       }
     }
+#endif
 
   /* repaint any dirty windows */
   win = wintopmost;

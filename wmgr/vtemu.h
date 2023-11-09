@@ -8,6 +8,13 @@ enum VTstyle
   vtINVERTED = 2
 };
 
+#define MAXTERMCOLS 128
+#define MAXTERMROWS 32
+
+/* NB assumes stride is 128; else use ((R)*MAXTERMWIDTH + (C)) */
+#define RC2OFF(R,C)  (((R)<<7) + (C))
+#define OFF2R(O)  ((O)>>7)
+
 typedef struct
 {
   char state;
@@ -20,10 +27,11 @@ typedef struct
   short margintop,marginbot;
 
   short cols,rows;
-  char buffer[132*32];
-  char attrib[132*32];
+  char buffer[MAXTERMCOLS*MAXTERMROWS];
+  char attrib[MAXTERMCOLS*MAXTERMROWS];
   short cx,cy;
   unsigned int dirtylines;      /* mask of which lines are dirty so we can skip rendering => max 32 lines */
+  unsigned char linelengths[MAXTERMROWS];
 } VTemu;
 
 extern void VTreset();
