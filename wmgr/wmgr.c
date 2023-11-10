@@ -58,7 +58,7 @@ typedef struct _win
   VTemu vt;
 
   struct _win *next;
-  char title[32];
+  char title[64];
   struct RECT oldrect;
   struct RECT windowrect;
   struct RECT contentrect;
@@ -125,7 +125,9 @@ struct RECT *r2;
 int cleanup2(sig)
 int sig;
 {
-  fprintf(stderr," child dead of %d\n", getpid());
+  int i;
+
+  fprintf(stderr," child dead of parent %d\n", getpid());
 }
 
 int window_session(ptfd, islogger)
@@ -161,7 +163,7 @@ int islogger;
     control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
 
     /* Close the slave side of the PTY */
-    close(fdslave);
+    /* Needed to get ttyname() close(fdslave);  */
   }
   else
   {
@@ -175,10 +177,11 @@ int islogger;
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
+/*
     new_term_settings.sg_flag |= RAW;
     new_term_settings.sg_flag |= CRMOD;
     new_term_settings.sg_flag |= XTABS;
-  
+*/  
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
@@ -197,7 +200,7 @@ int islogger;
     /* FIXME ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    //close(fdslave);
+/*    close(fdslave);    */
 
     /* Make the current process a new session leader */
     setsid();
@@ -313,11 +316,6 @@ int islogger;
     win->master = ptfd[1];
     win->slave = ptfd[0];
     
-/*
-    fprintf(stderr, "WindowCreate with pid%d\n", pid);
-    fprintf(stderr, "WindowCreate pty(%d, %d)\n", win->slave, win->master);
- */
-   
     sprintf(win->title, "%s %s [pid:%d]", title, ttyname(win->slave), pid);
 
     /* needs rendering */
@@ -984,8 +982,14 @@ sleep(2);
 #endif
     {
       n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
-     if (n>0 && wintopmost)
-       n = (int)write(wintopmost->master, inputbuffer, n);
+      if (n>0 && wintopmost)
+      {
+        n = (int)write(wintopmost->master, inputbuffer, n);
+        if (n < 0)
+        {
+       	  WindowDestroy(wintopmost - allwindows);
+        }
+      }
     }
 
     /* read any output from window process */
