@@ -1,3 +1,4 @@
+
 #define USE_SOCK_RAWxx
 #define PACKET_TYPE IPPROTO_RAW /* IPPROTO_RAW */
 
@@ -134,9 +135,13 @@ typedef struct dhcp
 
 #define DHCP_MAGIC_COOKIE   0x63825363
 
+#ifdef __clang__
 char DHCP_SERVER[20] = "255.255.255.255";
+#else
+char DHCP_SERVER[20] = "0.0.0.0";
+#endif
 
-int verbose = 1;
+int verbose = 0;
 int sock = -1;
 int ip;
 int packet_xid;
@@ -392,9 +397,20 @@ char **argv;
   socklen_t src_addr_len;
   dhcp_t *dhcp;
 
-  /* use this DHCP server address */
-  if (argc > 1)
-    strcpy(DHCP_SERVER, argv[1]);
+
+  for(i=1; i<argc; i++)
+  {
+    if (argv[i][0] == '-' || argv[i][0] == '+')
+    {
+      if (argv[i][1] == 'v')
+        verbose = 1;
+    }
+    else
+    {
+      /* use this DHCP server address */
+      strcpy(DHCP_SERVER, argv[1]);
+    }
+  }
 
   /* make a raw socket,  NB needs elevated permission */
   sock = socket(AF_INET, SOCK_DGRAM, IPPR_UDP);
@@ -405,9 +421,9 @@ char **argv;
 
   reuse = 1;
   rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-  fprintf(stderr,"REUSEADDR %d\n", rc);
+  if (verbose) fprintf(stderr,"REUSEADDR %d\n", rc);
   rc = setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &reuse, sizeof(reuse));
-  fprintf(stderr,"BROADCAST %d\n", rc);
+  if (verbose) fprintf(stderr,"BROADCAST %d\n", rc);
 
   memset(&client, 0, sizeof(client));
   client.sin_family = AF_INET;
@@ -420,7 +436,7 @@ char **argv;
   }
 
   /* Get the MAC address of the interface */
-  dev = argv[1] ? argv[1] : "en0";
+  dev = "en0";
   rc = get_mac_address(dev, mac);
   if (rc)
   {
@@ -442,12 +458,13 @@ char **argv;
     client.sin_addr.s_addr = htonl(INADDR_ANY);
     src_addr_len = sizeof(client);
    
-
     memset(buffer, 0, sizeof(buffer));
     rc = (int)recvfrom(sock, buffer, sizeof(buffer), MSG_FDBROADCAST, (struct sockaddr *)&client, &src_addr_len);
     if (verbose)
+    {
       fprintf(stderr, "recvfrom: len=%d src=%s port=%d\n", rc, inet_ntoa(client.sin_addr.s_addr),ntohs(client.sin_port));
-    print_buffer((unsigned char *)buffer, rc);
+      print_buffer((unsigned char *)buffer, rc);
+    }
     if (rc <= 0)
     {
       fprintf(stderr, "recvfrom: %s\n",strerror(errno));
