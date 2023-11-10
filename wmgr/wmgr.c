@@ -219,6 +219,57 @@ int islogger;
   return pid;
 }
 
+void addcursor(win)
+Window *win;
+{
+  struct RECT r;
+  
+  if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
+  {
+    newtime = EGetTime() / 204;
+    if (oldtime != newtime)
+    {
+      r.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
+      r.y = win->contentrect.y + win->vt.cy * font->maps->line + 2;
+      cursor = win->vt.buffer[RC2OFF(win->vt.cy,win->vt.cx)];
+
+      if (!cursor)
+        cursor = ' ';
+
+      SetClip(&win->contentrect);
+      
+      bb.rule = bbSxorD;
+
+      r.w = font->maps->maxw;
+      r.h = font->maps->baseline;
+      bb.halftoneform = &BlackMask;
+      RectDrawX(&r, &bb);
+      bb.rule = bbS;
+
+      oldtime = newtime;
+    }
+  }
+}
+
+void removecursor(win)
+Window *win;
+{
+  struct POINT origin;
+
+  if ((win->vt.cx < win->vt.cols))
+  {
+    origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
+    origin.y = win->contentrect.y + win->vt.cy * font->maps->line + font->maps->baseline;
+    cursor = win->vt.buffer[RC2OFF(win->vt.cy,win->vt.cx)];
+    if (!cursor)
+      cursor = ' ';
+
+    SetClip(&win->contentrect);
+    bb.destrect = win->contentrect;
+    CharDrawX(cursor, &origin, &bb, font);
+  }
+}
+
 int WindowTop(win)
 Window *win;
 {
@@ -268,6 +319,9 @@ char *msg;
 int n;
 {
   Window *win = allwindows + wid;
+
+  if (win == wintopmost)
+   removecursor(win);
 
   VToutput(&win->vt, msg, n, win->master);
 
@@ -380,7 +434,7 @@ int n,ox,oy;
   
   /* assumes font is fixed 8px and font bitmap stride=1024 and framebuffer stride=1024 */
   src = (unsigned char *)font->bitmap;
-  dst = (unsigned char *)screen->addr + ((oy-12)<<7) + (ox>>3);
+  dst = (unsigned char *)screen->addr + ((oy-font->maps->baseline)<<7) + (ox>>3);
   for(k=0; k<n; k++)
   {
     /* subtract makes no sense but needed on Tek */
@@ -412,10 +466,15 @@ int forcedirty;
   glyph.h = font->maps->line;
   if (forcedirty || win->dirty || win->vt.dirtylines)
   {
+    bb.rule = bbS;
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = screen->w;
+    bb.destrect.h = screen->h;
+    
     if (forcedirty || (win->dirty & 2))
     {
       /* render (just) frame */
-      bb.rule = bbS;
 
       r = win->windowrect;
       r.h = WINTITLEBAR;
@@ -479,7 +538,7 @@ int forcedirty;
     
       ProtectCursor(&win->contentrect, NULL);
       numlines = 0;
-      origin.y = win->contentrect.y + glyph.h;
+      origin.y = win->contentrect.y + font->maps->baseline;
       for(j=0; j<win->vt.rows; j++)
       {
         origin.x = win->contentrect.x;
@@ -552,53 +611,6 @@ int forcedirty;
   return 0;
 }
 
-void addcursor(win)
-Window *win;
-{
-  struct POINT origin;
-
-return;
-
-  if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
-  {
-    newtime = EGetTime() / 204;
-    if (oldtime != newtime)
-    {
-      origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
-      origin.y = win->contentrect.y + win->vt.cy * font->maps->line + font->maps->line;
-      cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
-
-      if (!cursor)
-        cursor = ' ';
-
-      SetClip(&win->contentrect);
-      CharDrawX(newtime & 1 ? 0x5f : cursor, &origin, &bb, font);
-
-      oldtime = newtime;
-    }
-  }
-}
-
-void removecursor(win)
-Window *win;
-{
-  struct POINT origin;
-
-return;
-
-  if ((win->vt.hidecursor == 0) && (win->vt.cx < win->vt.cols))
-  {
-    origin.x = win->contentrect.x + win->vt.cx * font->maps->maxw;
-    origin.y = win->contentrect.y + win->vt.cy * font->maps->line + font->maps->line;
-    cursor = win->vt.buffer[win->vt.cols*win->vt.cy+win->vt.cx];
-    if (!cursor)
-      cursor = ' ';
-
-    SetClip(&win->contentrect);
-    CharDrawX(cursor, &origin, &bb, font);
-  }
-}
-
 
 void movedisplaylines(vt, dst, src, n)
 VTemu *vt;
@@ -616,7 +628,6 @@ struct POINT cur;
   SetClip(&win->contentrect);
 
   /* flush any dirty lines before we blit */
-  removecursor(win);
   WindowRender(win, FALSE);
   
   bb.srcform = bb.destform = screen;
@@ -634,7 +645,11 @@ struct POINT cur;
   
   bb.srcform = NULL;
   bb.srcpoint.x = 0;
-  bb.srcpoint.y = 0; 
+  bb.srcpoint.y = 0;
+  bb.destrect.x = 0;
+  bb.destrect.y = 0;
+  bb.destrect.w = screen->w;
+  bb.destrect.h = screen->h;
 }
 
 void cleardisplaylines(vt, dst, n)
@@ -1036,6 +1051,10 @@ sleep(2);
 
 if (GetButtons() & M_MIDDLE)
 {
+  if (wintopmost)
+  {
+    kill(wintopmost->pid, SIGTERM);
+  }
   break;
 }
 

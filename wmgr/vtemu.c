@@ -354,6 +354,7 @@ int fdout;
             if (i == 1)
             {
               clearregion(vt, 0, RC2OFF(vt->cy,vt->cx));
+              vt->dirtylines |= (1<<vt->cy);
             }
             else
             if (i == 2)
@@ -367,7 +368,7 @@ int fdout;
               for (i=vt->cy; i<vt->rows; i++)
               {
                 vt->dirtylines |= (1 << i);
-                vt->linelengths[i] = 0;
+                vt->linelengths[i] = vt->cols - 1;
               }
               vt->linelengths[vt->cy] = vt->cx;
             }
@@ -395,6 +396,7 @@ int fdout;
             {
               clearregion(vt, RC2OFF(vt->cy,vt->cx), vt->cols-vt->cx);
               vt->dirtylines |= (1<<vt->cy);
+              vt->linelengths[vt->cy] = vt->cols - 1;
             }
             break;
 
