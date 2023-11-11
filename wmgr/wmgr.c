@@ -265,7 +265,10 @@ Window *win;
       cursor = ' ';
 
     SetClip(&win->contentrect);
-    bb.destrect = win->contentrect;
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = screen->w;
+    bb.destrect.h = screen->h;
     CharDrawX(cursor, &origin, &bb, font);
   }
 }
@@ -534,7 +537,7 @@ int forcedirty;
     /* render contents */
     if (forcedirty || (win->vt.dirtylines))
     {
-      bb.halftoneform = &BlackMask;
+      bb.halftoneform = NULL;
     
       ProtectCursor(&win->contentrect, NULL);
       numlines = 0;
@@ -665,7 +668,7 @@ struct RECT r;
     return;
 
   SetClip(&win->contentrect);
-  bb.halftoneform = &LightGrayMask;
+  bb.halftoneform = &WhiteMask;
   bb.rule = bbS;
 
   r.x = win->contentrect.x;
@@ -835,7 +838,7 @@ char **argv;
   struct in_sockaddr serv_addr;
 #endif
   fd_set fd_in;
-  char ch, inputbuffer[512];
+  char ch, inputbuffer[4096];
   struct timeval timeout;
   Window *win;
   struct RECT r,r2;
