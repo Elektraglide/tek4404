@@ -340,8 +340,6 @@ char **argv;
   sessionpid = fork();
   if (sessionpid)
   {
-    argv[0] = "dodah";
-
     /* PARENT */
     
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
@@ -427,7 +425,7 @@ char **argv;
               continue;
             }
 
-#ifndef WHY_DO_WE_NEED_THIS
+#if 0
             /* Convert cr nul to cr lf. */
             for (i = 0; i < n; ++i) {
               unsigned char ch = ts.bi.data[i];
@@ -515,6 +513,11 @@ char **argv;
             readspin++;
           }
           else
+          if (n == 4096)
+          {
+            fprintf(stderr,"read chocked\n");	
+          }
+          else
           {
 #ifdef DEBUG
             fprintf(stderr, "after %d spins, read %d bytes from fdmaster%d\n", readspin, n, fdmaster);
@@ -529,6 +532,7 @@ char **argv;
           ts.bo.end = ts.bo.data + n;
         }
 
+        /* try and totally drain */
         while (ts.bo.start != ts.bo.end) 
         {
 #ifdef DEBUG
@@ -539,6 +543,10 @@ char **argv;
           if (n < 0)
           {
             exit(errno);
+          }
+          if (n < ts.bo.end - ts.bo.start)
+          {
+            fprintf(stderr, "output choked\n");
           }
           ts.bo.start += n;
         }
@@ -695,14 +703,16 @@ char **argv;
     if (fork())
     {
       fprintf(stderr, "connect from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
-       sleep(5);
-       close(newsock); 
+      sleep(5);
+      close(newsock); 
     }
     else
     {
+      argv[0] = "client";
+
       rc = telnet_session(newsock, argc, argv);
-     fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
-     break;
+      fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
+      break;
     }
 
   }
