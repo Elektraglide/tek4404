@@ -168,6 +168,7 @@ int islogger;
   else
   {
     /* CHILD */
+    signal(SIGPIPE, cleanup2);
     
     /* Close the master side of the PTY */
     close(fdmaster);
@@ -847,7 +848,8 @@ char **argv;
   struct sgttyb new_term_settings;
   union EVENTUNION ev;
   int framenum = 0;
-
+  int last_read;
+  
   /* how do we detect child is dead? */
   signal(SIGINT, cleanup);
   signal(SIGTERM, cleanup);
@@ -948,6 +950,7 @@ sleep(2);
 #endif
   
   /* mainloop */
+  last_read = 0;
   while (1)
   {
 #if 0
@@ -976,7 +979,9 @@ sleep(2);
 #endif
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec = 120000;
+    timeout.tv_usec = 200000;
+    if (last_read)
+      timeout.tv_usec = 50000;
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
@@ -996,7 +1001,8 @@ sleep(2);
     if (FD_ISSET(fdtty, &fd_in))
 #else
     gtty(fdtty, &new_term_settings);
-    if (new_term_settings.sg_speed & INCHR)
+    last_read = new_term_settings.sg_speed & INCHR;
+    if (last_read)
 #endif
     {
       n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
