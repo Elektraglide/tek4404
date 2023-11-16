@@ -289,7 +289,8 @@ char **argv;
   int fdmaster,fdslave;
   int n,rc,sessionpid;
   int last_was_cr;
-
+  int last_read;
+  
   fd_set fd_in;
 
   struct sgttyb slave_orig_term_settings; 
@@ -372,6 +373,7 @@ char **argv;
     close(fdslave);
     
    last_was_cr = 0;
+   last_read = 0;
     while (1)
     {
       /* Uniflex select appears to only expect actual socket fds */
@@ -382,6 +384,9 @@ char **argv;
       FD_SET(socket, &fd_in);
 #ifdef __clang__
       FD_SET(fdmaster, &fd_in);
+#else
+      if(last_read)
+        timeout.tv_usec = 50000;
 #endif
 /*
       fprintf(stderr,"select(%x) on %d,fdmaster%d\n",fd_in.fdmask[0],socket, fdmaster);
@@ -478,7 +483,8 @@ char **argv;
 #ifdef __clang__
       if (FD_ISSET(fdmaster, &fd_in))
 #else
-      if ((n & PTY_OUTPUT_QUEUED))
+      last_read = (n & PTY_OUTPUT_QUEUED);
+      if (last_read)
 #endif
       {
         /* Data arrived from application */
@@ -573,6 +579,7 @@ char **argv;
  
     new_term_settings.sg_flag |= RAW;
     new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_flag |= XTABS;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
     fprintf(stderr,"terminal sg_flag(%x)\n", new_term_settings.sg_flag);
