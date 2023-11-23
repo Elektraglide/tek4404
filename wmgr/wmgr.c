@@ -931,10 +931,6 @@ sleep(2);
   tcsetattr(fdtty, TCSANOW, &t);
 #endif
 
-   /* experiment with non-blocking reading of stdin */
-/*
-   fcntl(fdtty, FNOBLOCK,0);
-*/
    signal(SIGINPUT, handleinput);
    signal(SIGEVT, handleinput);
 
@@ -953,17 +949,6 @@ sleep(2);
   last_read = 0;
   while (1)
   {
-#if 0
-     framenum++;
-     i = EGetCount();
-     if (i > 0)
-     {
-
-
-     }
-
-     printf("\023[Hframe(%d) ev(%d) %d %d \n", framenum, ev.evalue, EGetTime(), i);
-#endif
 
     /* check any outputs from master sides and track highest fd */
     FD_ZERO(&fd_in);
@@ -980,8 +965,11 @@ sleep(2);
     /* 20Hz updating */
     timeout.tv_sec = 0;
     timeout.tv_usec = 200000;
-    if (last_read)
+    if (last_read > 0)
+    {
       timeout.tv_usec = 50000;
+      last_read--;
+    }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
@@ -1001,7 +989,7 @@ sleep(2);
     if (FD_ISSET(fdtty, &fd_in))
 #else
     gtty(fdtty, &new_term_settings);
-    last_read = new_term_settings.sg_speed & INCHR;
+    last_read = (new_term_settings.sg_speed & INCHR) ? 5 : 0;
     if (last_read)
 #endif
     {

@@ -385,8 +385,12 @@ char **argv;
 #ifdef __clang__
       FD_SET(fdmaster, &fd_in);
 #else
-      if(last_read)
+      if(last_read > 0)
+      {
+      	/* if there is input, for a few loops use a short timeout */
         timeout.tv_usec = 50000;
+        last_read--;
+      }
 #endif
 /*
       fprintf(stderr,"select(%x) on %d,fdmaster%d\n",fd_in.fdmask[0],socket, fdmaster);
@@ -483,7 +487,7 @@ char **argv;
 #ifdef __clang__
       if (FD_ISSET(fdmaster, &fd_in))
 #else
-      last_read = (n & PTY_OUTPUT_QUEUED);
+      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : 0;
       if (last_read)
 #endif
       {
