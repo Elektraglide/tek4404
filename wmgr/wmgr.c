@@ -16,6 +16,21 @@
 
 #include "uniflexshim.h"
 
+#define	AF_INTRA	AF_UNIX
+extern int kill();
+char *nget_str(char *name)
+{
+	if (!strcmp(name, "cur_tty"))
+		return ttyname(fileno(stdin));
+		
+	return "unknown";
+}
+
+char *nserror()
+{
+	return strerror(errno);
+}
+
 #else
 
 #include <net/in.h>
@@ -32,10 +47,84 @@ extern int rand();
 extern int open();
 
 #ifdef __clang__
-#define NOTPOLLING
+#define POLLINGPTYx
+#define POLLINGINPx
+#define USE_TTYREADER
 #else
-#define POLLING
+#define POLLINGPTY
+#define POLLINGINPx
+#define USE_TTYREADER
 #endif
+
+#ifdef USE_TTYREADER
+int sockpair[2] = {0,0};
+int readerpid = 0;
+
+void ttycleanup(sig)
+int sig;
+{
+		if (readerpid)
+			kill(readerpid,SIGKILL);
+}
+
+char *getttysock(sockinput)
+int *sockinput;
+{
+  struct sgttyb new_term_settings;
+	int rc,n;
+	char inputbuffer[128];
+	
+	if (sockpair[1] > 0)
+	{
+		*sockinput = sockpair[1];
+		return  nget_str("cur_tty");
+	}
+
+  /* setup an input reader process */
+  rc = socketpair(AF_INTRA,SOCK_DGRAM,0, sockpair);
+  if (rc < 0)
+  {
+    fprintf(stderr, "Error %s on socketpair\n", nserror());
+    exit(errno);
+  }
+  
+  if ((readerpid = fork()))
+  {
+    close(sockpair[0]);
+    fprintf(stderr,"TTYREADER created using socket(%d)\n", sockpair[1]);
+		*sockinput = sockpair[1];
+		return nget_str("cur_tty");
+  }
+  else
+  {
+    /* CBREAK input */
+    rc = gtty(0, &new_term_settings);
+    new_term_settings.sg_flag |= CBREAK | RAW;
+    stty(0, &new_term_settings);
+
+#ifdef __clang__
+  /* modern OS no longer support stty as above */
+  struct termios t = {};
+  tcgetattr(0, &t);
+  t.c_lflag &= ~ICANON;
+  tcsetattr(0, TCSANOW, &t);
+#endif
+
+    fprintf(stderr, "child entering read/write loop on socket(%d)\n", sockpair[0]);
+
+    /* read stdin & write forever */
+    while ((n = read(0, inputbuffer, sizeof(inputbuffer))) > 0)
+    {
+			fprintf(stderr, "read %d bytes\n", n);
+      write(sockpair[0], inputbuffer, n);
+    }
+    exit(1);
+  }
+}
+
+#endif
+
+int fdtty;
 
 /**********************************/
 #define WINTITLEBAR 24
@@ -155,10 +244,6 @@ int islogger;
   pid = fork();
   if (pid)
   {
-  
-    /* PARENT */
-    signal(SIGDEAD, cleanup2);
-
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
 
@@ -168,6 +253,7 @@ int islogger;
   else
   {
     /* CHILD */
+    signal(SIGTERM, cleanup2);
     signal(SIGPIPE, cleanup2);
     
     /* Close the master side of the PTY */
@@ -810,8 +896,18 @@ void
 cleanup(sig)
 int sig;
 {
+  int i;
+	
   fprintf(stderr, "cleanup on %d\n", sig);
-  
+
+  close(fdtty);
+
+  /* kill all windows */
+  for(i=0; i<numwindows; i++)
+  {
+    kill(allwindows[i].pid, SIGTERM);
+  }
+
   EventDisable();
   ExitGraphics();
   FontClose(font);
@@ -820,22 +916,14 @@ int sig;
   exit(2);
 }
 
-void
-handleinput(sig)
-int sig;
-{
-  printf("handleinput on %d\n", sig);
-  
-}
-
 
 int
 main(argc, argv)
 int argc;
 char **argv;
 {
-  int n,i,j,k,rc,fdtty, dummysock;
-#ifdef POLLING
+  int n,i,j,k,rc,dummysock;
+#ifdef POLLINGINP
   struct in_sockaddr serv_addr;
 #endif
   fd_set fd_in;
@@ -850,10 +938,13 @@ char **argv;
   int framenum = 0;
   int last_read;
   
-  /* how do we detect child is dead? */
   signal(SIGINT, cleanup);
   signal(SIGTERM, cleanup);
   signal(SIGABORT, cleanup);
+
+  /* how do we detect which child is dead? */
+  signal(SIGDEAD, cleanup2);
+
 
 #ifdef __clang__XXXX
   /* watchdog */
@@ -874,11 +965,6 @@ char **argv;
   /* can we use a custom text render? */
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\n",usecustomblit);
-   
-  /* keyboard */
-  fdtty = open(ttyname(fileno(stdin)), O_RDWR);
-  fprintf(stderr, "reading %d from %s\n", fdtty, ttyname(fileno(stdin)));
-
 sleep(2);
 
   screen = InitGraphics(TRUE);
@@ -918,6 +1004,10 @@ sleep(2);
   WindowCreate("Console", 64-WINBORDER, 50, FALSE);
 #endif
 
+  /* keyboard */
+  fdtty = open(ttyname(fileno(stdin)), O_RDWR);
+  fprintf(stderr, "reading %s using fd(%d)\n", ttyname(fileno(stdin)), fdtty);
+
   /* CBREAK input */
   rc = gtty(fdtty, &new_term_settings);
   new_term_settings.sg_flag |= CBREAK | RAW;
@@ -931,10 +1021,12 @@ sleep(2);
   tcsetattr(fdtty, TCSANOW, &t);
 #endif
 
-   signal(SIGINPUT, handleinput);
-   signal(SIGEVT, handleinput);
+#ifdef USE_TTYREADER
+  //close(fdtty);
+	fprintf(stderr, "reading %s on socket(%d)\n", getttysock(&fdtty), fdtty);
+#endif
 
-#ifdef POLLING
+#ifdef POLLINGINP
   /* this is just so we can get a ms timeout! */
   dummysock = socket(AF_INET, SOCK_STREAM, 0);
   serv_addr.sin_family = AF_INET;
@@ -949,12 +1041,11 @@ sleep(2);
   last_read = 0;
   while (1)
   {
-
     /* check any outputs from master sides and track highest fd */
     FD_ZERO(&fd_in);
     FD_SET(dummysock, &fd_in);
     n = dummysock;
-#ifdef NOTPOLLING
+#ifndef POLLINGPTY
     for(i=0; i<numwindows; i++)
     {
       FD_SET(allwindows[i].master, &fd_in);
@@ -974,23 +1065,23 @@ sleep(2);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
   {
-    fprintf(stderr, "select(%d) error %d\n", n, errno);
+    fprintf(stderr, "select(%d) error %s\n", n, strerror(errno));
     exit(23);
   }
   else
-#ifdef NOTPOLLING
-  if (rc > 0)
-#else
+#ifdef POLLINGPTY | POLLINGINP
   if (rc == 0)
+#else
+  if (rc > 0)
 #endif
   {
     /* read any stdio input and send to topwindow input */
-#ifdef NOTPOLLING
-    if (FD_ISSET(fdtty, &fd_in))
-#else
+#ifdef POLLINGINP
     gtty(fdtty, &new_term_settings);
     last_read = (new_term_settings.sg_speed & INCHR) ? 5 : 0;
     if (last_read)
+#else
+    if (FD_ISSET(fdtty, &fd_in))
 #endif
     {
       n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
@@ -999,7 +1090,7 @@ sleep(2);
         n = (int)write(wintopmost->master, inputbuffer, n);
         if (n < 0)
         {
-       	  WindowDestroy(wintopmost - allwindows);
+       	  WindowDestroy((int)(wintopmost - allwindows));
         }
       }
     }
@@ -1007,11 +1098,12 @@ sleep(2);
     /* read any output from window process */
     for(i=0; i<numwindows; i++)
     {
+#ifdef POLLINGPTY
       n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
-#ifdef NOTPOLLING
-      if (FD_ISSET(allwindows[i].master, &fd_in))
+      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : 0;
+      if (last_read)
 #else
-      if ((n & PTY_OUTPUT_QUEUED))
+      if (FD_ISSET(allwindows[i].master, &fd_in))
 #endif
       {
         n = (int)read(allwindows[i].master, inputbuffer, sizeof(inputbuffer));
@@ -1034,7 +1126,7 @@ sleep(2);
     /* manage windows */
   {
 
-#ifdef __clang__
+#ifdef __clang__xxxx
      /*  THIS CALL TOTALLY HANGS THE MACHINE */
       /* tek4404 event system only used for keypress input */
       ev = (union EVENTUNION)EGetNext();
@@ -1048,11 +1140,7 @@ sleep(2);
 
 if (GetButtons() & M_MIDDLE)
 {
-  if (wintopmost)
-  {
-    kill(wintopmost->pid, SIGTERM);
-  }
-  break;
+  kill(0, SIGINT);
 }
 
       if (GetButtons() & M_LEFT)
