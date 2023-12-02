@@ -12,12 +12,16 @@
 #include <font.h>
 #include <graphics.h>
 
+#include <sys/task.h>
+#include <sys/userbl.h>
+
 #ifdef __clang__
 
 #include "uniflexshim.h"
 
 #define	AF_INTRA	AF_UNIX
 extern int kill();
+extern int wait();
 char *nget_str(char *name)
 {
 	if (!strcmp(name, "cur_tty"))
@@ -49,7 +53,7 @@ extern int open();
 #ifdef __clang__
 #define POLLINGPTYx
 #define POLLINGINPx
-#define USE_TTYREADER
+#define USE_TTYREADERx
 #else
 #define POLLINGPTY
 #define POLLINGINPx
@@ -71,7 +75,7 @@ char *getttysock(sockinput)
 int *sockinput;
 {
   struct sgttyb new_term_settings;
-	int rc,n;
+	int rc,n,fd;
 	char inputbuffer[128];
 	
 	if (sockpair[1] > 0)
@@ -91,29 +95,31 @@ int *sockinput;
   if ((readerpid = fork()))
   {
     close(sockpair[0]);
-    fprintf(stderr,"TTYREADER created using socket(%d)\n", sockpair[1]);
+    fprintf(stderr,"TTYREADER created using socket(%d) with proc(%d)\n", sockpair[1], readerpid);
 		*sockinput = sockpair[1];
 		return nget_str("cur_tty");
   }
   else
   {
+		fd = open("/dev/cnosole", O_RDWR);
+		
     /* CBREAK input */
-    rc = gtty(0, &new_term_settings);
-    new_term_settings.sg_flag |= CBREAK | RAW;
-    stty(0, &new_term_settings);
+    rc = gtty(fd, &new_term_settings);
+    new_term_settings.sg_flag |= CBREAK;
+    stty(fd, &new_term_settings);
 
 #ifdef __clang__
   /* modern OS no longer support stty as above */
   struct termios t = {};
-  tcgetattr(0, &t);
+  tcgetattr(fd, &t);
   t.c_lflag &= ~ICANON;
-  tcsetattr(0, TCSANOW, &t);
+  tcsetattr(fd, TCSANOW, &t);
 #endif
 
-    fprintf(stderr, "child entering read/write loop on socket(%d)\n", sockpair[0]);
+    fprintf(stderr, "child entering read/write loop on fd(%d) / socket(%d)\n", fd, sockpair[0]);
 
     /* read stdin & write forever */
-    while ((n = read(0, inputbuffer, sizeof(inputbuffer))) > 0)
+    while ((n = (int)read(fd, inputbuffer, sizeof(inputbuffer))) > 0)
     {
 			fprintf(stderr, "read %d bytes\n", n);
       write(sockpair[0], inputbuffer, n);
@@ -214,9 +220,12 @@ struct RECT *r2;
 int cleanup2(sig)
 int sig;
 {
-  int i;
 
+	close(0);
+	close(1);
+	close(2);
   fprintf(stderr," child dead of parent %d\n", getpid());
+	exit(sig);
 }
 
 int window_session(ptfd, islogger)
@@ -253,9 +262,15 @@ int islogger;
   else
   {
     /* CHILD */
-    signal(SIGTERM, cleanup2);
-    signal(SIGPIPE, cleanup2);
+    signal(SIGHUP, cleanup2);
+    signal(SIGINT, cleanup2);
+		signal(SIGQUIT, cleanup2);
     
+    signal(SIGTERM, cleanup2);
+
+    signal(SIGPIPE, cleanup2);
+
+
     /* Close the master side of the PTY */
     close(fdmaster);
 
@@ -264,11 +279,6 @@ int islogger;
 
     /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
-/*
-    new_term_settings.sg_flag |= RAW;
-    new_term_settings.sg_flag |= CRMOD;
-    new_term_settings.sg_flag |= XTABS;
-*/  
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
@@ -430,7 +440,7 @@ int islogger;
 
   /* term emu */
   win->vt.cols = 80;
-  win->vt.rows = 25;
+  win->vt.rows = 32;
   VTreset(&win->vt);
 
   /* size of text block */
@@ -942,11 +952,7 @@ char **argv;
   signal(SIGTERM, cleanup);
   signal(SIGABORT, cleanup);
 
-  /* how do we detect which child is dead? */
-  signal(SIGDEAD, cleanup2);
-
-
-#ifdef __clang__XXXX
+#if 0
   /* watchdog */
   signal(SIGALRM, cleanup);
   alarm(120);
@@ -965,7 +971,7 @@ char **argv;
   /* can we use a custom text render? */
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\n",usecustomblit);
-sleep(2);
+	sleep(2);
 
   screen = InitGraphics(TRUE);
   screenrect.x = 0;
@@ -1004,26 +1010,28 @@ sleep(2);
   WindowCreate("Console", 64-WINBORDER, 50, FALSE);
 #endif
 
+#ifdef USE_TTYREADER
+
+	fprintf(stderr, "reading %s on socket(%d)\n", getttysock(&fdtty), fdtty);
+#else
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
   fprintf(stderr, "reading %s using fd(%d)\n", ttyname(fileno(stdin)), fdtty);
 
   /* CBREAK input */
   rc = gtty(fdtty, &new_term_settings);
-  new_term_settings.sg_flag |= CBREAK | RAW;
+  new_term_settings.sg_flag |= CBREAK;
   stty(fdtty, &new_term_settings);
 
 #ifdef __clang__
   /* modern OS no longer support stty as above */
   struct termios t = {};
   tcgetattr(fdtty, &t);
-  t.c_lflag &= ~ICANON;
+  t.c_lflag &= ~(ICANON | ISIG | IEXTEN);
+  t.c_lflag |= (ECHO);
+  
   tcsetattr(fdtty, TCSANOW, &t);
 #endif
-
-#ifdef USE_TTYREADER
-  //close(fdtty);
-	fprintf(stderr, "reading %s on socket(%d)\n", getttysock(&fdtty), fdtty);
 #endif
 
 #ifdef POLLINGINP
@@ -1036,7 +1044,7 @@ sleep(2);
 #else
   dummysock = fdtty;
 #endif
-  
+
   /* mainloop */
   last_read = 0;
   while (1)
@@ -1062,6 +1070,7 @@ sleep(2);
       last_read--;
     }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+//fprintf(stderr, "select => %d\n", rc);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
   {
@@ -1116,7 +1125,9 @@ sleep(2);
         else
         if (n == 0)
         {
-          fprintf(stderr,"window%d destroyed\n", i);
+					rc = 0;
+					wait(&rc);
+          fprintf(stderr,"window%d destroyed because %04x\n", i, rc);
           WindowDestroy(i);
           break;
         }
@@ -1126,7 +1137,7 @@ sleep(2);
     /* manage windows */
   {
 
-#ifdef __clang__xxxx
+#ifdef __clang__
      /*  THIS CALL TOTALLY HANGS THE MACHINE */
       /* tek4404 event system only used for keypress input */
       ev = (union EVENTUNION)EGetNext();
@@ -1140,7 +1151,12 @@ sleep(2);
 
 if (GetButtons() & M_MIDDLE)
 {
-  kill(0, SIGINT);
+  /* kill all windows */
+  for(i=0; i<numwindows; i++)
+  {
+    kill(allwindows[i].pid, SIGTERM);
+  }
+
 }
 
       if (GetButtons() & M_LEFT)

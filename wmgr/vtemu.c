@@ -91,11 +91,13 @@ int dst,src,n;
 {
   int i;
 
+#if 0
   if (dst < 0 || dst + n > 25)
   {
     fprintf(stderr,"VTmovelines(%d %d)\n",dst,n);
     return;
   }
+#endif
 
     /* move the existing pixels */
     movedisplaylines(vt, dst, src, n);   
@@ -142,11 +144,13 @@ int dst,n;
 {
   int i;
 
+#if 0
   if (dst < 0 || dst + n > 25)
   {
     fprintf(stderr,"VTclearlines(%d %d)\n",dst,n);
     return;
   }
+#endif
 
     cleardisplaylines(vt, dst,n);
     
