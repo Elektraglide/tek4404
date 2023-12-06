@@ -15,13 +15,17 @@ char **argv;
 {
   int fd,n;
   HistoryRecord record;
-    
+  char buffer[32];
+      
    fd = open("/act/history", O_RDONLY);	
   if (fd > 0)
   {
     while((n = read(fd, &record, sizeof(record))) > 0)
     {
-      printf("%s\t%02s", ctime(&record.timestamp), record.code);
+      strcpy(buffer, ctime(&record.timestamp));
+      /* no CR */
+      buffer[24] = '\0';
+      printf("%s\t%02s\n", buffer, record.code);
     }
     close(fd);
   }
