@@ -21,7 +21,7 @@ char **argv;
   {
     while((n = read(fd, &record, sizeof(record))) > 0)
     {
-      printf("%02s %s\n", record.code, ctime(&record.timestamp));
+      printf("%s\t%02s", ctime(&record.timestamp), record.code);
     }
     close(fd);
   }
