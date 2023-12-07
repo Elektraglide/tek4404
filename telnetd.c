@@ -1,10 +1,14 @@
+/*
+Ctrl-C is received  but writing to fdmaster does not send SIGINT
+Is that shell ignoring it, or broken pty implementation?
+
+*/
 #include <stdio.h>
 #include <string.h>
 #include <errno.h> 
 #include <sys/fcntl.h>
 #include <sys/pty.h>
 #include <sys/sgtty.h>
-#include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <signal.h>
 
@@ -29,6 +33,7 @@ char *telnetprocess[] = {"shell", NULL};
 #else
 
 extern int open();
+extern int wait();
 
 #define in_sockaddr sockaddr_in
 #define  IPO_TELNET	  23
@@ -264,9 +269,10 @@ void
 cleanup2(sig)
 int sig;
 {
+	int result;
+	
   fprintf(stderr,"cleanup telnet session on %d\n",sig);
   close(sessionsock);
-  exit(0);
 }
 
 char hex[3];
@@ -328,15 +334,23 @@ char **argv;
   fdslave = ptfd[0];
   fdmaster = ptfd[1];
 
-    fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
+  fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
 
-    sessionsock = socket;
-    signal(SIGQUIT, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTERM, cleanup2);
-    signal(SIGPIPE, cleanup2);
-    signal(SIGDEAD, cleanup2);
+    /* Save the defaults parameters of the slave side of the PTY */
+    rc = gtty(fdmaster, &new_term_settings);
+    new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_flag |= XTABS;
+    new_term_settings.sg_flag &= ~ECHO;
+    new_term_settings.sg_flag &= ~RAW;
+    stty(fdmaster, &new_term_settings);
+
+  sessionsock = socket;
+  signal(SIGQUIT, SIG_DFL);
+  signal(SIGHUP, SIG_DFL);
+  signal(SIGINT, SIG_DFL);
+  signal(SIGTERM, cleanup2);
+  signal(SIGPIPE, cleanup2);
+  signal(SIGDEAD, cleanup2);
 
   sessionpid = fork();
   if (sessionpid)
@@ -344,10 +358,7 @@ char **argv;
     /* PARENT */
     
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
-    n |= PTY_REMOTE_MODE;
-#if 1
     n |= PTY_READ_WAIT; 
-#endif
     control_pty(fdmaster, PTY_SET_MODE, n );
 
     /* motd; Uniflex maps \n to \r so force it in */
@@ -371,11 +382,11 @@ char **argv;
 
     /* Close the slave side of the PTY */
     close(fdslave);
-    
-   last_was_cr = 0;
-   last_read = 0;
-    while (1)
-    {
+
+  last_was_cr = 0;
+  last_read = 0;
+  while(state != STOPPED)
+  {
       /* Uniflex select appears to only expect actual socket fds */
       /* having stdin in the FD_SET wreaks havoc */
       timeout.tv_sec = 0;
@@ -405,7 +416,7 @@ char **argv;
       if (rc < 0)
       {
           fprintf(stderr, "select() error %d\n", errno);
-          exit(errno);
+          break;
       }
 
       if (rc == 0)
@@ -428,7 +439,7 @@ char **argv;
             {
               if (errno != EINTR)
               {
-                exit(1);
+								break;
               }
 
               continue;
@@ -462,7 +473,7 @@ char **argv;
             {
               if (errno != EINTR)
               {
-                exit(errno);
+								break;
               }
               continue;
             }
@@ -487,8 +498,8 @@ char **argv;
 #ifdef __clang__
       if (FD_ISSET(fdmaster, &fd_in))
 #else
-      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : 0;
-      if (last_read)
+      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
+      if (n & PTY_OUTPUT_QUEUED)
 #endif
       {
         /* Data arrived from application */
@@ -503,24 +514,16 @@ char **argv;
           {
             if (errno != EINTR)
             {
-              exit(errno);
+							break;
             }
             continue;
           }
 
           if (n == 0)
           {
-#ifndef __clang__
-           /* this normally means half closed, but we get these all the time */
-            if (errno != 0)
-#endif
-            {
               fprintf(stderr,"broken connection\n");
               close(socket);
-              exit(errno);
-            }
-
-            readspin++;
+              break;
           }
           else
           if (n == 4096)
@@ -542,8 +545,7 @@ char **argv;
           ts.bo.end = ts.bo.data + n;
         }
 
-        /* try and totally drain */
-        while (ts.bo.start != ts.bo.end) 
+        if (ts.bo.start != ts.bo.end)
         {
 #ifdef DEBUG
           fprintf(stderr, "writing %d bytes to %d\n", ts.bo.end - ts.bo.start, socket);
@@ -552,7 +554,7 @@ char **argv;
           n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
           if (n < 0)
           {
-            exit(errno);
+						break;
           }
           if (n < ts.bo.end - ts.bo.start)
           {
@@ -562,6 +564,10 @@ char **argv;
         }
       }
     }
+    
+    /* collect child process */
+    wait(&rc);
+    
   }
   else
   {
@@ -572,19 +578,11 @@ char **argv;
 
     /* Save the defaults parameters of the slave side of the PTY */
     rc = gtty(fdslave, &slave_orig_term_settings);
-
-    /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
-    /*
-    new_term_settings.sg_flag |= XTABS;
-    new_term_settings.sg_flag |= CNTRL;
-    new_term_settings.sg_flag |= RAW;
-  */
- 
-    new_term_settings.sg_flag |= RAW;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag |= XTABS;
     new_term_settings.sg_flag &= ~ECHO;
+    new_term_settings.sg_flag &= ~RAW;
     stty(fdslave, &new_term_settings);
     fprintf(stderr,"terminal sg_flag(%x)\n", new_term_settings.sg_flag);
 
@@ -613,7 +611,7 @@ char **argv;
     /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-   close(fdslave); 
+    /* close(fdslave); */
 
     /* Make the current process a new session leader */
     setsid();
@@ -632,8 +630,8 @@ char **argv;
     return errno;
   }
 
-  fprintf(stderr, "EXIT\n");
-  return 0;
+  fprintf(stderr, "EXIT telnet_session\n");
+  return errno;
 }
 
 void
@@ -644,6 +642,17 @@ int sig;
 
   close(sock);
   state = STOPPED;
+}
+void
+cleanup_session(sig)
+int sig;
+{
+  int rc;
+  
+  wait(&rc);
+  fprintf(stderr,"cleanup session: %2.2x\n",rc);
+
+  signal(SIGDEAD, cleanup_session);
 }
 
 int
@@ -684,6 +693,8 @@ char **argv;
    signal(SIGQUIT, cleanup);
    signal(SIGTERM, cleanup);
 
+   signal(SIGDEAD, cleanup_session);
+
   rc = listen(sock, 5);
   if (rc < 0) {
     fprintf(stderr, "listen: %s\n",strerror(errno));
@@ -693,16 +704,23 @@ char **argv;
 
   fprintf(stderr, "telnetd started\n");
   state = RUNNING;
-  while (state == RUNNING) {
+  while (state == RUNNING) 
+  {
     fprintf(stderr,"telnet: waiting to accept\n");
 
-    newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
-    if (state == STOPPED) break;
-    if (newsock < 0) {
-      fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
-      close(sock);
-      return errno;
+    newsock = 0;
+    while (state == RUNNING && newsock <= 0)
+    {
+      newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
+      if (errno == EINTR) continue;	
+      if (newsock < 0){ 
+        fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
+        close(sock);
+        return errno;
+      }
     }
+    
+    if (state == STOPPED) break;
 
 #ifndef __clang__
     setsockopt(sock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0);
