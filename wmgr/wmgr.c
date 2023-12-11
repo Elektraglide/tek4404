@@ -1,3 +1,4 @@
+	
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -12,9 +13,6 @@
 #include <font.h>
 #include <graphics.h>
 
-#include <sys/task.h>
-#include <sys/userbl.h>
-
 #ifdef __clang__
 
 #include "uniflexshim.h"
@@ -24,15 +22,15 @@ extern int kill();
 extern int wait();
 char *nget_str(char *name)
 {
-	if (!strcmp(name, "cur_tty"))
-		return ttyname(fileno(stdin));
+  if (!strcmp(name, "cur_tty"))
+    return ttyname(fileno(stdin));
 		
-	return "unknown";
+  return "unknown";
 }
 
 char *nserror()
 {
-	return strerror(errno);
+  return strerror(errno);
 }
 
 #else
@@ -67,22 +65,31 @@ int readerpid = 0;
 void ttycleanup(sig)
 int sig;
 {
-		if (readerpid)
-			kill(readerpid,SIGKILL);
+  int i,pid;
+	
+  if (readerpid)
+  {
+    kill(readerpid,SIGKILL);
+    
+    close(sockpair[1]);
+    readerpid = 0;
+  }
+  fprintf(stderr, "waiting to reap ttyreader\012\n");	
+  pid = wait(&i);
 }
 
 char *getttysock(sockinput)
 int *sockinput;
 {
   struct sgttyb new_term_settings;
-	int rc,n,fd;
-	char inputbuffer[128];
+  int rc,n,fd;
+  char inputbuffer[128];
 	
-	if (sockpair[1] > 0)
-	{
-		*sockinput = sockpair[1];
-		return  nget_str("cur_tty");
-	}
+  if (sockpair[1] > 0)
+  {
+    *sockinput = sockpair[1];
+    return  nget_str("cur_tty");
+  }
 
   /* setup an input reader process */
   rc = socketpair(AF_INTRA,SOCK_DGRAM,0, sockpair);
@@ -94,18 +101,17 @@ int *sockinput;
   
   if ((readerpid = fork()))
   {
-    close(sockpair[0]);
-    fprintf(stderr,"TTYREADER created using socket(%d) with proc(%d)\n", sockpair[1], readerpid);
-		*sockinput = sockpair[1];
-		return nget_str("cur_tty");
+    /* close(sockpair[0]); */
+    *sockinput = sockpair[1];
+    return nget_str("cur_tty");
   }
   else
   {
-		fd = open("/dev/cnosole", O_RDWR);
+    fd = fileno(stdin);
 		
     /* CBREAK input */
     rc = gtty(fd, &new_term_settings);
-    new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_flag |= CBREAK | RAW;
     stty(fd, &new_term_settings);
 
 #ifdef __clang__
@@ -116,14 +122,13 @@ int *sockinput;
   tcsetattr(fd, TCSANOW, &t);
 #endif
 
-    fprintf(stderr, "child entering read/write loop on fd(%d) / socket(%d)\n", fd, sockpair[0]);
-
     /* read stdin & write forever */
     while ((n = (int)read(fd, inputbuffer, sizeof(inputbuffer))) > 0)
     {
-			fprintf(stderr, "read %d bytes\n", n);
-      write(sockpair[0], inputbuffer, n);
+      n = write(sockpair[0], inputbuffer, n);
     }
+
+    fprintf(stderr, "ttyreader exit\012\n");
     exit(1);
   }
 }
@@ -169,7 +174,7 @@ int numwindows = 0;
 #ifdef __clang__
 char *winprocess[] = {"sh", NULL};
 #else
-char *winprocess[] = {"shell", NULL};
+char *winprocess[] = {"ash", NULL};
 #endif
 char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
@@ -221,11 +226,8 @@ int cleanup2(sig)
 int sig;
 {
 
-	close(0);
-	close(1);
-	close(2);
   fprintf(stderr," child dead of parent %d\n", getpid());
-	exit(sig);
+  exit(sig);
 }
 
 int window_session(ptfd, islogger)
@@ -264,12 +266,9 @@ int islogger;
     /* CHILD */
     signal(SIGHUP, cleanup2);
     signal(SIGINT, cleanup2);
-		signal(SIGQUIT, cleanup2);
-    
+    signal(SIGQUIT, cleanup2);    
     signal(SIGTERM, cleanup2);
-
     signal(SIGPIPE, cleanup2);
-
 
     /* Close the master side of the PTY */
     close(fdmaster);
@@ -526,7 +525,7 @@ int x, y;
 }
 
 void renderstring(line, n, ox, oy)
-char *line;
+register char *line;
 int n,ox,oy;
 {
   register int j,k,rows,ch;
@@ -910,7 +909,11 @@ int sig;
 	
   fprintf(stderr, "cleanup on %d\n", sig);
 
+#ifdef USE_TTYREADER
+	ttycleanup(sig);
+#else
   close(fdtty);
+#endif
 
   /* kill all windows */
   for(i=0; i<numwindows; i++)
@@ -926,6 +929,25 @@ int sig;
   exit(2);
 }
 
+void
+cleanup_window(sig)
+int sig;
+{
+  int i,pid;
+
+  pid = wait(&i);
+  fprintf(stderr, "child proc(%d) died\012\n", pid);
+  for(i=0; i<numwindows; i++)
+  {
+    if (allwindows[i].pid == pid)
+    {
+      WindowDestroy(i);
+      break;
+    }
+  }
+  
+  signal(SIGDEAD, cleanup_window);
+}
 
 int
 main(argc, argv)
@@ -951,6 +973,8 @@ char **argv;
   signal(SIGINT, cleanup);
   signal(SIGTERM, cleanup);
   signal(SIGABORT, cleanup);
+  
+  signal(SIGDEAD, cleanup_window);
 
 #if 0
   /* watchdog */
@@ -1012,15 +1036,18 @@ char **argv;
 
 #ifdef USE_TTYREADER
 
-	fprintf(stderr, "reading %s on socket(%d)\n", getttysock(&fdtty), fdtty);
-#else
+  fprintf(stderr, "reading %s on socket(%d)\012\n", getttysock(&fdtty), fdtty);
+
+#endif
+
+#ifdef POLLINGINP
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
-  fprintf(stderr, "reading %s using fd(%d)\n", ttyname(fileno(stdin)), fdtty);
+  fprintf(stderr, "reading %s using fd(%d)\012\n", ttyname(fileno(stdin)), fdtty);
 
   /* CBREAK input */
   rc = gtty(fdtty, &new_term_settings);
-  new_term_settings.sg_flag |= CBREAK;
+  new_term_settings.sg_flag |= CBREAK | RAW;
   stty(fdtty, &new_term_settings);
 
 #ifdef __clang__
@@ -1070,7 +1097,6 @@ char **argv;
       last_read--;
     }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
-//fprintf(stderr, "select => %d\n", rc);
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
   {
@@ -1079,7 +1105,6 @@ char **argv;
   }
   else
 #ifdef POLLINGPTY | POLLINGINP
-  if (rc == 0)
 #else
   if (rc > 0)
 #endif
@@ -1087,8 +1112,8 @@ char **argv;
     /* read any stdio input and send to topwindow input */
 #ifdef POLLINGINP
     gtty(fdtty, &new_term_settings);
-    last_read = (new_term_settings.sg_speed & INCHR) ? 5 : 0;
-    if (last_read)
+    last_read = (new_term_settings.sg_speed & INCHR) ? 5 : last_read;
+    if (new_term_settings.sg_speed & INCHR)
 #else
     if (FD_ISSET(fdtty, &fd_in))
 #endif
@@ -1109,8 +1134,8 @@ char **argv;
     {
 #ifdef POLLINGPTY
       n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
-      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : 0;
-      if (last_read)
+      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
+      if (n & PTY_OUTPUT_QUEUED)
 #else
       if (FD_ISSET(allwindows[i].master, &fd_in))
 #endif
@@ -1125,8 +1150,8 @@ char **argv;
         else
         if (n == 0)
         {
-					rc = 0;
-					wait(&rc);
+	  rc = 0;
+	  wait(&rc);
           fprintf(stderr,"window%d destroyed because %04x\n", i, rc);
           WindowDestroy(i);
           break;
@@ -1134,7 +1159,7 @@ char **argv;
       }
     }
   }
-    /* manage windows */
+  /* manage windows */
   {
 
 #ifdef __clang__
@@ -1156,7 +1181,7 @@ if (GetButtons() & M_MIDDLE)
   {
     kill(allwindows[i].pid, SIGTERM);
   }
-
+  exit(0);
 }
 
       if (GetButtons() & M_LEFT)

@@ -91,13 +91,11 @@ int dst,src,n;
 {
   int i;
 
-#if 0
-  if (dst < 0 || dst + n > 25)
+  if (dst < 0 || dst + n > 32)
   {
     fprintf(stderr,"VTmovelines(%d %d)\n",dst,n);
     return;
   }
-#endif
 
     /* move the existing pixels */
     movedisplaylines(vt, dst, src, n);   
@@ -144,13 +142,11 @@ int dst,n;
 {
   int i;
 
-#if 0
-  if (dst < 0 || dst + n > 25)
+  if (dst < 0 || dst + n > 32)
   {
     fprintf(stderr,"VTclearlines(%d %d)\n",dst,n);
     return;
   }
-#endif
 
     cleardisplaylines(vt, dst,n);
     
@@ -215,7 +211,7 @@ int asciinum2(msg, defval)
 char *msg;
 int defval;
 {
-  int c = 0;
+  register int c = 0;
 
   for(c=0; c<8; c++)
   {
@@ -300,8 +296,8 @@ int i;
 }
 
 int VToutput(vt, msg, n, fdout)
-VTemu *vt;
-char *msg;
+register VTemu *vt;
+register char *msg;
 int n;
 int fdout;
 {
