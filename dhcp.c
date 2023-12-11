@@ -321,10 +321,10 @@ dhcp_t *dhcp;
 
     option = DHCP_OPTION_DISCOVER;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
-
+#if 0
     req_ip = htonl(0xc0a8013d); /* 192.168.0.64 */
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
-
+#endif
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_PARAMETER_REQ_LIST, (unsigned char *)&parameter_req_list, sizeof(parameter_req_list));
 
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
@@ -370,6 +370,79 @@ unsigned char *mac;
 #endif
 
       if (verbose)
+      fprintf(stderr, "Sending %d bytes to %s : %d\n", len, inet_ntoa(server.sin_addr.s_addr), ntohs(server.sin_port));
+    print_buffer(packet, len);
+
+    if (sendto(sock, packet, len, MSG_FDBROADCAST, (struct sockaddr *)&server, sizeof(server)) != len)
+    {
+      fprintf(stderr, "sendto: %s\n",strerror(errno));
+      return errno;
+    }
+    if (verbose)
+      fprintf(stderr, "SENT --------\n");
+    return 0;
+}
+
+/*
+ * Fill DHCP options
+ */
+static int
+fill_dhcp_request_options(dhcp)
+dhcp_t *dhcp;
+{
+    int len = 0;
+    unsigned int req_ip;
+    unsigned char option;
+
+    option = DHCP_OPTION_REQUEST;
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
+
+    req_ip = htonl(0xc0a8013d); /* 192.168.1.61 */
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
+
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
+
+    option = 0;
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_END, &option, sizeof(option));
+
+    return len;
+}
+
+/*
+ * Send DHCP REQUEST packet
+ */
+int
+dhcp_request(mac)
+unsigned char *mac;
+{
+    int i,len = 0;
+    unsigned char buffer[4096];
+    unsigned char *packet;
+    dhcp_t *dhcp_payload;
+    struct sockaddr_in server;
+    struct in_addr ipaddr;
+
+    if (verbose)
+      fprintf(stderr, "Sending DHCP_REQUEST\n");
+
+    memset(buffer, 0, sizeof(buffer));
+    dhcp_payload = (dhcp_t *)buffer;
+
+    /* build payload */
+    len = fill_dhcp_request_options(dhcp_payload);
+    dhcp_output(dhcp_payload, mac, &len); packet = (unsigned char *)dhcp_payload;
+
+    /* actually send it to DHCP server */
+    memset(&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_port = htons(DHCP_SERVER_PORT);
+#ifndef __clang__
+    server.sin_addr.s_addr = my_inet_addr(DHCP_SERVER);
+#else
+    server.sin_addr.s_addr = inet_addr(DHCP_SERVER);
+#endif
+
+    if (verbose)
       fprintf(stderr, "Sending %d bytes to %s : %d\n", len, inet_ntoa(server.sin_addr.s_addr), ntohs(server.sin_port));
     print_buffer(packet, len);
 
@@ -477,6 +550,13 @@ char **argv;
     {
       ip = ntohl(dhcp->yiaddr);
       printf("%s", inet_ntoa(dhcp->yiaddr));
+
+      rc = dhcp_request(mac);
+      if (rc)
+      {
+        exit(rc);
+      }
+      
       break;
     }
   }
