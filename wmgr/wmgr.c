@@ -69,7 +69,7 @@ int sig;
 	
   if (readerpid)
   {
-    kill(readerpid,SIGKILL);
+    kill(readerpid,SIGINT);
     
     close(sockpair[1]);
     readerpid = 0;
@@ -910,7 +910,7 @@ int sig;
   fprintf(stderr, "cleanup on %d\n", sig);
 
 #ifdef USE_TTYREADER
-	ttycleanup(sig);
+  ttycleanup(sig);
 #else
   close(fdtty);
 #endif
@@ -1176,6 +1176,10 @@ char **argv;
 
 if (GetButtons() & M_MIDDLE)
 {
+#ifdef USE_TTYREADER
+  ttycleanup(0);
+#endif
+  
   /* kill all windows */
   for(i=0; i<numwindows; i++)
   {
