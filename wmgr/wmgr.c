@@ -69,8 +69,9 @@ int sig;
 	
   if (readerpid)
   {
-    kill(readerpid,SIGINT);
-    
+    kill(readerpid,SIGTERM);
+    sleep(1);
+        
     close(sockpair[1]);
     readerpid = 0;
   }
@@ -555,7 +556,9 @@ int forcedirty;
 {
   struct RECT r,glyph;
   struct POINT origin;
-  int i,j,k,n,style,numlines,ch,rows;
+  struct POINT strpos;
+  register int j,k;
+  int i,n,style,numlines,ch,rows;
   char line[160];
   unsigned char *src,*dst;
 
@@ -661,14 +664,16 @@ int forcedirty;
             {
               /* flush so far */
               line[n] = '\0';
-              StringDrawX(line, &origin, &bb, font);
+              strpos = origin;
+              StringDrawX(line, &strpos, &bb, font);
 
               /* bold needs drawing again */
               if (style & vtBOLD)
               {
                 origin.x += 1;
                 bb.rule = bbSorD;
-                StringDrawX(line, &origin, &bb, font);
+                strpos = origin;
+                StringDrawX(line, &strpos, &bb, font);
                 origin.x -= 1;
               }
 
@@ -693,7 +698,8 @@ int forcedirty;
           }
           else
           {
-            StringDrawX(line, &origin, &bb, font);
+            strpos = origin;
+            StringDrawX(line, &strpos, &bb, font);
           }
           
           numlines++;
@@ -920,7 +926,8 @@ int sig;
   {
     kill(allwindows[i].pid, SIGTERM);
   }
-
+  sleep(1);
+  
   EventDisable();
   ExitGraphics();
   FontClose(font);
