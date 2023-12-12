@@ -77,6 +77,7 @@ int sig;
   }
   fprintf(stderr, "waiting to reap ttyreader\012\n");	
   pid = wait(&i);
+  fprintf(stderr, "pid=%d\012\n", pid);
 }
 
 char *getttysock(sockinput)
@@ -108,6 +109,8 @@ int *sockinput;
   }
   else
   {
+		signal(SIGINT, SIG_IGN);
+  
     fd = fileno(stdin);
 		
     /* CBREAK input */
@@ -223,11 +226,11 @@ struct RECT *r2;
   return 0;	
 }
 
-int cleanup2(sig)
+int cleanup_child(sig)
 int sig;
 {
 
-  fprintf(stderr," child dead of parent %d\n", getpid());
+  fprintf(stderr,"signal(%d): child of parent %d\n", sig, getpid());
   exit(sig);
 }
 
@@ -257,7 +260,7 @@ int islogger;
   if (pid)
   {
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
-    control_pty(fdmaster, PTY_SET_MODE, n | PTY_REMOTE_MODE);
+    control_pty(fdmaster, PTY_SET_MODE, n | PTY_READ_WAIT);
 
     /* Close the slave side of the PTY */
     /* Needed to get ttyname() close(fdslave);  */
@@ -265,19 +268,18 @@ int islogger;
   else
   {
     /* CHILD */
-    signal(SIGHUP, cleanup2);
-    signal(SIGINT, cleanup2);
-    signal(SIGQUIT, cleanup2);    
-    signal(SIGTERM, cleanup2);
-    signal(SIGPIPE, cleanup2);
+    signal(SIGHUP, cleanup_child);
+    signal(SIGINT, cleanup_child);
+    signal(SIGQUIT, cleanup_child);    
+    signal(SIGTERM, cleanup_child);
+    signal(SIGPIPE, cleanup_child);
+		signal(SIGDEAD, SIG_DFL);
 
     /* Close the master side of the PTY */
     close(fdmaster);
 
     /* Save the defaults parameters of the slave side of the PTY */
     rc = gtty(fdslave, &slave_orig_term_settings);
-
-    /* Set RAW mode on slave side of PTY */
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
@@ -908,18 +910,12 @@ int wid;
 }
 
 void
-cleanup(sig)
+cleanup_and_exit(sig)
 int sig;
 {
   int i;
 	
   fprintf(stderr, "cleanup on %d\n", sig);
-
-#ifdef USE_TTYREADER
-  ttycleanup(sig);
-#else
-  close(fdtty);
-#endif
 
   /* kill all windows */
   for(i=0; i<numwindows; i++)
@@ -928,6 +924,12 @@ int sig;
   }
   sleep(1);
   
+#ifdef USE_TTYREADER
+  ttycleanup(sig);
+#else
+  close(fdtty);
+#endif
+
   EventDisable();
   ExitGraphics();
   FontClose(font);
@@ -977,9 +979,8 @@ char **argv;
   int framenum = 0;
   int last_read;
   
-  signal(SIGINT, cleanup);
-  signal(SIGTERM, cleanup);
-  signal(SIGABORT, cleanup);
+  signal(SIGINT, cleanup_and_exit);
+  signal(SIGTERM, cleanup_and_exit);
   
   signal(SIGDEAD, cleanup_window);
 
@@ -1183,15 +1184,7 @@ char **argv;
 
 if (GetButtons() & M_MIDDLE)
 {
-#ifdef USE_TTYREADER
-  ttycleanup(0);
-#endif
-  
-  /* kill all windows */
-  for(i=0; i<numwindows; i++)
-  {
-    kill(allwindows[i].pid, SIGTERM);
-  }
+	cleanup_and_exit(0);
   exit(0);
 }
 
