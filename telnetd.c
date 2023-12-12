@@ -269,7 +269,7 @@ struct termstate *ts;
 
 /************************************************/
 void
-cleanup2(sig)
+cleanup_child(sig)
 int sig;
 {
 	int result;
@@ -347,9 +347,10 @@ char *from;
     stty(fdmaster, &new_term_settings);
 
   sessionsock = socket;
-  signal(SIGTERM, cleanup2);
-  signal(SIGPIPE, cleanup2);
-  signal(SIGDEAD, cleanup2);
+  signal(SIGPIPE, cleanup_child);
+  signal(SIGDEAD, cleanup_child);
+
+  signal(SIGINT, SIG_DFL);
 
   sessionpid = fork();
   if (sessionpid)
@@ -571,21 +572,12 @@ char *from;
   else
   {
     /* CHILD */
-    signal(SIGQUIT, SIG_DFL);
     signal(SIGHUP, SIG_DFL);
     signal(SIGINT, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
 
     /* Close the master side of the PTY */
     close(fdmaster);
-
-    /* Save the defaults parameters of the slave side of the PTY */
-    rc = gtty(fdslave, &slave_orig_term_settings);
-    new_term_settings = slave_orig_term_settings;
-    new_term_settings.sg_flag |= CBREAK;
-    new_term_settings.sg_flag |= XTABS;
-    new_term_settings.sg_flag &= ~ECHO;
-    new_term_settings.sg_flag &= ~RAW;
-    stty(fdslave, &new_term_settings);
 
     /* make a friendly name */
     strcpy(sessionname, "telnet_");
@@ -632,7 +624,7 @@ char *from;
 }
 
 void
-cleanup(sig)
+cleanup_and_exit(sig)
 int sig;
 {
   fprintf(stderr,"cleanup telnetd on %d\n",sig);
@@ -644,9 +636,9 @@ void
 cleanup_session(sig)
 int sig;
 {
-  int rc;
+  int rc,pid;
   
-  wait(&rc);
+  pid = wait(&rc);
   fprintf(stderr,"cleanup session: %2.2x\n",rc);
 
   signal(SIGDEAD, cleanup_session);
@@ -687,8 +679,9 @@ char **argv;
   }
 
    signal(SIGINT, SIG_IGN);
-   signal(SIGQUIT, cleanup);
-   signal(SIGTERM, cleanup);
+   signal(SIGQUIT, SIG_IGN);
+   
+   signal(SIGTERM, cleanup_and_exit);
 
    signal(SIGDEAD, cleanup_session);
 
