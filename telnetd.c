@@ -27,7 +27,7 @@ typedef int socklen_t;
 void setsid() {}
 
 socketopt opt;
-char *telnetprocess[] = {"shell", NULL};
+char *telnetprocess[] = {"ash", NULL};
 
 
 #else
@@ -91,6 +91,9 @@ int sessionsock;
 
 int off = 0;
 int on = 1;
+
+char sessionname[64];
+char *sessionargv[2];
 
 struct buffer {
   unsigned char data[4096];
@@ -285,10 +288,9 @@ int val;
   return(hex);
 }
 
-int telnet_session(socket,argc,argv)
+int telnet_session(socket,from)
 int socket;
-int argc;
-char **argv;
+char *from;
 {
   struct termstate ts;
   int ptfd[2];
@@ -345,9 +347,6 @@ char **argv;
     stty(fdmaster, &new_term_settings);
 
   sessionsock = socket;
-  signal(SIGQUIT, SIG_DFL);
-  signal(SIGHUP, SIG_DFL);
-  signal(SIGINT, SIG_DFL);
   signal(SIGTERM, cleanup2);
   signal(SIGPIPE, cleanup2);
   signal(SIGDEAD, cleanup2);
@@ -572,6 +571,9 @@ char **argv;
   else
   {
     /* CHILD */
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
+    signal(SIGINT, SIG_DFL);
 
     /* Close the master side of the PTY */
     close(fdmaster);
@@ -584,18 +586,13 @@ char **argv;
     new_term_settings.sg_flag &= ~ECHO;
     new_term_settings.sg_flag &= ~RAW;
     stty(fdslave, &new_term_settings);
-    fprintf(stderr,"terminal sg_flag(%x)\n", new_term_settings.sg_flag);
 
-    fprintf(stderr, "telnet session: isatty(%d) ttyname(%s)\n", isatty(fdslave),ttyname(fdslave));
-
-
-#if 1
-    /* The slave side of the PTY becomes the stdin/stdout/stderr of process */
-    close(0); /* Close standard input (current terminal) */
-    close(1); /* Close standard output (current terminal) */
-    close(2); /* Close standard error (current terminal) */
-#endif
-
+    /* make a friendly name */
+    strcpy(sessionname, "telnet_");
+    strcat(sessionname, from);
+    sessionargv[0] = sessionname;
+    sessionargv[1] = NULL;
+  		
     /* does opening the  ptty make it controlling? */
     /*
       https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
@@ -619,7 +616,7 @@ char **argv;
     /* Execution of the program */
     {
       /* launch cmd */
-      rc = execvp(telnetprocess[0], telnetprocess);
+      rc = execvp(telnetprocess[0], sessionargv);
       if (rc < 0)
       {
         fprintf(stderr, "Error %d on exec\n", errno);
@@ -739,7 +736,7 @@ char **argv;
     {
       argv[0] = "client";
 
-      rc = telnet_session(newsock, argc, argv);
+      rc = telnet_session(newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
       fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
       break;
     }
