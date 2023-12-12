@@ -313,7 +313,8 @@ dhcp_t *dhcp;
     unsigned int req_ip;
     unsigned char parameter_req_list[4];
     unsigned char option;
-
+    char *name;
+    
     parameter_req_list[0] = MESSAGE_TYPE_REQ_SUBNET_MASK;
     parameter_req_list[1] = MESSAGE_TYPE_ROUTER;
     parameter_req_list[2] = MESSAGE_TYPE_DNS;
@@ -321,13 +322,10 @@ dhcp_t *dhcp;
 
     option = DHCP_OPTION_DISCOVER;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
-#if 0
-    req_ip = htonl(0xc0a8013d); /* 192.168.0.64 */
-    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
-#endif
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_PARAMETER_REQ_LIST, (unsigned char *)&parameter_req_list, sizeof(parameter_req_list));
 
-    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
+    name = nget_str("my_name");
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)name, strlen(name));
 
     option = 0;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_END, &option, sizeof(option));
@@ -387,20 +385,21 @@ unsigned char *mac;
  * Fill DHCP options
  */
 static int
-fill_dhcp_request_options(dhcp)
+fill_dhcp_request_options(dhcp,req_ip)
 dhcp_t *dhcp;
+unsigned int req_ip;
 {
     int len = 0;
-    unsigned int req_ip;
     unsigned char option;
-
+    char *name;
+    
     option = DHCP_OPTION_REQUEST;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_DHCP, &option, sizeof(option));
 
-    req_ip = htonl(0xc0a8013d); /* 192.168.1.61 */
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_REQ_IP, (unsigned char *)&req_ip, sizeof(req_ip));
 
-    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)"TEK4404", 8);
+    name = nget_str("my_name");
+    len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_HOSTNAME, (unsigned char *)name, strlen(name));
 
     option = 0;
     len += fill_dhcp_option(&dhcp->bp_options[len], MESSAGE_TYPE_END, &option, sizeof(option));
@@ -412,8 +411,9 @@ dhcp_t *dhcp;
  * Send DHCP REQUEST packet
  */
 int
-dhcp_request(mac)
+dhcp_request(mac, req_ip)
 unsigned char *mac;
+unsigned int req_ip;
 {
     int i,len = 0;
     unsigned char buffer[4096];
@@ -429,7 +429,7 @@ unsigned char *mac;
     dhcp_payload = (dhcp_t *)buffer;
 
     /* build payload */
-    len = fill_dhcp_request_options(dhcp_payload);
+    len = fill_dhcp_request_options(dhcp_payload, req_ip);
     dhcp_output(dhcp_payload, mac, &len); packet = (unsigned char *)dhcp_payload;
 
     /* actually send it to DHCP server */
@@ -551,7 +551,7 @@ char **argv;
       ip = ntohl(dhcp->yiaddr);
       printf("%s", inet_ntoa(dhcp->yiaddr));
 
-      rc = dhcp_request(mac);
+      rc = dhcp_request(mac, dhcp->yiaddr);
       if (rc)
       {
         exit(rc);
