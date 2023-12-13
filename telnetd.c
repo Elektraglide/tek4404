@@ -1,6 +1,7 @@
 /*
 Ctrl-C is received  but writing to fdmaster does not send SIGINT
 Is that shell ignoring it, or broken pty implementation?
+Appears to be broken pty implementation AND shell ignoring SIGINT
 
 */
 #include <stdio.h>
@@ -268,16 +269,6 @@ struct termstate *ts;
 }
 
 /************************************************/
-void
-cleanup_child(sig)
-int sig;
-{
-	int result;
-	
-  fprintf(stderr,"cleanup telnet session on %d\n",sig);
-  close(sessionsock);
-}
-
 char hex[3];
 char *int2hex(val)
 int val;
@@ -286,6 +277,26 @@ int val;
   hex[1] = hexascii[val & 15];
   hex[2] = 0;
   return(hex);
+}
+
+void
+cleanup_child(sig)
+int sig;
+{
+  int result;
+	
+  fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
+  close(sessionsock);
+}
+
+void
+testsig(sig)
+int sig;
+{
+  int result;
+	
+  fprintf(stderr,"signal(%d) \012\n",sig);
+
 }
 
 int telnet_session(socket,from)
@@ -303,7 +314,7 @@ char *from;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
-  int i,fd, readspin;
+  int i,fd;
   char buffer[64];
   struct timeval timeout;
 
@@ -335,16 +346,6 @@ char *from;
 
   fdslave = ptfd[0];
   fdmaster = ptfd[1];
-
-  fprintf(stderr, "create_pty() => %d %d\n", fdmaster,fdslave);
-
-    /* Save the defaults parameters of the slave side of the PTY */
-    rc = gtty(fdmaster, &new_term_settings);
-    new_term_settings.sg_flag |= CBREAK;
-    new_term_settings.sg_flag |= XTABS;
-    new_term_settings.sg_flag &= ~ECHO;
-    new_term_settings.sg_flag &= ~RAW;
-    stty(fdmaster, &new_term_settings);
 
   sessionsock = socket;
   signal(SIGPIPE, cleanup_child);
@@ -466,14 +467,21 @@ char *from;
         {
             n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
 #ifdef DEBUG
-  fprintf(stderr, "write %d bytes to fdmaster%d\n", n, fdmaster);
+  fprintf(stderr, "write %d bytes to fdmaster%d\012\n", n, fdmaster);
 #endif
+           /* Uniflex pty does not handle Ctrl-C! */
+           if (ts.bi.start[0] == 0x03)
+           {
+             /* fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid); */
+             kill(sessionpid, SIGINT);	
+           }
+
 
             if (n < 0)
             {
               if (errno != EINTR)
               {
-								break;
+                break;
               }
               continue;
             }
@@ -514,7 +522,7 @@ char *from;
           {
             if (errno != EINTR)
             {
-							break;
+              break;
             }
             continue;
           }
@@ -528,17 +536,7 @@ char *from;
           else
           if (n == 4096)
           {
-            fprintf(stderr,"read chocked\n");	
-          }
-          else
-          {
-#ifdef DEBUG
-            fprintf(stderr, "after %d spins, read %d bytes from fdmaster%d\n", readspin, n, fdmaster);
-            for(i=0; i<n; i++)
-              fprintf(stderr, "0x%s ", int2hex((int)ts.bo.data[i]));
-            fprintf(stderr, "\n");
-#endif
-            readspin = 0;
+            fprintf(stderr,"read chocked\n");
           }
 
           ts.bo.start = ts.bo.data;
@@ -554,7 +552,7 @@ char *from;
           n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
           if (n < 0)
           {
-						break;
+            break;
           }
           if (n < ts.bo.end - ts.bo.start)
           {
@@ -573,7 +571,7 @@ char *from;
   {
     /* CHILD */
     signal(SIGHUP, SIG_DFL);
-    signal(SIGINT, SIG_DFL);
+    signal(SIGINT, testsig);
     signal(SIGQUIT, SIG_DFL);
 
     /* Close the master side of the PTY */
@@ -627,7 +625,7 @@ void
 cleanup_and_exit(sig)
 int sig;
 {
-  fprintf(stderr,"cleanup telnetd on %d\n",sig);
+  fprintf(stderr,"cleanup telnetd on %d\012\n",sig);
 
   close(sock);
   state = STOPPED;
@@ -639,7 +637,7 @@ int sig;
   int rc,pid;
   
   pid = wait(&rc);
-  fprintf(stderr,"cleanup session: %2.2x\n",rc);
+  fprintf(stderr,"cleanup session: %d\012\n",pid);
 
   signal(SIGDEAD, cleanup_session);
 }
@@ -696,8 +694,6 @@ char **argv;
   state = RUNNING;
   while (state == RUNNING) 
   {
-    fprintf(stderr,"telnet: waiting to accept\n");
-
     newsock = 0;
     while (state == RUNNING && newsock <= 0)
     {
