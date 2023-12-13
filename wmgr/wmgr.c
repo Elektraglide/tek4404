@@ -109,7 +109,9 @@ int *sockinput;
   }
   else
   {
-		signal(SIGINT, SIG_IGN);
+    /* FIXME: execvp("drone") may have smaller memory footprint */	
+  
+    signal(SIGINT, SIG_IGN);
   
     fd = fileno(stdin);
 		
@@ -273,8 +275,8 @@ int islogger;
     signal(SIGQUIT, cleanup_child);    
     signal(SIGTERM, cleanup_child);
     signal(SIGPIPE, cleanup_child);
-		signal(SIGDEAD, SIG_DFL);
-
+    signal(SIGDEAD, SIG_DFL);
+    
     /* Close the master side of the PTY */
     close(fdmaster);
 
@@ -304,6 +306,10 @@ int islogger;
     /* Make the current process a new session leader */
     setsid();
 
+    /* use preferred shell */
+    if (getenv("SHELL"))
+      winprocess[0] = getenv("SHELL");
+    
     /* Execution of the session shell */
     rc = islogger ? execvp(logprocess[0], logprocess) : execvp(winprocess[0], winprocess);
     if (rc < 0)
@@ -1130,6 +1136,13 @@ char **argv;
       if (n>0 && wintopmost)
       {
         n = (int)write(wintopmost->master, inputbuffer, n);
+        
+        /* Uniflex pty does not handle Ctrl-C! */
+        if (inputbuffer[0] == 0x03)
+        {
+          kill(wintopmost->pid, SIGINT);	
+        } 
+      
         if (n < 0)
         {
        	  WindowDestroy((int)(wintopmost - allwindows));
