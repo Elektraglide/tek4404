@@ -1,0 +1,4 @@
+name:code:addr type:comment
+INTRA:1::		AF_INTRA - Interprocess communication.
+INET :2:ipa address:    AF_INET - DARPA Internet address family (IP, et.al.)
+ETHER:11::		ARP address family.

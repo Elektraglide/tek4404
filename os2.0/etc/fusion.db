@@ -1,0 +1,27 @@
+name:value:comment
+my_name:my4400:			user's network name for local machine
+af_db:/etc/af.db:		address family database
+arp_db:/etc/arp.db:		ARP database file
+bin_prefix:/bin/:		where the binaries are
+console:/dev/console:		names a debug outlet
+cur_tty:/dev/tty00:		names the current tty
+default_login:public:		provides the default login name
+default_termtype:net:		the terminal type used if none supplied
+errno_db:/etc/errno.db:		errno value to string mapping
+lfig_db:/etc/lfig.db:		link configuration file
+machine_db:/etc/netHosts.db:	host machine database
+mfig_db:/etc/mfig.db:		machine configuration database
+msg_db:/etc/msg.db:		standard message database
+net_db:/etc/net.db:		directly connected net database
+os:UNIX-B4.2:			allows foreign programs to tune in to us
+ttyn_prefix:ttyn:		what do net ttys
+ttytype_file:/etc/ttytype:	line/ttytype correspondence file
+ttys_file:/etc/ttys:		line configuration file
+server_socket:442:		socket used by fusion server
+server_db:/etc/server.db:	server startup data base
+service_db:/etc/service.db:	service data base
+time_socket:443:		socket used by time server
+spooler_socket:444:		socket used by fusion spooler
+telnet:23:			ip port used by telnet daemon
+ftp:21				ip port used by ftp daemon
+version:3.1.0:			Fusion version id

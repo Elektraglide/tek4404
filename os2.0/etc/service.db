@@ -1,0 +1,35 @@
+service:protocol:port:comment
+sink	:tcp	:9	: Discard
+systat	:tcp	:11	: Who is on or SYSTAT
+daytime	:tcp	:13	: Date and Time
+netstat	:tcp	:15	: Who is up or NETSTAT
+ftp	:tcp	:21	: New File Transfer Protocol
+telnet	:tcp	:23	: Telnet
+smtp	:tcp	:25	: SMTP
+time	:tcp	:37	: Time server
+name	:tcp	:42	: Name server
+whois	:tcp	:43	: WhoIs
+mtp	:tcp	:57	: MTP
+rje	:tcp	:77	: any private RJE server
+finger	:tcp	:79	: Name or Finger
+link	:tcp	:87	: any terminal link
+supdup	:tcp	:95	: SUPDUP
+exec	:tcp	:512	: remote execution server
+login	:tcp	:513	:
+shell	:tcp	:514	:
+printer	:tcp	:515	:
+efs	:tcp	:520	:
+courier	:tcp	:530	:
+echo	:udp	:7	: Echo
+discard	:udp	:9	: Discard
+tftp	:udp	:69	: Trivial File Transfer Protocol
+biff	:udp	:512	:
+who	:udp	:513	:
+syslog	:udp	:514	:
+tekname	:udp	:515	: Tektronix (utek) name server
+talk	:udp	:517	: Berkley 4.2 Talk
+route	:udp	:520	:
+monitor	:udp	:561	:
+test	:xns	:10	: FUSION 3.0 test socket
+server	:xns	:442	: FUSION 3.0 server socket
+time	:xns	:442	: FUSION 3.0 time server

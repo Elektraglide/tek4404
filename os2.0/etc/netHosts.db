@@ -1,0 +1,6 @@
+machine name:site:mfig:xna address:ipa address:comment
+my4400          :here           :ethernet::192.168.1.61: Tek4400
+ntp             :us.pool.ntp.org:ethernet::162.159.200.1: 
+us.pool.ntp.org :US_ntp         :ethernet::162.159.200.1: 
+bbc             :bbc.co.uk      :ethernet::151.101.0.81: 
+lightup         :light-up.co.uk :ethernet::35.215.83.209: 

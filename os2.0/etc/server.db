@@ -1,0 +1,34 @@
+service	:state	:protocol:port	:options :cmnd	:comment
+sink	:1	:tcp	:9	::/etc/sinkd: TCP blackHole for testing.
+systat	:0	:tcp	:11	::: Who is on or SYSTAT
+daytime	:0	:tcp	:13	::: Date and Time
+netstat	:1	:tcp	:15	::: Who is up or NETSTAT
+ftp	:1	:tcp	:21	::/etc/ftpd: New File Transfer Protocol
+telnet	:1	:tcp	:23	::/etc/telnetd: New File Transfer Protocol
+smtp	:0	:tcp	:25	::: SMTP
+time	:0	:tcp	:37	::: Time server
+name	:0	:tcp	:42	::: Name server
+whois	:0	:tcp	:43	::: WhoIs
+mtp	:0	:tcp	:57	::: MTP
+rje	:0	:tcp	:77	::: any private RJE server
+finger	:0	:tcp	:79	::: Name or Finger
+link	:0	:tcp	:87	::: any terminal link
+supdup	:0	:tcp	:95	::: SUPDUP
+exec	:1	:tcp	:512	::: remote execution server
+login	:1	:tcp	:513	:::
+shell	:0	:tcp	:514	:::
+printer	:0	:tcp	:515	:::
+efs	:0	:tcp	:520	:::
+courier	:0	:tcp	:530	:::
+echo	:1	:udp	:7	::/etc/echod: Echo
+discard	:1	:udp	:9	::/etc/sinkd: Discard
+tftp	:0	:udp	:69	::: Trivial File Transfer Protocol
+biff	:0	:udp	:512	:::
+who	:0	:udp	:513	:::
+syslog	:0	:udp	:514	:::
+tekname	:0	:udp	:515	:::
+talk	:0	:udp	:517	:::
+route	:0	:udp	:520	:::
+new-rwho:0	:udp	:550	:::
+rmonitor:0	:udp	:560	:::
+monitor	:0	:udp	:561	:::
