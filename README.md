@@ -9,6 +9,7 @@ Generally uses #ifdef __clang__ for compiling on modern Un*x
 - **telnetd.c**  - listens on port 23 and creates a pty running argv[1]<br>
 - **ifdump.c**  - uses diddle() to extract MAC address, assigned IP and stats<br>
 - **dhcp.c**  - DHCP client; needs router address for Uniflex since we cant do SO_BROADCAST <br>
+- **ash.c**  - replacement minimal shell with history, autocomplete, jobs & various builtins that runs in 36k not 350k <br>
 
 - **uniflexshim.h**  - working but incomplete Uniflex emulation to allow compiling these on Darwin<br>
 
