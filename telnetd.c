@@ -473,7 +473,8 @@ char *from;
            if (ts.bi.start[0] == 0x03)
            {
              /* fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid); */
-             kill(sessionpid, SIGINT);	
+             kill(sessionpid, SIGINT);
+             control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
            }
 
 

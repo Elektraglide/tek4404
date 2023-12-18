@@ -231,7 +231,7 @@ struct RECT *r2;
 int cleanup_child(sig)
 int sig;
 {
-
+	
   fprintf(stderr,"signal(%d): child of parent %d\n", sig, getpid());
   exit(sig);
 }
@@ -1140,8 +1140,9 @@ char **argv;
         /* Uniflex pty does not handle Ctrl-C! */
         if (inputbuffer[0] == 0x03)
         {
-          kill(wintopmost->pid, SIGINT);	
-        } 
+          kill(wintopmost->pid, SIGINT);
+          control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
+        }
       
         if (n < 0)
         {
