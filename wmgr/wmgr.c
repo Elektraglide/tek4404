@@ -61,6 +61,7 @@ extern int open();
 #ifdef USE_TTYREADER
 int sockpair[2] = {0,0};
 int readerpid = 0;
+char *droneprocess[] = {"drone", NULL};
 
 void ttycleanup(sig)
 int sig;
@@ -109,8 +110,7 @@ int *sockinput;
   }
   else
   {
-    /* FIXME: execvp("drone") may have smaller memory footprint */	
-  
+
     signal(SIGINT, SIG_IGN);
   
     fd = fileno(stdin);
@@ -126,13 +126,20 @@ int *sockinput;
   tcgetattr(fd, &t);
   t.c_lflag &= ~ICANON;
   tcsetattr(fd, TCSANOW, &t);
-#endif
 
     /* read stdin & write forever */
     while ((n = (int)read(fd, inputbuffer, sizeof(inputbuffer))) > 0)
     {
       n = write(sockpair[0], inputbuffer, n);
     }
+#endif
+
+    /* NB drone is the tek4404 pattern for helper process to read stdin */
+    dup2(fd, 0);
+    dup2(sockpair[0], 1);
+    close(2);
+    execvp(droneprocess[0], droneprocess);
+
 
     fprintf(stderr, "ttyreader exit\012\n");
     exit(1);
@@ -231,7 +238,7 @@ struct RECT *r2;
 int cleanup_child(sig)
 int sig;
 {
-	
+
   fprintf(stderr,"signal(%d): child of parent %d\n", sig, getpid());
   exit(sig);
 }
@@ -974,7 +981,7 @@ char **argv;
   struct in_sockaddr serv_addr;
 #endif
   fd_set fd_in;
-  char ch, inputbuffer[4096];
+  char ch, *name, inputbuffer[4096];
   struct timeval timeout;
   Window *win;
   struct RECT r,r2;
@@ -1050,15 +1057,15 @@ char **argv;
 
 #ifdef USE_TTYREADER
 
-  fprintf(stderr, "reading %s on socket(%d)\012\n", getttysock(&fdtty), fdtty);
+  name = getttysock(&fdtty);
+  /* fprintf(stderr, "reading %s on socket(%d)\012\n", name, fdtty); */
 
 #endif
 
 #ifdef POLLINGINP
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
-  fprintf(stderr, "reading %s using fd(%d)\012\n", ttyname(fileno(stdin)), fdtty);
-
+  /* fprintf(stderr, "reading %s using fd(%d)\012\n", ttyname(fileno(stdin)), fdtty); */
   /* CBREAK input */
   rc = gtty(fdtty, &new_term_settings);
   new_term_settings.sg_flag |= CBREAK | RAW;
@@ -1142,7 +1149,7 @@ char **argv;
         {
           kill(wintopmost->pid, SIGINT);
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-        }
+        } 
       
         if (n < 0)
         {
