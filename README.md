@@ -15,5 +15,4 @@ Generally uses #ifdef __clang__ for compiling on modern Un*x
 - **tek_graphics.c** - working but incomplete implementation of Tek4404 graphics libs using SDL 
 - **wmgr** implements a simple desktop with windows running a shell via a pseudo terminal.  Implements vt100.
 
-![alt text](https://github.com/Elektraglide/tek4404/blob/main/wmgr/tek4404_wmgr.png?raw=true)
-
+![wmgr](https://github.com/Elektraglide/tek4404/assets/41291895/c57c3a41-32e3-4e40-88c1-b596f6ee6bb7)
