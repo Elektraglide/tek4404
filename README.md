@@ -17,3 +17,8 @@ Generally uses #ifdef __clang__ for compiling on modern Un*x
 - **wmgr** implements a simple desktop with windows running a shell via a pseudo terminal.  Implements vt100.
 
 ![newwmgr](https://github.com/Elektraglide/tek4404/assets/41291895/04b68031-53af-43e8-b41e-e3e3c9e54f39)
+
+And running with MagnoliaFixed6 font.
+
+![wmgr6](https://github.com/Elektraglide/tek4404/assets/41291895/3cc6cbdd-c736-4d4a-ae1a-96cf36e254ef)
+
