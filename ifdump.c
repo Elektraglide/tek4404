@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 #include <errno.h> 
 #include <signal.h>
@@ -68,13 +66,25 @@ netdev *ptr;
 #endif
 }
 
+void setting(name, value)
+char *name;
+int value;
+{
+int rc;
+
+  rc = wdiddle(name, &value, sizeof(value));
+  printf("%s(%d) => %d ", name, value, rc);
+}
+
 void printsetting(name)
 char *name;
 {
 int value;
+int rc;
 
-  rdiddle(name, &value, sizeof(value));
-  printf("%s(%d) ", name, value);
+  value = 0;
+  rc = rdiddle(name, &value, sizeof(value));
+  printf("%s(%d) => %d ", name, value, rc);
 }
 
 void printsettingstring(name)
@@ -90,16 +100,24 @@ main(argc,argv)
 int argc;
 char **argv;
 {
-  int n,rc,i,j,nde_size;
+  int value,dbufferlen,rc,i,j,nde_size;
   unsigned char *ptr;
   char filepath[256];
   
-  n = ldiddle("ndevsw");
-  ptr = rdiddle("ndevsw", dbuffer, n);
-  rdiddle("nde_size", &nde_size, sizeof(nde_size));
-  printf("nde_size(0x%x) netdev_size(0x%x)\n", nde_size, sizeof(netdev));
+  dbufferlen = ldiddle("ndevsw"); 			/* buffer len */
+  ptr = rdiddle("ndevsw", dbuffer, dbufferlen);		/* buffer data */
+  rdiddle("nde_size", &nde_size, sizeof(nde_size));	/* ndev struct size */
+
   rdiddle("fusion_db_name", filepath, sizeof(filepath), 0);
   printf("fusion_db = %s\n",filepath);
+
+  /* attempt to write value */
+  if (argc > 2)
+  {
+    value = atoi(argv[2]);
+    setting(argv[1], value);	
+  }
+
 
   printf("\nkernel settings\n");
   printsettingstring("sock_prefix");
@@ -113,26 +131,29 @@ char **argv;
   printsetting("tcp_try_max");
   printsetting("tcp_ttl");
   printf("\n");
-  printsetting("tcp_debug");
-  printsetting("tcp_trace");
+
   printsetting("tcp_taccept");
   printsetting("tcp_tbind");
   printsetting("tcp_tclose");
   printsetting("tcp_tlinger");
   printf("\n");
 
+  printsetting("tcp_debug");
+  printsetting("tcp_trace");
+  printf("\n");
   printsetting("udp_debug");
   printsetting("udp_trace");
+  printf("\n");
   printsetting("ip_debug");
   printsetting("ip_trace");
+  printf("\n");
   printsetting("icmp_debug");
   printsetting("icmp_trace");
   printf("\n");
 
-
   /* start of network interface blocks of nde_size bytes each */
   ptr = dbuffer;
-  while (ptr - dbuffer < n)
+  while (ptr - dbuffer < dbufferlen)
   {
     printif(ptr);
 
