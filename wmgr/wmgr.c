@@ -592,39 +592,38 @@ int forcedirty;
     if (forcedirty || (win->dirty & 2))
     {
       /* render (just) frame */
-
-      r = win->windowrect;
-      r.h = WINTITLEBAR;
-      bb.halftoneform = &BlackMask;
-      RectDrawX(&r, &bb);
-      r = win->windowrect;
-      r.w = WINBORDER;
-      RectDrawX(&r, &bb);
-      r.x += win->windowrect.w - WINBORDER;
-      RectDrawX(&r, &bb);
-      r = win->windowrect;
-      r.y += win->windowrect.h - WINBORDER;
-      r.h = WINBORDER;
-      RectDrawX(&r, &bb);
-
-      /* some accent lines */
-      bb.halftoneform = &WhiteMask;
-      r = win->windowrect;
-      r.h = WINTITLEBAR;
-      RectBoxDrawX(&r, 1, &bb);
       r = win->windowrect;
       r.y += WINTITLEBAR;
       r.h -= WINTITLEBAR;
+      bb.halftoneform = &WhiteMask;
+      RectDrawX(&r, &bb);
+
+      /* margins */
+      bb.halftoneform = &BlackMask;
+      r = win->windowrect;
+      r.w = WINBORDER - 1;
       RectBoxDrawX(&r, 1, &bb);
+      r.x += win->windowrect.w - WINBORDER + 1;
+      RectBoxDrawX(&r, 1, &bb);
+      r = win->windowrect;
+      r.y += win->windowrect.h - WINBORDER + 1;
+      r.h = WINBORDER - 1;
+      RectBoxDrawX(&r, 1, &bb);
+
+      /* title bar */
+      r = win->windowrect;
+      r.h = WINTITLEBAR;
+      bb.halftoneform = &VeryLightGrayMask;
+      RectDrawX(&r, &bb);
 
 #ifdef CLOSEBOX
       /* render closebox */
-      bb.halftoneform = &VeryLightGrayMask;
+      bb.halftoneform = &WhiteMask;
       r = win->windowrect;
-      r.x += 4;
-      r.y += 4;
-      r.w = 16;
-      r.h = 16;
+      r.x += 8;
+      r.y += 8;
+      r.w = 12;
+      r.h = 12;
       RectDrawX(&r, &bb);
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
@@ -636,10 +635,6 @@ int forcedirty;
       origin.x = win->windowrect.x + win->windowrect.w / 2 - j/2;
       origin.y = win->windowrect.y + (WINTITLEBAR - glyph.h)/2 + glyph.h;
       StringDrawX(win->title, &origin, &bb, font);
-
-      r = win->contentrect;
-      bb.halftoneform = &WhiteMask;
-      RectDrawX(&r, &bb);
     }
 
     /* during dragging do not update content */
@@ -971,6 +966,14 @@ int sig;
   signal(SIGDEAD, cleanup_window);
 }
 
+int sh_input(sig)
+int sig;
+{
+  WindowOutput(0, "event\n", 6);
+	
+  signal(SIGEVT, sh_input);
+}
+
 int
 main(argc, argv)
 int argc;
@@ -1038,6 +1041,10 @@ char **argv;
   EventEnable();
   SetKBCode(0);
 #else
+  
+  signal(SIGEVT, sh_input);
+  ESetSignal();
+    
   SetKBCode(1);
 #endif
 
@@ -1218,7 +1225,7 @@ if (GetButtons() & M_MIDDLE)
         while (win)
         {
           /* docs wrong; returns 0 if contained */
-          if (!myRectContainsPoint(&win->windowrect, &origin))
+          if (!myRectContainsPoint(&win->windowrect, &origin) && myRectContainsPoint(&win->contentrect, &origin))
           {
             WindowTop(win);
 
