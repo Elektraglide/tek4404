@@ -601,13 +601,14 @@ int forcedirty;
       /* margins */
       bb.halftoneform = &BlackMask;
       r = win->windowrect;
-      r.w = WINBORDER - 1;
+      r.x += 1;
+      r.w = WINBORDER - 2;
       RectBoxDrawX(&r, 1, &bb);
-      r.x += win->windowrect.w - WINBORDER + 1;
+      r.x += win->windowrect.w - 1 - (WINBORDER-1);
       RectBoxDrawX(&r, 1, &bb);
       r = win->windowrect;
-      r.y += win->windowrect.h - WINBORDER + 1;
-      r.h = WINBORDER - 1;
+      r.y += win->windowrect.h - 1 - (WINBORDER-1) + 1;
+      r.h = WINBORDER - 2;
       RectBoxDrawX(&r, 1, &bb);
 
       /* title bar */
