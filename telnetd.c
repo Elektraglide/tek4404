@@ -16,6 +16,7 @@ Appears to be broken pty implementation AND shell ignoring SIGINT
 #include <net/telnet.h>
 #include <net/select.h>
 #include <net/inet.h>
+#include <net/nerrno.h>
 
 #ifndef __clang__
 #include <net/in.h>
@@ -699,8 +700,15 @@ char **argv;
     while (state == RUNNING && newsock <= 0)
     {
       newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
-      if (errno == EINTR) continue;	
       if (newsock < 0){ 
+        if (errno == EINTR) continue;
+        if (errno == ETIMEDOUT) continue;
+        if (errno == ENETUNREACH) continue;
+        if (errno == EHOSTUNREACH) continue;
+        if (errno == ECONNRESET) continue;
+        if (errno == ENETDOWN) continue;
+        if (errno == ENOPROTOOPT) continue;
+
         fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
         close(sock);
         return errno;
