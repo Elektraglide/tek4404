@@ -5,8 +5,11 @@ int main(argc, argv)
 int argc;
 char **argv;
 {
+struct POINT p;
+	
     InitGraphics(FALSE);
-
+    p.x = p.y = 0;
+    SetViewport(&p);
     EventDisable();
     SetKBCode(1);
 
