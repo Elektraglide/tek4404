@@ -91,20 +91,23 @@ netdev *ptr;
   fr = ptr->nd_re;
   if (fr)
   {
+    /* skip */
+    fr = readmem(&afrent, sizeof(frent),  (int)fr);
     fr = fr->re_ndcU.rpu_p;
-    printf("\thops    rate    delay   rte_net         rte_gwy\n");
+
+    printf("\tflags   hops    rate    delay    rte_net        rte_gwy\n");
     while (fr)
     {
        fr = readmem(&afrent, sizeof(frent),  (int)fr);
 
-       printf("\t%-8d%-8d%-8d ", 
-   	(int)fr->re_hops, (int)fr->re_rate, fr->re_delay);
+       printf("\t%-8.4x%-8d%-8d%-8d ", 
+   	(int)fr->re_flags,(int)fr->re_hops, (int)fr->re_rate, fr->re_delay);
 
        i = *(unsigned int *)(fr->re_rte.rte_net.sa_data + 2);
-       printf("%-16s\t", inet_ntoa(i));
+       printf("%-12s\t", inet_ntoa(i));
 
        i = *(unsigned int *)(fr->re_rte.rte_gwy.sa_data + 2);
-       printf("%-16s\n", inet_ntoa(i));
+       printf("%-12s\n", inet_ntoa(i));
   
       fr = fr->re_ndcU.rpu_p;
     }
