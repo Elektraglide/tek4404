@@ -4,7 +4,7 @@
 #include <sys/fcntl.h>
 #include <net/select.h>
 #include <net/netdev.h>
-
+#include <net/fr.h>
 
 #ifndef __clang__
 #include <net/inet.h>
@@ -35,11 +35,33 @@ extern char *memset();
 unsigned char dbuffer[2048];
 char filepath[80];
 
+char * readmem(dst, len, loc)
+char *dst;
+int len;
+int loc;
+{
+  int fd;
+  
+ fd = open("/dev/pmem", O_RDONLY);
+ if (fd > 0)
+ {
+   lseek(fd, loc, 0);
+
+   read(fd, dst, len);
+
+   close(fd); 	
+ }
+
+ return dst;
+}
+
+
 int printif(ptr)
 netdev *ptr;
 {
   int i;
-
+  frent afrent, *fr;
+  
   printf("IF name: %s (%s)\n", 
     ptr->nd_name, ptr->nd_flags & F_N_ONLINE ? "ONLINE" : "OFFLINE");
 
@@ -64,6 +86,30 @@ netdev *ptr;
   printf("nd_ioctl: %8x\n", ptr->nd_ioctl);
   printf("nd_next: %8x\n", ptr->nd_next);
 #endif
+
+  /* walk fusion router entries (NB 1st is null entry) */
+  fr = ptr->nd_re;
+  if (fr)
+  {
+    fr = fr->re_ndcU.rpu_p;
+    printf("\thops    rate    delay   rte_net         rte_gwy\n");
+    while (fr)
+    {
+       fr = readmem(&afrent, sizeof(frent),  (int)fr);
+
+       printf("\t%-8d%-8d%-8d ", 
+   	(int)fr->re_hops, (int)fr->re_rate, fr->re_delay);
+
+       i = *(unsigned int *)(fr->re_rte.rte_net.sa_data + 2);
+       printf("%-16s\t", inet_ntoa(i));
+
+       i = *(unsigned int *)(fr->re_rte.rte_gwy.sa_data + 2);
+       printf("%-16s\n", inet_ntoa(i));
+  
+      fr = fr->re_ndcU.rpu_p;
+    }
+  }
+
 }
 
 void setting(name, value)
@@ -149,6 +195,9 @@ char **argv;
   printf("\n");
   printsetting("icmp_debug");
   printsetting("icmp_trace");
+  printf("\n");
+  printsetting("fr_debug");
+  printsetting("fr_trace");
   printf("\n");
 
   /* start of network interface blocks of nde_size bytes each */
