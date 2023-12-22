@@ -55,13 +55,15 @@ Elf32_Sym symbols[4096];
 int numsymbols = 0;
 
 /* ongoing string lump offsets */
-char globalstrings[4096] = "\0";
+char globalstrings[32768] = "\0";
 int stringoffset = 1;
 int addstring(char *label)
 {
   int startpos = stringoffset;
   memcpy(globalstrings+stringoffset, label, strlen(label)+1);
   stringoffset += strlen(label)+1;
+  if(stringoffset > 32768)
+		exit(3);
   return startpos;
 }
 
@@ -228,6 +230,8 @@ char *typename;
   symbols[numsymbols].st_other = 0;
   symbols[numsymbols].st_shndx = htons(SHN_UNDEF);
   numsymbols++;
+  if (numsymbols > 4096)
+		exit(5);
 #endif
 
   /* seek to symbols (offset from end) */
