@@ -35,19 +35,19 @@ extern char *memset();
 unsigned char dbuffer[2048];
 char filepath[80];
 
-char * readmem(dst, len, loc)
+char * readmem(dst, src, structlen)
 char *dst;
-int len;
-int loc;
+char *src;
+int structlen;
 {
   int fd;
   
  fd = open("/dev/pmem", O_RDONLY);
  if (fd > 0)
  {
-   lseek(fd, loc, 0);
+   lseek(fd, (int)src, 0);
 
-   read(fd, dst, len);
+   read(fd, dst, structlen);
 
    close(fd); 	
  }
@@ -92,22 +92,23 @@ netdev *ptr;
   if (fr)
   {
     /* skip */
-    fr = readmem(&afrent, sizeof(frent),  (int)fr);
+    fr = readmem(&afrent, fr, sizeof(frent));
     fr = fr->re_ndcU.rpu_p;
 
-    printf("\tflags   hops    rate    delay    rte_net        rte_gwy\n");
+    printf("\t%-8s%-8s%-8s%-8s%-14s%-14s\n", 
+    	"flags","hops","rate","delay","rte_net","rte_gwy");
     while (fr)
     {
-       fr = readmem(&afrent, sizeof(frent),  (int)fr);
+       fr = readmem(&afrent, fr, sizeof(frent));
 
-       printf("\t%-8.4x%-8d%-8d%-8d ", 
+       printf("\t%-8.4x%-8d%-8d%-8d", 
    	(int)fr->re_flags,(int)fr->re_hops, (int)fr->re_rate, fr->re_delay);
 
        i = *(unsigned int *)(fr->re_rte.rte_net.sa_data + 2);
-       printf("%-12s\t", inet_ntoa(i));
+       printf("%-14s", inet_ntoa(i));
 
        i = *(unsigned int *)(fr->re_rte.rte_gwy.sa_data + 2);
-       printf("%-12s\n", inet_ntoa(i));
+       printf("%-14s\n", inet_ntoa(i));
   
       fr = fr->re_ndcU.rpu_p;
     }
