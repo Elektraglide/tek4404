@@ -20,6 +20,8 @@
 #define	AF_INTRA	AF_UNIX
 extern int kill();
 extern int wait();
+extern char *getenv();
+
 char *nget_str(char *name)
 {
   if (!strcmp(name, "cur_tty"))
@@ -154,6 +156,9 @@ int fdtty;
 #define WINTITLEBAR 24
 #define WINBORDER 8
 #define CLOSEBOX
+
+#define FORCEPAINT 	0x0001
+#define DRAGGED 		0x8000
 
 struct DISPSTATE ds;
 struct FontHeader *font;
@@ -489,7 +494,7 @@ int islogger;
 
     /* needs rendering */
     win->dirty = 2;
-    win->vt.dirtylines = (1 << win->vt.rows) - 1;
+    win->vt.dirtylines = (1 << (win->vt.rows-1)) - 1;
 
     /* link it */
     win->next = wintopmost;
@@ -645,14 +650,15 @@ int forcedirty;
     }
 
     /* during dragging do not update content */
-    if (forcedirty && win == wintopmost)
+    if (forcedirty & DRAGGED)
     {
        return 0;
     }
 
+		/* make all lines dirty */
     if (forcedirty)
-      win->vt.dirtylines = (1 << win->vt.rows) - 1;
-      
+			win->vt.dirtylines = (1 << (win->vt.rows-1)) - 1;
+			
     /* render contents */
     if (win->vt.dirtylines)
     {
@@ -870,7 +876,7 @@ Window *win;
     win->contentrect.h = 0;
   }
   
-  Paint(wintopmost, &win->oldrect, TRUE);
+  Paint(wintopmost, &win->oldrect, FORCEPAINT);
 
   return 0;
 }
@@ -924,7 +930,7 @@ int wid;
   if (numwindows > 0)
     WindowTop(&allwindows[0]);
 
-  Paint(wintopmost, &oldrect, TRUE);
+  Paint(wintopmost, &oldrect, FORCEPAINT);
 }
 
 void
@@ -1255,10 +1261,10 @@ if (GetButtons() & M_MIDDLE)
                 quadrect.next = 0;
                 RectAreasOutside(&r2, &win->windowrect, &quadrect);
                 for(j=0; j<quadrect.next; j++)
-                  Paint(wintopmost->next, &quadrect.region[j], TRUE);
+                  Paint(wintopmost->next, &quadrect.region[j], FORCEPAINT | DRAGGED);
 
                 SetClip(&win->windowrect);
-                WindowRender(win, TRUE);
+                WindowRender(win, FORCEPAINT | DRAGGED);
                 
 #ifdef __clang__
                 SDLrefreshwin();
@@ -1272,11 +1278,8 @@ if (GetButtons() & M_MIDDLE)
               WindowMin(win);
             }
             
-            /* content is dirty */
-            win->vt.dirtylines |= 0xffffffff;
-
             /* repaint everything */
-            Paint(wintopmost, &screenrect, TRUE);
+            Paint(wintopmost, &screenrect, FORCEPAINT);
             
             /* now has focus */
             break;
