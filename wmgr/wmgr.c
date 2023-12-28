@@ -616,6 +616,12 @@ int forcedirty;
       r.h = WINTITLEBAR;
       bb.halftoneform = &VeryLightGrayMask;
       RectDrawX(&r, &bb);
+      r.x += 1;
+      r.y += 1;
+      r.w -= 2;
+      r.h -= 2;
+      bb.halftoneform = &BlackMask;
+      RectBoxDrawX(&r, 1, &bb);
 
 #ifdef CLOSEBOX
       /* render closebox */
@@ -644,8 +650,11 @@ int forcedirty;
        return 0;
     }
 
+    if (forcedirty)
+      win->vt.dirtylines = (1 << win->vt.rows) - 1;
+      
     /* render contents */
-    if (forcedirty || (win->vt.dirtylines))
+    if (win->vt.dirtylines)
     {
       bb.halftoneform = NULL;
     
@@ -954,7 +963,7 @@ int sig;
   int i,pid;
 
   pid = wait(&i);
-  fprintf(stderr, "child proc(%d) died\012\n", pid);
+  fprintf(stderr, "child proc(%d) died by %d\012\n", pid, i);
   for(i=0; i<numwindows; i++)
   {
     if (allwindows[i].pid == pid)
@@ -1265,6 +1274,9 @@ if (GetButtons() & M_MIDDLE)
             
             /* content is dirty */
             win->vt.dirtylines |= 0xffffffff;
+
+            /* repaint everything */
+            Paint(wintopmost, &screenrect, TRUE);
             
             /* now has focus */
             break;
