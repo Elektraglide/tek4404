@@ -312,13 +312,13 @@ char *from;
   int n,rc,sessionpid;
   int last_was_cr;
   int last_read;
-  
+    
   fd_set fd_in;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
   int i,fd;
-  char buffer[64];
+  char buffer[64], *cwp, *nlp;
   struct timeval timeout;
 
   /* telnet state */
@@ -376,9 +376,25 @@ char *from;
      }
      else
      {
-       while((i = (int)read(fd, buffer, sizeof(buffer))) > 0)
+       while((i = (int)read(fd, buffer, sizeof(buffer)-1)) > 0)
        {
-         write(socket, buffer, i);
+       	 /* insert linefeeds */
+       	 buffer[i] = '\0';
+       	 cwp = buffer;
+       	 while(i > 0)
+       	 {
+           nlp = strchr(cwp, '\n');
+           if(!nlp)
+             break;
+
+     	   n = nlp - cwp;
+           write(socket, cwp, n);
+           write(socket, &newline, sizeof(newline));
+           cwp = nlp + 1;
+           i -= n;
+         }
+         if (i > 0)
+           write(socket, cwp, i);
        }
        write(socket, &newline, sizeof(newline));
        close(fd);
@@ -641,7 +657,7 @@ int sig;
   int rc,pid;
   
   pid = wait(&rc);
-  fprintf(stderr,"cleanup session: telnet proc(%d)\012\n",pid);
+  /* fprintf(stderr,"cleanup session: telnet proc(%d)\012\n",pid); */
 
   signal(SIGDEAD, cleanup_session);
 }
@@ -739,7 +755,7 @@ char **argv;
       timestamp = time(NULL);
       ts = localtime(&timestamp);
       fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: connect from %s\012\n", 
-          ts->tm_mday, ts->tm_mon, ts->tm_year,
+          ts->tm_mday, ts->tm_mon+1, ts->tm_year,
           ts->tm_hour, ts->tm_min,
           inet_ntoa(cli_addr.sin_addr.s_addr));
     
@@ -755,7 +771,7 @@ char **argv;
       timestamp = time(NULL);
       ts = localtime(&timestamp);
       fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: disconnect from %s\012\n", 
-          ts->tm_mday, ts->tm_mon, ts->tm_year,
+          ts->tm_mday, ts->tm_mon+1, ts->tm_year,
           ts->tm_hour, ts->tm_min,
           inet_ntoa(cli_addr.sin_addr.s_addr));
 
