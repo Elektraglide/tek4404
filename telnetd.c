@@ -6,7 +6,8 @@ Appears to be broken pty implementation AND shell ignoring SIGINT
 */
 #include <stdio.h>
 #include <string.h>
-#include <errno.h> 
+#include <errno.h>
+#include <time.h>
 #include <sys/fcntl.h>
 #include <sys/pty.h>
 #include <sys/sgtty.h>
@@ -85,8 +86,9 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 char hexascii[] = "0123456789ABCDEF";
 
 /* Uniflex maps \n to \r..  so we have to insert at runtime */
-char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\r\n";
-char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\r\n\r\n";
+char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\012\n";
+char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\012\n\012\n";
+char newline[] = "\012\n";
 int sock = -1;
 int state = STOPPED;
 int sessionsock;
@@ -286,7 +288,7 @@ int sig;
 {
   int result;
 	
-  fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
+  /* fprintf(stderr,"cleanup telnet session on %d\012\n",sig); */
   close(sessionsock);
 }
 
@@ -341,7 +343,7 @@ char *from;
   rc = create_pty(ptfd);
   if (rc < 0)
   {
-    fprintf(stderr, "Error %d on create_pty\n", errno);
+    fprintf(stderr, "Error %d on create_pty\012\n", errno);
     exit(1);
   }
 
@@ -364,7 +366,6 @@ char *from;
     control_pty(fdmaster, PTY_SET_MODE, n );
 
     /* motd; Uniflex maps \n to \r so force it in */
-    copyright[sizeof(copyright)-1] = 0x0a;
     write(socket, copyright, sizeof(copyright));
 
      fd = open("/etc/log/motd", O_RDONLY);
@@ -379,6 +380,7 @@ char *from;
        {
          write(socket, buffer, i);
        }
+       write(socket, &newline, sizeof(newline));
        close(fd);
      }
 
@@ -531,7 +533,7 @@ char *from;
 
           if (n == 0)
           {
-              fprintf(stderr,"broken connection\n");
+              fprintf(stderr,"broken connection\012\n");
               close(socket);
               break;
           }
@@ -580,7 +582,7 @@ char *from;
     close(fdmaster);
 
     /* make a friendly name */
-    strcpy(sessionname, "telnet_");
+    strcpy(sessionname, "tn_");
     strcat(sessionname, from);
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
@@ -627,7 +629,7 @@ void
 cleanup_and_exit(sig)
 int sig;
 {
-  fprintf(stderr,"cleanup telnetd on %d\012\n",sig);
+  /* fprintf(stderr,"cleanup telnetd on %d\012\n",sig); */
 
   close(sock);
   state = STOPPED;
@@ -639,10 +641,11 @@ int sig;
   int rc,pid;
   
   pid = wait(&rc);
-  fprintf(stderr,"cleanup session: %d\012\n",pid);
+  fprintf(stderr,"cleanup session: telnet proc(%d)\012\n",pid);
 
   signal(SIGDEAD, cleanup_session);
 }
+
 
 int
 main(argc,argv)
@@ -652,6 +655,7 @@ char **argv;
   int newsock;
   int rc;
   int pair[2];
+  struct isockaddr peer;
   struct in_sockaddr serv_addr;
   struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
@@ -659,7 +663,9 @@ char **argv;
   socketopt opt;
 #endif
   int reuse = 1;
-
+  time_t timestamp;
+  struct tm *ts;
+    
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
     fprintf(stderr, "socket: %s\n",strerror(errno));
@@ -718,15 +724,25 @@ char **argv;
     if (state == STOPPED) break;
 
 #ifndef __clang__
-    setsockopt(sock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0);
+    /* setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0); */
     /* is turning off Nagle supported? */
 #else
     setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
+    /* Uniflex accept() doesn't fill this in.. */
+    cli_addr_len = sizeof(cli_addr);
+    rc = getpeername(newsock, &cli_addr, &cli_addr_len);
+
     if (fork())
     {
-      fprintf(stderr, "connect from %s\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      timestamp = time(NULL);
+      ts = localtime(&timestamp);
+      fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: connect from %s\012\n", 
+          ts->tm_mday, ts->tm_mon, ts->tm_year,
+          ts->tm_hour, ts->tm_min,
+          inet_ntoa(cli_addr.sin_addr.s_addr));
+    
       sleep(5);
       close(newsock); 
     }
@@ -735,7 +751,14 @@ char **argv;
       argv[0] = "client";
 
       rc = telnet_session(newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
-      fprintf(stderr, "client disconnected (%d) from %s\n", rc, inet_ntoa(cli_addr.sin_addr.s_addr));
+
+      timestamp = time(NULL);
+      ts = localtime(&timestamp);
+      fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: disconnect from %s\012\n", 
+          ts->tm_mday, ts->tm_mon, ts->tm_year,
+          ts->tm_hour, ts->tm_min,
+          inet_ntoa(cli_addr.sin_addr.s_addr));
+
       break;
     }
 
