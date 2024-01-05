@@ -37,6 +37,7 @@ char *telnetprocess[] = {"ash", NULL};
 
 extern int open();
 extern int wait();
+extern int kill();
 
 #define in_sockaddr sockaddr_in
 #define  IPO_TELNET	  23
@@ -86,9 +87,9 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 char hexascii[] = "0123456789ABCDEF";
 
 /* Uniflex maps \n to \r..  so we have to insert at runtime */
-char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\012\n";
-char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\012\n\012\n";
-char newline[] = "\012\n";
+char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\n";
+char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
+char linefeed[] = "\012";
 int sock = -1;
 int state = STOPPED;
 int sessionsock;
@@ -288,7 +289,9 @@ int sig;
 {
   int result;
 	
-  /* fprintf(stderr,"cleanup telnet session on %d\012\n",sig); */
+#ifdef DEBUG
+	fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
+#endif
   close(sessionsock);
 }
 
@@ -299,6 +302,39 @@ int sig;
   int result;
 	
   fprintf(stderr,"signal(%d) \012\n",sig);
+
+}
+
+void writewithlf(socket, buffer, len)
+int socket;
+char *buffer;
+int len;
+{
+char  *cwp, *nlp;
+int n;
+        
+         /* insert linefeeds */
+  cwp = buffer;
+  while(len > 0)
+  {
+    nlp = strchr(cwp, '\n');
+   if(!nlp)
+   {
+      break;
+   }
+   else
+   {
+      nlp++;
+      n = (int)nlp - (int)cwp;
+      write(socket, cwp, n);
+      write(socket, &linefeed, sizeof(linefeed));
+      cwp = nlp;
+      len -= n;
+   }
+ }
+         
+ if (len > 0)
+   write(socket, cwp, len);
 
 }
 
@@ -318,7 +354,7 @@ char *from;
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
   int i,fd;
-  char buffer[64], *cwp, *nlp;
+  char buffer[64];
   struct timeval timeout;
 
   /* telnet state */
@@ -366,37 +402,21 @@ char *from;
     control_pty(fdmaster, PTY_SET_MODE, n );
 
     /* motd; Uniflex maps \n to \r so force it in */
-    write(socket, copyright, sizeof(copyright));
+    writewithlf(socket, copyright, sizeof(copyright)-1);
 
      fd = open("/etc/log/motd", O_RDONLY);
      if (fd < 0)
      {
        /* a default MOTD */
-       write(socket, welcomemotd, sizeof(welcomemotd));
+       writewithlf(socket, welcomemotd, sizeof(welcomemotd)-1);
      }
      else
      {
        while((i = (int)read(fd, buffer, sizeof(buffer)-1)) > 0)
        {
-       	 /* insert linefeeds */
-       	 buffer[i] = '\0';
-       	 cwp = buffer;
-       	 while(i > 0)
-       	 {
-           nlp = strchr(cwp, '\n');
-           if(!nlp)
-             break;
-
-     	   n = nlp - cwp;
-           write(socket, cwp, n);
-           write(socket, &newline, sizeof(newline));
-           cwp = nlp + 1;
-           i -= n;
-         }
-         if (i > 0)
-           write(socket, cwp, i);
+				 buffer[i] = '\0';
+         writewithlf(socket, buffer, i);
        }
-       write(socket, &newline, sizeof(newline));
        close(fd);
      }
 
@@ -549,7 +569,7 @@ char *from;
 
           if (n == 0)
           {
-              fprintf(stderr,"broken connection\012\n");
+              /* fprintf(stderr,"broken connection\012\n"); */
               close(socket);
               break;
           }
@@ -637,7 +657,9 @@ char *from;
     return errno;
   }
 
+#ifdef DEBUG
   fprintf(stderr, "EXIT telnet_session\n");
+#endif
   return errno;
 }
 
@@ -645,8 +667,9 @@ void
 cleanup_and_exit(sig)
 int sig;
 {
-  /* fprintf(stderr,"cleanup telnetd on %d\012\n",sig); */
-
+#ifdef DEBUG
+  fprintf(stderr,"cleanup telnetd on %d\012\n",sig);
+#endif
   close(sock);
   state = STOPPED;
 }
@@ -657,11 +680,24 @@ int sig;
   int rc,pid;
   
   pid = wait(&rc);
-  /* fprintf(stderr,"cleanup session: telnet proc(%d)\012\n",pid); */
+#ifdef DEBUG
+  fprintf(stderr,"cleanup session: telnet proc(%d)\012\n",pid);
+#endif
 
   signal(SIGDEAD, cleanup_session);
 }
 
+void logtime()
+{
+  time_t timestamp;
+  struct tm *ts;
+
+		timestamp = time(NULL);
+		ts = localtime(&timestamp);
+		fprintf(stderr, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
+				ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
+				ts->tm_hour, ts->tm_min);
+}
 
 int
 main(argc,argv)
@@ -671,7 +707,6 @@ char **argv;
   int newsock;
   int rc;
   int pair[2];
-  struct isockaddr peer;
   struct in_sockaddr serv_addr;
   struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
@@ -679,8 +714,6 @@ char **argv;
   socketopt opt;
 #endif
   int reuse = 1;
-  time_t timestamp;
-  struct tm *ts;
     
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock < 0) {
@@ -748,16 +781,12 @@ char **argv;
 
     /* Uniflex accept() doesn't fill this in.. */
     cli_addr_len = sizeof(cli_addr);
-    rc = getpeername(newsock, &cli_addr, &cli_addr_len);
+    rc = getpeername(newsock, (struct sockaddr *) &cli_addr, &cli_addr_len);
 
     if (fork())
     {
-      timestamp = time(NULL);
-      ts = localtime(&timestamp);
-      fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: connect from %s\012\n", 
-          ts->tm_mday, ts->tm_mon+1, ts->tm_year,
-          ts->tm_hour, ts->tm_min,
-          inet_ntoa(cli_addr.sin_addr.s_addr));
+      logtime();
+      fprintf(stderr, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
     
       sleep(5);
       close(newsock); 
@@ -768,12 +797,8 @@ char **argv;
 
       rc = telnet_session(newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
 
-      timestamp = time(NULL);
-      ts = localtime(&timestamp);
-      fprintf(stderr, "%2.2d-%2.2d-%2.2d %2.2d:%2.2d: disconnect from %s\012\n", 
-          ts->tm_mday, ts->tm_mon+1, ts->tm_year,
-          ts->tm_hour, ts->tm_min,
-          inet_ntoa(cli_addr.sin_addr.s_addr));
+      logtime();
+      fprintf(stderr, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
 
       break;
     }
