@@ -40,7 +40,7 @@ extern int wait();
 extern int kill();
 
 #define in_sockaddr sockaddr_in
-#define  IPO_TELNET	  23
+#define  IPO_TELNET    23
 char *telnetprocess[] = {"sh", NULL};
 
 #include "uniflexshim.h"
@@ -56,6 +56,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define DEBUGxx
+#define DEBUGEXxx
 
 /***********************************/
 
@@ -87,7 +88,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 char hexascii[] = "0123456789ABCDEF";
 
 /* Uniflex maps \n to \r..  so we have to insert at runtime */
-char copyright[] = "Telnet Server Version 1.0 Copyright (C) 2023 By Adam Billyard\n";
+char copyright[] = "Telnet Server Version 1.1 Copyright (C) 2024 By Adam Billyard\n";
 char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
 char linefeed[] = "\012";
 int sock = -1;
@@ -288,9 +289,9 @@ cleanup_child(sig)
 int sig;
 {
   int result;
-	
+  
 #ifdef DEBUG
-	fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
+  fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
 #endif
   close(sessionsock);
 }
@@ -300,7 +301,7 @@ testsig(sig)
 int sig;
 {
   int result;
-	
+  
   fprintf(stderr,"signal(%d) \012\n",sig);
 
 }
@@ -338,8 +339,8 @@ int n;
 
 }
 
-int telnet_session(socket,from)
-int socket;
+int telnet_session(din,dout,from)
+int din,dout;
 char *from;
 {
   struct termstate ts;
@@ -359,11 +360,11 @@ char *from;
 
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
-  ts.sock = socket;
+  ts.sock = din;
   ts.state = STATE_NORMAL;
   ts.term.type = TERM_VT100;
   ts.term.cols = 80;
-  ts.term.lines = 25;
+  ts.term.lines = 30;
 
   /* Send initial options */
   sendopt(&ts, WILL, T_ECHO);
@@ -386,7 +387,7 @@ char *from;
   fdslave = ptfd[0];
   fdmaster = ptfd[1];
 
-  sessionsock = socket;
+  sessionsock = din;
   signal(SIGPIPE, cleanup_child);
   signal(SIGDEAD, cleanup_child);
 
@@ -402,121 +403,165 @@ char *from;
     control_pty(fdmaster, PTY_SET_MODE, n );
 
     /* motd; Uniflex maps \n to \r so force it in */
-    writewithlf(socket, copyright, sizeof(copyright)-1);
+    writewithlf(dout, copyright, sizeof(copyright)-1);
 
-     fd = open("/etc/log/motd", O_RDONLY);
-     if (fd < 0)
-     {
-       /* a default MOTD */
-       writewithlf(socket, welcomemotd, sizeof(welcomemotd)-1);
-     }
-     else
-     {
-       while((i = (int)read(fd, buffer, sizeof(buffer)-1)) > 0)
-       {
-				 buffer[i] = '\0';
-         writewithlf(socket, buffer, i);
-       }
-       close(fd);
-     }
+    fd = open("/etc/log/motd", O_RDONLY);
+    if (fd < 0)
+    {
+      /* a default MOTD */
+      writewithlf(dout, welcomemotd, sizeof(welcomemotd)-1);
+    }
+    else
+    {
+      while((i = (int)read(fd, buffer, sizeof(buffer)-1)) > 0)
+      {
+        buffer[i] = '\0';
+        writewithlf(dout, buffer, i);
+      }
+      close(fd);
+    }
 
     /* Close the slave side of the PTY */
     close(fdslave);
 
-  last_was_cr = 0;
-  last_read = 0;
-  while(state != STOPPED)
-  {
-      /* Uniflex select appears to only expect actual socket fds */
-      /* having stdin in the FD_SET wreaks havoc */
-      timeout.tv_sec = 0;
-      timeout.tv_usec = 200000;
-      FD_ZERO(&fd_in);
-      FD_SET(socket, &fd_in);
+    last_was_cr = 0;
+    last_read = 0;
+    while(state != STOPPED)
+    {
+        /* Uniflex select appears to only expect actual socket fds */
+        /* having stdin in the FD_SET wreaks havoc */
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 250000;
+        FD_ZERO(&fd_in);
+        n = 0;
+        
+        FD_SET(din, &fd_in);
+        if (din > n)
+          n = din;
+
 #ifdef __clang__
-      FD_SET(fdmaster, &fd_in);
+        FD_SET(fdmaster, &fd_in);
+        if (fdmaster > n)
+          n = fdmaster;
 #else
-      if(last_read > 0)
-      {
-      	/* if there is input, for a few loops use a short timeout */
-        timeout.tv_usec = 50000;
-        last_read--;
-      }
-#endif
-/*
-      fprintf(stderr,"select(%x) on %d,fdmaster%d\n",fd_in.fdmask[0],socket, fdmaster);
-      fflush(stderr);
-*/
-      rc = select(max(fdmaster,socket) + 1, &fd_in, NULL, NULL, &timeout);
-/*
-      fprintf(stderr,"select(%x) => %d\n", fd_in.fdmask[0], rc);
-      fflush(stderr);
-*/
-
-      if (rc < 0)
-      {
-          fprintf(stderr, "select() error %d\n", errno);
-          break;
-      }
-
-      if (rc == 0)
-      {
-        sprintf(buffer, "nothing from %d\n%c", socket, 0x0a);
-        /* write(socket, buffer, strlen(buffer));  */
-      }
-      else
-      /* read any socket input and send to slave input */
-      if (FD_ISSET(socket, &fd_in))
-      {
-        if (ts.bi.start == ts.bi.end)
+        if(last_read > 0)
         {
-            n = (int)read(socket, ts.bi.data, sizeof(ts.bi.data));
-#ifdef DEBUG
-  fprintf(stderr, "read %d bytes from %d\n", n, socket);
+          /* if there is input, for a few loops use a short timeout */
+          timeout.tv_usec = 50000;
+          last_read--;
+        }
 #endif
 
-            if (n < 0)
-            {
-              if (errno != EINTR)
-              {
-								break;
-              }
+/*
+        fprintf(stderr,"select(%d, %x,0,0,%d)\012\n",n+1,fd_in.fdmask[0],timeout.tv_usec);
+        fflush(stderr);
+*/
 
-              continue;
-            }
+        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
-#if 0
-            /* Convert cr nul to cr lf. */
-            for (i = 0; i < n; ++i) {
-              unsigned char ch = ts.bi.data[i];
-              if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
-              last_was_cr = (ch == '\r');
-            }
-#endif
+/*
+        fprintf(stderr,"select(%x) => %d\012\n", fd_in.fdmask[0], rc);
+        fflush(stderr);
+*/
 
-            ts.bi.start = ts.bi.data;
-            ts.bi.end = ts.bi.data + n;
+        if (rc < 0)
+        {
+            fprintf(stderr, "select() error %d\n", errno);
+            break;
         }
 
-        /* Parse user input for telnet options */
-        parse(&ts);
 
-        /* Application ready to receive */
-        if (ts.bi.start != ts.bi.end)
+        if (rc == 0)
         {
-            n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
-#ifdef DEBUG
-  fprintf(stderr, "write %d bytes to fdmaster%d\012\n", n, fdmaster);
+          sprintf(buffer, "nothing from %d\012\n", din);
+          /* write(dout, buffer, strlen(buffer)); */
+        }
+        else
+
+        /* read any socket input (din) and send to slave input */
+        if (FD_ISSET(din, &fd_in))
+        {
+          if (ts.bi.start == ts.bi.end)
+          {
+              n = (int)read(din, ts.bi.data, sizeof(ts.bi.data));
+#ifdef DEBUGEX
+              fprintf(stderr, "read %d bytes from %d\012\n", n, din);
 #endif
-           /* Uniflex pty does not handle Ctrl-C! */
-           if (ts.bi.start[0] == 0x03)
-           {
-             /* fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid); */
-             kill(sessionpid, SIGINT);
-             control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
-           }
 
+              if (n < 0)
+              {
+                if (errno != EINTR)
+                {
+                  break;
+                }
 
+                continue;
+              }
+
+#if 0
+              /* Convert cr nul to cr lf. */
+              for (i = 0; i < n; ++i) {
+                unsigned char ch = ts.bi.data[i];
+                if (ch == 0 && last_was_cr) ts.bi.data[i] = '\n';
+                last_was_cr = (ch == '\r');
+              }
+#endif
+
+              ts.bi.start = ts.bi.data;
+              ts.bi.end = ts.bi.data + n;
+          }
+
+          /* Parse user input for telnet options */
+          parse(&ts);
+
+          /* Application ready to receive */
+          if (ts.bi.start != ts.bi.end)
+          {
+              n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
+#ifdef DEBUGEX
+             fprintf(stderr, "write %d bytes to fdmaster%d\012\n", n, fdmaster);
+#endif
+             /* Uniflex pty does not handle Ctrl-C! */
+             if (ts.bi.start[0] == 0x03)
+             {
+               /* fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid); */
+               kill(sessionpid, SIGINT);
+               control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
+             }
+
+              if (n < 0)
+              {
+                if (errno != EINTR)
+                {
+                  break;
+                }
+                continue;
+              }
+
+              ts.bi.start += n;
+          }
+        }
+
+        /* read any slave output and send to socket */
+        /* select says bytes to read but read busy waits forever */
+        /* select just doesn't work with pty descriptors */
+        
+#ifdef __clang__
+        if (FD_ISSET(fdmaster, &fd_in))
+#else
+        n = control_pty(fdmaster, PTY_INQUIRY, 0);
+        last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
+        if (n & PTY_OUTPUT_QUEUED)
+#endif
+        {
+          /* Data arrived from application */
+          if (ts.bo.start == ts.bo.end)
+          {
+#ifdef DEBUGEX
+            fprintf(stderr, "about to try read from fdmaster%d\012\n", fdmaster);
+            fflush(stderr);
+#endif
+            n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
             if (n < 0)
             {
               if (errno != EINTR)
@@ -526,86 +571,44 @@ char *from;
               continue;
             }
 
-            ts.bi.start += n;
-        }
-      }
+            if (n == 0)
+            {
+                /* fprintf(stderr,"broken connection\012\n"); */
+                break;
+            }
+            else
+            if (n == 4096)
+            {
+              fprintf(stderr,"read chocked\n");
+            }
 
-      /* read any slave output and send to socket */
-      /* select says bytes to read but read busy waits forever */
-      /* select just doesn't work with pty descriptors */
-      
-      n = control_pty(fdmaster, PTY_INQUIRY, 0);
-#ifdef DEBUG
-      if ((n & PTY_OUTPUT_QUEUED))
-      {
-        fprintf(stderr, "fdmaster has OUTPUT_QUEUED\n");
-        fflush(stderr);
-      }
-#endif
+            ts.bo.start = ts.bo.data;
+            ts.bo.end = ts.bo.data + n;
+          }
 
-#ifdef __clang__
-      if (FD_ISSET(fdmaster, &fd_in))
-#else
-      last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
-      if (n & PTY_OUTPUT_QUEUED)
-#endif
-      {
-        /* Data arrived from application */
-        if (ts.bo.start == ts.bo.end) 
-        {
-#ifdef DEBUG
-          fprintf(stderr, "about to try read from fdmaster%d\n", fdmaster);
-          fflush(stderr);
-#endif
-          n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data)); 
-          if (n < 0)
+          if (ts.bo.start != ts.bo.end)
           {
-            if (errno != EINTR)
+#ifdef DEBUGEX
+            fprintf(stderr, "writing %d bytes to %d\012\n", ts.bo.end - ts.bo.start, dout);
+            fflush(stderr);
+#endif
+            n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
+            if (n < 0)
             {
               break;
             }
-            continue;
+            if (n < ts.bo.end - ts.bo.start)
+            {
+              fprintf(stderr, "output choked\n");
+            }
+            ts.bo.start += n;
           }
-
-          if (n == 0)
-          {
-              /* fprintf(stderr,"broken connection\012\n"); */
-              close(socket);
-              break;
-          }
-          else
-          if (n == 4096)
-          {
-            fprintf(stderr,"read chocked\n");
-          }
-
-          ts.bo.start = ts.bo.data;
-          ts.bo.end = ts.bo.data + n;
-        }
-
-        if (ts.bo.start != ts.bo.end)
-        {
-#ifdef DEBUG
-          fprintf(stderr, "writing %d bytes to %d\n", ts.bo.end - ts.bo.start, socket);
-          fflush(stderr);
-#endif
-          n = (int)write(socket, ts.bo.start, ts.bo.end - ts.bo.start);
-          if (n < 0)
-          {
-            break;
-          }
-          if (n < ts.bo.end - ts.bo.start)
-          {
-            fprintf(stderr, "output choked\n");
-          }
-          ts.bo.start += n;
         }
       }
-    }
     
-    /* collect child process */
-    wait(&rc);
-    
+      /* collect child process */
+      kill(sessionpid, SIGQUIT);
+      wait(&rc);
   }
   else
   {
@@ -622,7 +625,7 @@ char *from;
     strcat(sessionname, from);
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
-  		
+      
     /* does opening the  ptty make it controlling? */
     /*
       https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
@@ -692,11 +695,11 @@ void logtime()
   time_t timestamp;
   struct tm *ts;
 
-		timestamp = time(NULL);
-		ts = localtime(&timestamp);
-		fprintf(stderr, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
-				ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
-				ts->tm_hour, ts->tm_min);
+    timestamp = time(NULL);
+    ts = localtime(&timestamp);
+    fprintf(stderr, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
+        ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
+        ts->tm_hour, ts->tm_min);
 }
 
 int
@@ -714,97 +717,118 @@ char **argv;
   socketopt opt;
 #endif
   int reuse = 1;
-    
-  sock = socket(AF_INET, SOCK_STREAM, 0);
-  if (sock < 0) {
-    fprintf(stderr, "socket: %s\n",strerror(errno));
-    return 1;
-  }
 
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port = htons(IPO_TELNET);
-  rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
-  if (rc < 0) {
-    fprintf(stderr, "bind: %s\n",strerror(errno));
-    close(sock);
-    return errno;
-  }
-
-   signal(SIGINT, SIG_IGN);
-   signal(SIGQUIT, SIG_IGN);
-   
-   signal(SIGTERM, cleanup_and_exit);
-
-   signal(SIGDEAD, cleanup_session);
-
-  rc = listen(sock, 5);
-  if (rc < 0) {
-    fprintf(stderr, "listen: %s\n",strerror(errno));
-    close(sock);
-    return errno;
-  }
-
-  fprintf(stderr, "telnetd started\n");
   state = RUNNING;
-  while (state == RUNNING) 
-  {
-    newsock = 0;
-    while (state == RUNNING && newsock <= 0)
-    {
-      newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
-      if (newsock < 0){ 
-        if (errno == EINTR) continue;
-        if (errno == ETIMEDOUT) continue;
-        if (errno == ENETUNREACH) continue;
-        if (errno == EHOSTUNREACH) continue;
-        if (errno == ECONNRESET) continue;
-        if (errno == ENETDOWN) continue;
-        if (errno == ENOPROTOOPT) continue;
 
-        fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
-        close(sock);
-        return errno;
-      }
+   /* listen for connections too? */
+  if (argc > 1 && !strcmp(argv[1],"-s"))
+  {
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+      fprintf(stderr, "socket: %s\n",strerror(errno));
+      return 1;
     }
-    
-    if (state == STOPPED) break;
+
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = INADDR_ANY;
+    serv_addr.sin_port = htons(IPO_TELNET);
+    rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
+    if (rc < 0) {
+      fprintf(stderr, "bind: %s\n",strerror(errno));
+      close(sock);
+      return errno;
+    }
+
+     signal(SIGINT, SIG_IGN);
+     signal(SIGQUIT, SIG_IGN);
+     
+     signal(SIGTERM, cleanup_and_exit);
+     signal(SIGDEAD, cleanup_session);
+
+    rc = listen(sock, 5);
+    if (rc < 0) {
+      fprintf(stderr, "listen: %s\n",strerror(errno));
+      close(sock);
+      return errno;
+    }
+
+    fprintf(stderr, "telnetd started\n");
+    while (state == RUNNING)
+    {
+      newsock = 0;
+      while (state == RUNNING && newsock <= 0)
+      {
+        newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
+        if (newsock < 0){
+          if (errno == EINTR) continue;
+          if (errno == ETIMEDOUT) continue;
+          if (errno == ENETUNREACH) continue;
+          if (errno == EHOSTUNREACH) continue;
+          if (errno == ECONNRESET) continue;
+          if (errno == ENETDOWN) continue;
+          if (errno == ENOPROTOOPT) continue;
+
+          fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
+          close(sock);
+          return errno;
+        }
+      }
+      
+      if (state == STOPPED) break;
 
 #ifndef __clang__
-    /* setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0); */
-    /* is turning off Nagle supported? */
+      /* setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0); */
+      /* is turning off Nagle supported? */
 #else
-    setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
+      setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
-    /* Uniflex accept() doesn't fill this in.. */
-    cli_addr_len = sizeof(cli_addr);
-    rc = getpeername(newsock, (struct sockaddr *) &cli_addr, &cli_addr_len);
+      /* Uniflex accept() doesn't fill this in.. */
+      cli_addr_len = sizeof(cli_addr);
+      rc = getpeername(newsock, (struct sockaddr *) &cli_addr, &cli_addr_len);
 
-    if (fork())
-    {
-      logtime();
-      fprintf(stderr, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      if (fork())
+      {
+        logtime();
+        fprintf(stderr, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+      
+        sleep(5);
+        close(newsock);
+      }
+      else
+      {
+        argv[0] = "client";
+
+        rc = telnet_session(newsock, newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
+      
+        logtime();
+        fprintf(stderr, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
+
+        break;
+      }
+
+    }
     
-      sleep(5);
-      close(newsock); 
+    close(sock);
+  }
+  else
+  {
+    struct stat s;
+    
+    fstat(0, &s);
+    if (s.st_mode & S_IFPIPE)
+    {
+      /* use socketpair */
+      rc = telnet_session(0, 1, "local");
     }
     else
     {
-      argv[0] = "client";
-
-      rc = telnet_session(newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
-
-      logtime();
-      fprintf(stderr, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
-
-      break;
+      fprintf(stderr, "stdin is not a pipe.\n");	
     }
-
   }
-  close(sock); 
+  
   return 0;
 }
 
