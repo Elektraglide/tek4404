@@ -153,12 +153,17 @@ int *sockinput;
 int fdtty;
 
 /**********************************/
-#define WINTITLEBAR 24
-#define WINBORDER 8
-#define CLOSEBOX
+
+#define DEBUGREPAINTxxx
+
+#define WINTITLEBAR 16
+#define WINBORDER 16
+#define CLOSEBOX 8
 
 #define FORCEPAINT 	0x0001
 #define DRAGGED 		0x8000
+
+#define DIRTYFRAME 2
 
 struct DISPSTATE ds;
 struct FontHeader *font;
@@ -423,7 +428,7 @@ Window *win;
 
     VTfocus(win->vt, win->master);
 
-    win->dirty |= 2;
+    win->dirty |= DIRTYFRAME;
     win->vt.dirtylines |= (1 << win->vt.rows) - 1;
   }
   
@@ -493,7 +498,7 @@ int islogger;
     sprintf(win->title, "%s %s [pid:%d]", title, ttyname(win->slave), pid);
 
     /* needs rendering */
-    win->dirty = 2;
+    win->dirty = DIRTYFRAME;
     win->vt.dirtylines = (1 << (win->vt.rows-1)) - 1;
 
     /* link it */
@@ -534,7 +539,7 @@ int x, y;
     win->windowrect.y = win->contentrect.y - WINTITLEBAR;
 
     /* frame is dirty */
-    win->dirty |= 2;
+    win->dirty |= DIRTYFRAME;
     win->vt.dirtylines |= (1 << win->vt.rows) - 1;
     
     return 1;
@@ -570,6 +575,42 @@ int n,ox,oy;
   }
 }
 
+/* adjust line[] to be inside clipprect */
+static int cropline(aline, len, origin, glyph)
+char *aline;
+int len;
+struct POINT *origin;
+struct RECT *glyph;
+{
+  int excess;
+
+	/* crop top and bottom */
+	if (origin->y + glyph->h < bb.cliprect.y || origin->y > bb.cliprect.y + bb.cliprect.h)
+	{
+		len = 0;
+	}
+	else
+	{
+    /* crop left */
+    excess = bb.cliprect.x - origin->x;
+    if (excess > 0)
+    {
+      memcpy(aline, aline + excess / glyph->w, len);
+      origin->x += excess;
+      len -= excess / glyph->w;
+    }
+
+    /* crop right */
+    excess = (origin->x + len * glyph->w) - (bb.cliprect.x + bb.cliprect.w);
+    if (excess > 0)
+    {
+      len -= excess / glyph->w;
+    }
+	}
+	
+	return len;
+}
+
 int WindowRender(win, forcedirty)
 Window *win;
 int forcedirty;
@@ -594,7 +635,7 @@ int forcedirty;
     bb.destrect.w = screen->w;
     bb.destrect.h = screen->h;
     
-    if (forcedirty || (win->dirty & 2))
+    if (forcedirty || (win->dirty & DIRTYFRAME))
     {
       /* render (just) frame */
       r = win->windowrect;
@@ -632,10 +673,10 @@ int forcedirty;
       /* render closebox */
       bb.halftoneform = &WhiteMask;
       r = win->windowrect;
-      r.x += 8;
-      r.y += 8;
-      r.w = 12;
-      r.h = 12;
+      r.x += (WINBORDER-CLOSEBOX)>>1;
+      r.y += (WINTITLEBAR-CLOSEBOX)>>1;
+      r.w = CLOSEBOX;
+      r.h = CLOSEBOX;
       RectDrawX(&r, &bb);
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
@@ -643,10 +684,14 @@ int forcedirty;
 
       /* render centered title */
       bb.halftoneform = &BlackMask;
-      j = StringWidth(win->title, font);
+      strcpy(line, win->title);
+      if (win->contentrect.h == 0)
+      	line[24] = '\0';
+
+      j = StringWidth(line, font);
       origin.x = win->windowrect.x + win->windowrect.w / 2 - j/2;
-      origin.y = win->windowrect.y + (WINTITLEBAR - glyph.h)/2 + glyph.h;
-      StringDrawX(win->title, &origin, &bb, font);
+      origin.y = win->windowrect.y + (WINTITLEBAR - glyph.h)/2 + font->maps->baseline;
+      StringDrawX(line, &origin, &bb, font);
     }
 
     /* during dragging do not update content */
@@ -673,7 +718,7 @@ int forcedirty;
         
         /* is it dirty AND not clipped away */
         r.x = origin.x;
-        r.y = origin.y - glyph.h;
+        r.y = origin.y - font->maps->baseline;
         r.w = win->contentrect.w;
         r.h = glyph.h;
         if ((win->vt.dirtylines & (1<<j)) && myRectIntersects(&r, &bb.cliprect))
@@ -717,17 +762,30 @@ int forcedirty;
             n++;
           }
 
-          line[n] = '\0';
-          if (usecustomblit && !style)
+          n = cropline(line, n, &origin, &glyph);
+#ifdef DEBUGREPAINT
+          r2.x = origin.x;
+          r2.y = origin.y - font->maps->baseline;
+          r2.w = n * glyph.w;
+          r2.h = glyph.h;
+
+          RectDebug(&r2, rand() & 255,rand() & 255,rand() & 255);
+#else
+          if (n > 0)
           {
-            renderstring(line, n, origin.x, origin.y);
+            line[n] = '\0';
+            if (usecustomblit && !style)
+            {
+              renderstring(line, n, origin.x, origin.y);
+            }
+            else
+            {
+              strpos = origin;
+              StringDrawX(line, &strpos, &bb, font);
+            }
           }
-          else
-          {
-            strpos = origin;
-            StringDrawX(line, &strpos, &bb, font);
-          }
-          
+#endif
+
           numlines++;
         }
         
@@ -826,29 +884,18 @@ int forcedirty;
   {
     bb.halftoneform =  &GrayMask;
 
-    if ((counter & 1) == 0)
+#ifdef DEBUGREPAINTxx
+		if ((counter & 1) == 0)
     {
       i = rand() & 255;
-  /*    RectDebug(r, i,i,i); */
+     RectDebug(r, i,i,i);
     }
+#endif
     
-    bb.cliprect = *r;
     RectDrawX(r, &bb);
   }
   else
   {
-    /* repaint self */
-    RectIntersect(r, &win->windowrect, &overlap);
-    if (overlap.w > 0 && overlap.h > 0)
-    {
-      SetClip(&overlap);
-      WindowRender(win, forcedirty);
-      if ((counter & 1) == 0)
-      {
-      /*  RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255); */
-      }
-    }
-
     /* recurse for parts outside this window */
     quadrect.next = 0;
     RectAreasOutside(r, &win->windowrect, &quadrect);
@@ -856,6 +903,31 @@ int forcedirty;
     {
       Paint(win->next, &quadrect.region[i], forcedirty);
     }
+
+    /* repaint self */
+    RectIntersect(r, &win->windowrect, &overlap);
+    if (overlap.w > 0 && overlap.h > 0)
+    {
+    	struct RECT oldclip;
+     
+      oldclip.x  = bb.cliprect.x;
+      oldclip.y  = bb.cliprect.y;
+      oldclip.w  = bb.cliprect.w;
+      oldclip.h  = bb.cliprect.h;
+      SetClip(&overlap);
+
+#ifdef DEBUGREPAINT
+      if ((counter & 1) == 0)
+      {
+      	 RectDebug(&overlap, rand() & 255,rand() & 255,rand() & 255);
+      }
+#endif
+
+      WindowRender(win, forcedirty);
+      
+      bb.cliprect = oldclip;
+    }
+
   }
 }
 
@@ -930,6 +1002,7 @@ int wid;
   if (numwindows > 0)
     WindowTop(&allwindows[0]);
 
+	SetClip(&oldrect);
   Paint(wintopmost, &oldrect, FORCEPAINT);
 }
 
@@ -1241,7 +1314,7 @@ if (GetButtons() & M_MIDDLE)
         while (win)
         {
           /* docs wrong; returns 0 if contained */
-          if (!myRectContainsPoint(&win->windowrect, &origin) && myRectContainsPoint(&win->contentrect, &origin))
+          if (!myRectContainsPoint(&win->windowrect, &origin))
           {
             WindowTop(win);
 
@@ -1249,7 +1322,8 @@ if (GetButtons() & M_MIDDLE)
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
 
-            /* track drag */
+            /* track drag of window frame */
+            if (myRectContainsPoint(&win->contentrect, &origin))
             while (GetButtons() & M_LEFT)
             {
               GetMPosition(&p);
@@ -1336,6 +1410,7 @@ if (GetButtons() & M_MIDDLE)
   {
     if (win->dirty || win->vt.dirtylines)
     {
+    	SetClip(&win->windowrect);
       Paint(wintopmost, &win->windowrect, FALSE);
       win->dirty = 0;
       win->vt.dirtylines = 0;

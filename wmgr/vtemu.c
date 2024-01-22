@@ -370,7 +370,6 @@ int fdout;
                 vt->dirtylines |= (1 << i);
                 vt->linelengths[i] = vt->cols - 1;
               }
-              vt->linelengths[vt->cy] = vt->cx;
             }
             vt->cx = 0;
             vt->cy = 0;
