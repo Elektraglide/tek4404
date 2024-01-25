@@ -529,7 +529,7 @@ int x, y;
     SetClip(&win->windowrect);
   }
 
-  if (x != win->windowrect.x || win->windowrect.y != y)
+  if ((x & -8) != win->windowrect.x || win->windowrect.y != y)
   {
     /* byte boundary for faster blit? */
     win->contentrect.x = (x + WINBORDER) & -8;
@@ -1322,7 +1322,7 @@ if (GetButtons() & M_MIDDLE)
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
 
-            /* track drag of window frame */
+            /* track drag of window frame (ie not in contentrect) */
             if (myRectContainsPoint(&win->contentrect, &origin))
             while (GetButtons() & M_LEFT)
             {
@@ -1334,12 +1334,13 @@ if (GetButtons() & M_MIDDLE)
                 /* repaint only difference of old and new */
                 quadrect.next = 0;
                 RectAreasOutside(&r2, &win->windowrect, &quadrect);
+
                 for(j=0; j<quadrect.next; j++)
                   Paint(wintopmost->next, &quadrect.region[j], FORCEPAINT | DRAGGED);
 
                 SetClip(&win->windowrect);
                 WindowRender(win, FORCEPAINT | DRAGGED);
-                
+
 #ifdef __clang__
                 SDLrefreshwin();
 #endif
@@ -1350,10 +1351,10 @@ if (GetButtons() & M_MIDDLE)
             if (offset.x < 20 && offset.y < 20)
             {
               WindowMin(win);
-            }
-            
             /* repaint everything */
             Paint(wintopmost, &screenrect, FORCEPAINT);
+            
+            }
             
             /* now has focus */
             break;
@@ -1418,6 +1419,8 @@ if (GetButtons() & M_MIDDLE)
 
     win = win->next;
   }
+  
+  /* drop shadow for top window ? */
 
   /* focus cursor */
   if (wintopmost)
