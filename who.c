@@ -21,7 +21,7 @@ char **argv;
       /* no CR */
       buffer[24] = '\0';
       
-      printf("%s\t%02s\n", record->ut_user, record->ut_line, buffer );
+      printf("%s\t%02s\t%s\n", record->ut_user, record->ut_line, buffer );
     }
     endutent();
     
