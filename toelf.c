@@ -20,19 +20,6 @@
 #define min(A,B)  (A < B ? A : B)
 
 
-#pragma pack(1)
-
-typedef struct {
-
-  short kind;
-  int offset;
-  short segment;
-
-  short len;
-  
-} symbolheader;
-
-
 char buffer[4096];
 
 int readshort(int fd)
@@ -55,15 +42,15 @@ Elf32_Sym symbols[4096];
 int numsymbols = 0;
 
 /* ongoing string lump offsets */
-char globalstrings[32768] = "\0";
+char globalstrings[512*1024] = "\0";
 int stringoffset = 1;
 int addstring(char *label)
 {
   int startpos = stringoffset;
   memcpy(globalstrings+stringoffset, label, strlen(label)+1);
   stringoffset += strlen(label)+1;
-  if(stringoffset > 32768)
-		exit(3);
+  if(stringoffset > 512*1024)
+		fprintf(stderr, "*********** PANIC: overflow\n");
   return startpos;
 }
 
@@ -97,7 +84,7 @@ char *typename;
 
   // think this should be 0x40 bytes long as offsets are from after the header
   read(fd, &ph, sizeof(PH));
-  if (ph.magic[0] != 0x04) // what does ph.magic[1] mean?
+  if ((ph.magic[0]) != 0x04) // what does ph.magic[1] mean?
   {
     fprintf(stderr, "%s: not an executable  (%04x)\n", argv[1], ph.magic);
     return(1);
@@ -231,7 +218,7 @@ char *typename;
   symbols[numsymbols].st_shndx = htons(SHN_UNDEF);
   numsymbols++;
   if (numsymbols > 4096)
-		exit(5);
+		fprintf(stderr, "************** PANIC: overflow  symbols\n");
 #endif
 
   /* seek to symbols (offset from end) */
@@ -292,19 +279,19 @@ char *typename;
     buffer[sym.len] = '\0';
     switch(sym.segment)
     {
-      case 8:
+      case SEGABS:
         typename = "ABS";
         n = 1;
         break;
-      case 9:
+      case SEGTEXT:
         typename = "TEXT";
         n = 0;
         break;
-      case 10:
+      case SEGDATA:
         typename = "DATA";
         n = 1;
         break;
-      case 11:
+      case SEGBSS:
         typename = "BSS";
         n = 2;
         break;
