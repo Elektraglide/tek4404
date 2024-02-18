@@ -65,6 +65,19 @@ int findnamedsect(char *needle, Elf32_Shdr *sect, int numsects)
 	return numsects;
 }
 
+void datacpy(int dst, int src, int len)
+{
+	char buffer[4096];
+	int n;
+	
+	while(len > 0)
+	{
+		n = read(src, buffer, min(len, sizeof(buffer)) );
+		write(dst, buffer, n);
+		len -= n;
+	}
+}
+
 int main(int argc, char *argv[])
 {
 int fd, ph_fd;
@@ -95,7 +108,14 @@ char *typename;
       fprintf(stderr, "%s: not relocatable file\n", argv[1]);
       return(1);
 	}
-	
+#if 0	// FIXME: not understanding this I flag..
+	if (ntohl(eh.e_flags) != EF_CPU32)
+	{
+      fprintf(stderr, "%s: not Direct 32 bit \n", argv[1]);
+      return(1);
+	}
+#endif
+
 	// PH offsets start after header
 	adddata(sizeof(ph));
 	
@@ -154,37 +174,24 @@ char *typename;
 	// copy text section
 	lseek(fd, ntohl(sect[textindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[textindex].sh_size);
-	while(i > 0)
-	{
-		n = read(fd, buffer, min(i, sizeof(buffer)) );
-		write(ph_fd, buffer, n);
-		i -= n;
-	}
+	datacpy(ph_fd, fd, i);
 	
 	// copy data & rodata section
 	lseek(fd, ntohl(sect[dataindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[dataindex].sh_size);
-	while(i > 0)
-	{
-		n = read(fd, buffer, min(i, sizeof(buffer)) );
-		write(ph_fd, buffer, n);
-		i -= n;
-	}
+	datacpy(ph_fd, fd, i);
+
 	lseek(fd, ntohl(sect[rodataindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[rodataindex].sh_size);
-	while(i > 0)
-	{
-		n = read(fd, buffer, min(i, sizeof(buffer)) );
-		write(ph_fd, buffer, n);
-		i -= n;
-	}
+	datacpy(ph_fd, fd, i);
 	
-	// we need symbols to index into
+	// we need all symbols to index into
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
 	i = htonl(ph.symbolsize);
-	n = read(fd, symbols, i * sizeof(Elf32_Sym));
+	read(fd, symbols, i * sizeof(Elf32_Sym));
 	
 	// reloc
+	fprintf(stderr, "Reloc\n");
 	lseek(fd, ntohl(sect[relaindex].sh_offset), SEEK_SET);
 	i = htonl(ph.relocsize);
 	len = 0;
@@ -195,28 +202,41 @@ char *typename;
 		
 		read(fd, &elfreloc, sizeof(elfreloc));
 		int s = ELF32_R_SYM(ntohl(elfreloc.r_info));
-		int t = ELF32_R_TYPE(ntohl(elfreloc.r_info));
-		if (t == STT_FUNC || t == STT_OBJECT || t == STT_SECTION)
+		int rtype = ELF32_R_TYPE(ntohl(elfreloc.r_info));
+		//if (rtype == STT_FUNC || rtype == STT_OBJECT || rtype == STT_SECTION)
 		{
 			rel.offset = htonl(ntohl(elfreloc.r_offset));
-			rel.kind = htons(0x8001);
 
+			// need to handle t = R_68K_32, R_68K_16, R_68K_8,  R_68K_PC16 etc
+			// in known-good .r files I see 0x8001 for function calls and 0x0081 'other stuff'
+			if (rtype == R_68K_32)
+				rel.kind = htons(0x8001);
+			else
+			if (rtype == R_68K_PC32)
+				rel.kind = htons(0x0081);
+			else
+			{
+				rel.kind = 0;
+			}
+			
 			// lookup symbol and embed it
 			char *symbolname = strtab + ntohl(symbols[s].st_name);
 			n = strlen(symbolname);
 			rel.len = ntohs(n);
 
-			fprintf(stderr, "reloc %08x %s\n", ntohl(elfreloc.r_offset), symbolname);
+			fprintf(stderr, "%32s %3d %08x\n", symbolname, rtype, ntohl(elfreloc.r_offset) );
 			
 			write(ph_fd, &rel, sizeof(rel));
 			write(ph_fd, symbolname, n);
 			len += sizeof(rel);
+			len += n;
 			len += n;
 		}
 	}
 	ph.relocsize = htonl(len);
 				
 	// symbols
+	fprintf(stderr, "Symbols\n");
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
 	i = htonl(ph.symbolsize);
 	len = 0;
@@ -270,7 +290,6 @@ char *typename;
 	}
 	ph.symbolsize = htonl(len);
 	
-		
 	// lastly, any comments
 	lseek(fd, ntohl(sect[commentindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[commentindex].sh_size);
