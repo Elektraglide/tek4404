@@ -6,7 +6,7 @@
 /* probably 64 bytes, big endian */
 typedef struct
 {
-  unsigned char magic[2];    /* exe: 0x04, 0x00,  relocatable:  0x05, 0x00 */
+  unsigned char magic[2];    /* exe: 0x04, 0x00,  relocatable:  0x05, 0x00, BASIC compiled: 0x8d,0x00 */
   int textsize;
   int datasize;
   int bsssize;
@@ -22,14 +22,47 @@ typedef struct
   int symbolsize;
 
   short commentsize;
-  short rcssize;
+	short namesize;
+  short flags;
+  /* 0x8000 = no xfer address
+     0x1000 = has 68881 instructions
+     0x0800 = produce core dump
+     0x0400 = has 68020 instructions
+     0x0200 = 68881 signals enabled
+     0x0020 = bss not cleared
+	*/
 
-  short flags;    /* 0x8000 = no mc68881   0x0040 = core dump, 0x0020 = not clear BSS */
+  short unknown1;
+	int unknown2;			/* address mask? */
+	
+  short rcssize;
   
-  int unknown2[3];
+  int unknown3;
   
-  int data2;      /* eg 0x00020000 */
-  int data3;      /* eg 0x00040000 */
+  short source;			/* 1 = assembler, 2 = C, 3 = Pascal, 4 = Fortran, 5 = Cobol */
+  short unknown4;
+  
+  short configuration;
+  /* 0 = unknown
+     1 = Momentum Hawk
+     2 = Pixel 100
+     4 = Tektronix 4404
+     5 = TSC SBC
+     6 = Tektronix CBI
+     7 = Force CPU-3V
+     8 = VME/10
+     9 = Ironics IV1600
+		10 = Gimix GMX-20
+		11 = NCR Tower
+		12 = Gimix MICRO-20
+		13 = SWTPc SB68K
+		14 = VTM-1000
+		15 = Tektronix 4406
+		17 = SWTPcVME System
+		64 = Gimix MICRO-20 (non-MMU)
+  */
+
+  short unknown5;
 } PH;
 
 typedef struct {
