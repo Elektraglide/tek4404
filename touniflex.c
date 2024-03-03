@@ -91,6 +91,7 @@ int j = ntohl(r2->r_offset);
 void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int rodataindex, int dataoffset)
 {
 	int i;
+	int targetsection;
 	
 	for(i=0; i<n; i++)
 	{
@@ -104,28 +105,33 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 		{
 			if (symtype == STT_SECTION)
 			{
-				if (symindex == rodataindex)
+				targetsection = ntohs(symbols[symindex].st_shndx);
+
+				// rodata offsets need to be adjusted because they are relative to data (we dont have rodata in Uniflex)
+				if (targetsection == rodataindex)
 				{
 					//rarray[i].r_offset = htonl(ntohl(rarray[i].r_offset) + dataoffset);
 					rarray[i].r_addend = htonl(ntohl(rarray[i].r_addend) + dataoffset);
+					fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
 				}
 			}
 		}
 	}
 }
 
-emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int textindex, int dataindex, int rodataindex, int bssindex, PH *ph, int targetsection)
+int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int textindex, int dataindex, int rodataindex, int bssindex, PH *ph, int targetsection)
 {
-	int i,n;
+	int i;
 	int len = 0;
 
 	// calc offset to targetsection knowing we always have: text,data,(bss)
 	int sectionstart = 0;
 	if (targetsection == dataindex)	sectionstart = ntohl(ph->textsize);
-	if (targetsection == bssindex)	sectionstart = ntohl(ph->textsize) + ntohl(ph->datasize);
+	if (targetsection == rodataindex)	sectionstart = ntohl(ph->textsize) + ntohl(ph->datasize);
 	
 	int instsegment = 1;
 	if (targetsection == dataindex)	instsegment = 2;
+	if (targetsection == rodataindex)	instsegment = 2;
 	if (targetsection == bssindex)	instsegment = 3;
 	
 	for(i=0; i<numrecords; i++)
@@ -134,18 +140,23 @@ emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int
 		relocheader rel;
 		
 		elfreloc = rarray[i];
-		int symindex = ELF32_R_SYM(ntohl(elfreloc.r_info));
+		int rsymindex = ELF32_R_SYM(ntohl(elfreloc.r_info));
 		int rtype = ELF32_R_TYPE(ntohl(elfreloc.r_info));
 
 		rel.offset = htonl(ntohl(elfreloc.r_offset));
 
 		// lookup symbol
-		int symtype = ELF32_ST_TYPE(symbols[symindex].st_info);
-		
-		char *symbolname = strtab + ntohl(symbols[symindex].st_name);
+		int symtype = ELF32_ST_TYPE(symbols[rsymindex].st_info);
+		char *symbolname = strtab + ntohl(symbols[rsymindex].st_name);
 		int namelen = strlen(symbolname);
 		rel.len = ntohs(namelen);
 
+		if (symtype == STT_FILE)
+		{
+			fprintf(stderr,"file: %s\n", symbolname);
+			continue;
+		}
+		
 		if (rtype == R_68K_NONE)
 		{
 			rel.kind = 0;
@@ -157,44 +168,45 @@ emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int
 
 			if (symtype == STT_SECTION)
 			{
-				n = ntohs(symbols[symindex].st_shndx);
+				int targetsection = ntohs(symbols[rsymindex].st_shndx);
 				
-				if (n == bssindex)
+				if (targetsection == bssindex)
 				{
 					symbolname = "BSS";
 					rel.kind = htons(0x00c0 + instsegment);
 				}
 				else
-				if (n == rodataindex)
+				if (targetsection == rodataindex)
 				{
 					symbolname = "RODATA";
 					rel.kind = htons(0x0080 + instsegment);
 				}
 				else
-				if (n == dataindex)
+				if (targetsection == dataindex)
 				{
 					symbolname = "DATA";
 					rel.kind = htons(0x0080 + instsegment);
 				}
 				else
-				if (n == textindex)
+				if (targetsection == textindex)
 				{
 					symbolname = "TEXT";
 					rel.kind = htons(0x0040 + instsegment);
 				}
 				
-				// this is horribly inefficient...
-				// Uniflex does not have addend reloc records, so we need to embed its value like a Elf32_Rel
-				if (elfreloc.r_addend != 0)
-				{
-					off_t crp = lseek(ph_fd, 0, SEEK_CUR);
-						lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
-						int v = htonl(ntohl(elfreloc.r_addend));
-						write(ph_fd, &v, sizeof(v));
-					lseek(ph_fd, crp, SEEK_SET);
-				}
 			}
 			
+			// this is horribly inefficient...
+			// Uniflex does not have addend reloc records, so we need to embed its value like a Elf32_Rel
+			if (elfreloc.r_addend != 0)
+			{
+				off_t crp = lseek(ph_fd, 0, SEEK_CUR);
+					lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
+					int v = htonl(ntohl(elfreloc.r_addend));
+			//		v = htonl(0xDEADDEAD);
+					write(ph_fd, &v, sizeof(v));
+				lseek(ph_fd, crp, SEEK_SET);
+			}
 		}
 		else
 		if (rtype == R_68K_PC32)
@@ -239,7 +251,7 @@ off_t crp;
 	// explore ELF
 	read(fd, &eh, sizeof(Elf32_Ehdr));
 
-  fprintf(stderr, "executable:  %s \n", strrchr(argv[1],'/'));
+  fprintf(stderr, "relocatable:  %s \n", strrchr(argv[1],'/'));
 	if (ntohs(eh.e_machine) != EM_68K)
 	{
       fprintf(stderr, "%s: not m68k\n", argv[1]);
@@ -250,13 +262,6 @@ off_t crp;
       fprintf(stderr, "%s: not relocatable file\n", argv[1]);
       return(1);
 	}
-#if 0	// FIXME: not understanding this I flag..
-	if (ntohl(eh.e_flags) != EF_CPU32)
-	{
-      fprintf(stderr, "%s: not Direct 32 bit \n", argv[1]);
-      return(1);
-	}
-#endif
 
 	// PH offsets start after header
 	adddata(sizeof(ph));
@@ -331,6 +336,9 @@ off_t crp;
 	int reladataindex = findnamedsect(".rela.data", sect, ntohs(eh.e_shnum));
 	int reladatasect = reladataindex > 0 ? ntohl(sect[reladataindex].sh_info) : -1;
 
+	int relarodataindex = findnamedsect(".rela.rodata", sect, ntohs(eh.e_shnum));
+	int relarodatasect = relarodataindex > 0 ? ntohl(sect[relarodataindex].sh_info) : -1;
+
   /* writing PH */
   sprintf(buffer, "%s.r", argv[1]);
   ph_fd = open(buffer, O_RDWR | O_TRUNC| O_CREAT, 0666);
@@ -350,7 +358,7 @@ off_t crp;
 	if (textindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "text section at %08lx\n", crp);
+		fprintf(stderr, "text section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[textindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[textindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -360,7 +368,7 @@ off_t crp;
 	if (dataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "data section at %08lx\n", crp);
+		fprintf(stderr, "data section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[dataindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[dataindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -368,7 +376,7 @@ off_t crp;
 	if (rodataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rodata section at %08lx\n", crp);
+		fprintf(stderr, "rodata section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[rodataindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[rodataindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -383,8 +391,8 @@ off_t crp;
 	len = 0;
 	if (relatextindex > 0)
 	{
-		n = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rela.text section at %08lx\n", n);
+		crp = lseek(ph_fd, 0, SEEK_CUR);
+		fprintf(stderr, "rela.text section at %08llx\n", crp);
 
 		// assert(ntohl(sect[relatextindex].sh_link) == symindex);
 		
@@ -393,7 +401,7 @@ off_t crp;
 		read(fd, rarray, ntohl(sect[relatextindex].sh_size));
 		n = ntohl(sect[relatextindex].sh_size) / ntohl(sect[relatextindex].sh_entsize);
 		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
-		//qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 
 		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, relatextsect);
 		free(rarray);
@@ -402,7 +410,7 @@ off_t crp;
 	if (reladataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rela.data section at %08lx\n", crp);
+		fprintf(stderr, "rela.data section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[reladataindex].sh_offset), SEEK_SET);
 
 		//	assert(ntohl(sect[reladataindex].sh_link) == symindex);
@@ -411,17 +419,36 @@ off_t crp;
 		read(fd, rarray, ntohl(sect[reladataindex].sh_size));
 		n = ntohl(sect[reladataindex].sh_size) / ntohl(sect[reladataindex].sh_entsize);
 		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
-		//qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 
 		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, reladatasect);
 		free(rarray);
 	}
 
+	if (relarodataindex > 0)
+	{
+		crp = lseek(ph_fd, 0, SEEK_CUR);
+		fprintf(stderr, "rela.rodata section at %08llx\n", crp);
+		lseek(fd, ntohl(sect[relarodataindex].sh_offset), SEEK_SET);
+
+		//	assert(ntohl(sect[relarodataindex].sh_link) == symindex);
+
+		Elf32_Rela *rarray = (Elf32_Rela *)malloc(ntohl(sect[relarodataindex].sh_size));
+		read(fd, rarray, ntohl(sect[relarodataindex].sh_size));
+		n = ntohl(sect[relarodataindex].sh_size) / ntohl(sect[relarodataindex].sh_entsize);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
+		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+
+		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, relarodatasect);
+		free(rarray);
+		
+	}
+	
 	ph.relocsize = htonl(len);
 	
 	// symbols
 	crp = lseek(ph_fd, 0, SEEK_CUR);
-	fprintf(stderr, "Symbols section at %08lx\n", crp);
+	fprintf(stderr, "Symbols section at %08llx\n", crp);
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
 	len = 0;
 	for(i=0; i<htonl(ph.symbolsize); i++)
@@ -482,7 +509,7 @@ off_t crp;
 	
 	// lastly, any comments
 	crp = lseek(ph_fd, 0, SEEK_CUR);
-	fprintf(stderr, "comment section at %08lx\n", crp);
+	fprintf(stderr, "comment section at %08llx\n", crp);
 	lseek(fd, ntohl(sect[commentindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[commentindex].sh_size);
 	datacpy(ph_fd, fd, i);
