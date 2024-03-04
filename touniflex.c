@@ -219,7 +219,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 			rel.kind = 0;
 		}
 		
-		fprintf(stderr, "%32s %04x %08x addend(%08lx)\n", symbolname, ntohs(rel.kind), ntohl(rel.offset), ntohl(elfreloc.r_addend) );
+		fprintf(stderr, "%32s %04x %08x addend(%08x)\n", symbolname, ntohs(rel.kind), ntohl(rel.offset), ntohl(elfreloc.r_addend) );
 		
 		write(ph_fd, &rel, sizeof(rel));
 		if (namelen > 0)
@@ -457,7 +457,15 @@ off_t crp;
 		symbolheader sym;
 		
 		elfsymbol = symbols[i];
+		
+			char *symbolname = strtab + ntohl(elfsymbol.st_name);
+			sym.len = ntohs(strlen(symbolname));
+		
+		// only interested in GLOBAL symbols
 		int b = ELF32_ST_BIND(elfsymbol.st_info);
+		if (b != STB_GLOBAL)
+			continue;
+				
 		int t = ELF32_ST_TYPE(elfsymbol.st_info);
 		if (t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
 		{
@@ -492,9 +500,6 @@ off_t crp;
 				typename = "UNDEF";
 			}
 
-			char *symbolname = strtab + ntohl(elfsymbol.st_name);
-			sym.len = ntohs(strlen(symbolname));
-		
 			fprintf(stderr,"%32s %6s %08x\n", symbolname, typename, ntohl(sym.offset));
 			
 			// write sym + string
