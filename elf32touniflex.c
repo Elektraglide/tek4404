@@ -21,6 +21,7 @@
 #define min(A,B)  (A < B ? A : B)
 
 char buffer[4096];
+int verbose = 0;
 
 int readshort(int fd)
 {
@@ -112,7 +113,7 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 				{
 					//rarray[i].r_offset = htonl(ntohl(rarray[i].r_offset) + dataoffset);
 					rarray[i].r_addend = htonl(ntohl(rarray[i].r_addend) + dataoffset);
-					fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
+					if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
 				}
 			}
 		}
@@ -151,12 +152,6 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 		int namelen = strlen(symbolname);
 		rel.len = ntohs(namelen);
 
-		if (symtype == STT_FILE)
-		{
-			fprintf(stderr,"file: %s\n", symbolname);
-			continue;
-		}
-		
 		if (rtype == R_68K_NONE)
 		{
 			rel.kind = 0;
@@ -219,7 +214,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 			rel.kind = 0;
 		}
 		
-		fprintf(stderr, "%32s %04x %08x addend(%08x)\n", symbolname, ntohs(rel.kind), ntohl(rel.offset), ntohl(elfreloc.r_addend) );
+		if (verbose) fprintf(stderr, "%32s %04x %08x addend(%08x)\n", symbolname, ntohs(rel.kind), ntohl(rel.offset), ntohl(elfreloc.r_addend) );
 		
 		write(ph_fd, &rel, sizeof(rel));
 		if (namelen > 0)
@@ -233,6 +228,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 
 int main(int argc, char *argv[])
 {
+int inputindex;
 int fd, ph_fd;
 int len,n,i = 0;
 PH ph = {};
@@ -241,25 +237,34 @@ char buffer[1024];
 char *typename;
 off_t crp;
 
-  fd = open(argv[1], O_RDONLY);
+	inputindex = 0;
+	for(i=1; i<argc; i++)
+	{
+		if (!strcmp(argv[i],"-v"))
+			verbose = 1;
+		else
+			inputindex = i;
+	}
+
+  fd = open(argv[inputindex], O_RDONLY);
   if (fd < 0)
   {
-      fprintf(stderr, "%s: not found\n", argv[1]);
+      fprintf(stderr, "%s: not found\n", argv[inputindex]);
       return(1);
   }
 
 	// explore ELF
 	read(fd, &eh, sizeof(Elf32_Ehdr));
 
-  fprintf(stderr, "relocatable:  %s \n", strrchr(argv[1],'/'));
+  if (verbose) fprintf(stderr, "relocatable:  %s \n", strrchr(argv[inputindex],'/'));
 	if (ntohs(eh.e_machine) != EM_68K)
 	{
-      fprintf(stderr, "%s: not m68k\n", argv[1]);
+      fprintf(stderr, "%s: not m68k\n", argv[inputindex]);
       return(1);
 	}
 	if (ntohs(eh.e_type) != ET_REL)
 	{
-      fprintf(stderr, "%s: not relocatable file\n", argv[1]);
+      fprintf(stderr, "%s: not relocatable file\n", argv[inputindex]);
       return(1);
 	}
 
@@ -278,7 +283,7 @@ off_t crp;
 
 	for(i=1; i<ntohs(eh.e_shnum); i++)
 	{
-		fprintf(stderr, "%d: %s\n", i, shstrtab + ntohl(sect[i].sh_name));
+		if (verbose) fprintf(stderr, "%d: %s\n", i, shstrtab + ntohl(sect[i].sh_name));
 	}
 
 	int stindex = findnamedsect(".strtab", sect, ntohs(eh.e_shnum));
@@ -340,8 +345,8 @@ off_t crp;
 	int relarodatasect = relarodataindex > 0 ? ntohl(sect[relarodataindex].sh_info) : -1;
 
   /* writing PH */
-  sprintf(buffer, "%s.r", argv[1]);
-  ph_fd = open(buffer, O_RDWR | O_TRUNC| O_CREAT, 0666);
+  sprintf(buffer, "%s.r", argv[inputindex]);
+  ph_fd = open(buffer, O_RDWR | O_TRUNC | O_CREAT, 0666);
   if (ph_fd < 0)
   {
     fprintf(stderr, "%s: failed to create: %s\n", buffer, strerror(errno));
@@ -358,7 +363,7 @@ off_t crp;
 	if (textindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "text section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "text section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[textindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[textindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -368,7 +373,7 @@ off_t crp;
 	if (dataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "data section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "data section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[dataindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[dataindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -376,7 +381,7 @@ off_t crp;
 	if (rodataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rodata section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "rodata section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[rodataindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[rodataindex].sh_size);
 		datacpy(ph_fd, fd, i);
@@ -392,7 +397,7 @@ off_t crp;
 	if (relatextindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rela.text section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "rela.text section at %08llx\n", crp);
 
 		// assert(ntohl(sect[relatextindex].sh_link) == symindex);
 		
@@ -410,7 +415,7 @@ off_t crp;
 	if (reladataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rela.data section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "rela.data section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[reladataindex].sh_offset), SEEK_SET);
 
 		//	assert(ntohl(sect[reladataindex].sh_link) == symindex);
@@ -428,7 +433,7 @@ off_t crp;
 	if (relarodataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
-		fprintf(stderr, "rela.rodata section at %08llx\n", crp);
+		if (verbose) fprintf(stderr, "rela.rodata section at %08llx\n", crp);
 		lseek(fd, ntohl(sect[relarodataindex].sh_offset), SEEK_SET);
 
 		//	assert(ntohl(sect[relarodataindex].sh_link) == symindex);
@@ -448,7 +453,7 @@ off_t crp;
 	
 	// symbols
 	crp = lseek(ph_fd, 0, SEEK_CUR);
-	fprintf(stderr, "Symbols section at %08llx\n", crp);
+	if (verbose) fprintf(stderr, "Symbols section at %08llx\n", crp);
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
 	len = 0;
 	for(i=0; i<htonl(ph.symbolsize); i++)
@@ -462,11 +467,16 @@ off_t crp;
 			sym.len = ntohs(strlen(symbolname));
 		
 		// only interested in GLOBAL symbols
+		int t = ELF32_ST_TYPE(elfsymbol.st_info);
+		if (t == STT_FILE)
+		{
+			// TODO: we could use this as name section contents rather than .comment
+		}
+		
 		int b = ELF32_ST_BIND(elfsymbol.st_info);
 		if (b != STB_GLOBAL)
 			continue;
 				
-		int t = ELF32_ST_TYPE(elfsymbol.st_info);
 		if (t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
 		{
 			sym.kind = 0;
@@ -500,7 +510,7 @@ off_t crp;
 				typename = "UNDEF";
 			}
 
-			fprintf(stderr,"%32s %6s %08x\n", symbolname, typename, ntohl(sym.offset));
+			if (verbose) fprintf(stderr,"%32s %6s %08x\n", symbolname, typename, ntohl(sym.offset));
 			
 			// write sym + string
 			write(ph_fd, &sym, sizeof(sym));
@@ -514,7 +524,7 @@ off_t crp;
 	
 	// lastly, any comments
 	crp = lseek(ph_fd, 0, SEEK_CUR);
-	fprintf(stderr, "comment section at %08llx\n", crp);
+	if (verbose) fprintf(stderr, "comment section at %08llx\n", crp);
 	lseek(fd, ntohl(sect[commentindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[commentindex].sh_size);
 	datacpy(ph_fd, fd, i);
@@ -524,15 +534,17 @@ off_t crp;
 	write(ph_fd, &ph, sizeof(ph));
 	close(ph_fd);
 
-	fprintf(stderr, "-----------------\n");
-  fprintf(stderr, "textstart = %08x\n", ntohl(ph.textstart));
-  fprintf(stderr, "textsize = %08x\n", ntohl(ph.textsize));
-  fprintf(stderr, "datastart = %08x\n", ntohl(ph.datastart));
-  fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
-  fprintf(stderr, "relocsize = %08x\n", ntohl(ph.relocsize));
-  fprintf(stderr, "symbolsize = %08x\n", ntohl(ph.symbolsize));
-  fprintf(stderr, "namesize = %08x\n", ntohs(ph.namesize));
-
+	if (verbose)
+	{
+		fprintf(stderr, "-----------------\n");
+		fprintf(stderr, "textstart = %08x\n", ntohl(ph.textstart));
+		fprintf(stderr, "textsize = %08x\n", ntohl(ph.textsize));
+		fprintf(stderr, "datastart = %08x\n", ntohl(ph.datastart));
+		fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
+		fprintf(stderr, "relocsize = %08x\n", ntohl(ph.relocsize));
+		fprintf(stderr, "symbolsize = %08x\n", ntohl(ph.symbolsize));
+		fprintf(stderr, "namesize = %08x\n", ntohs(ph.namesize));
+	}
 
   return 0;
 }
