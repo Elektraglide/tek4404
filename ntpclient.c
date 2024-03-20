@@ -80,7 +80,7 @@ typedef struct
 
 } ntp_packet;              /* Total: 384 bits or 48 bytes. */
 
-
+int verbose = 0;
 
 void error( msg )
 char* msg;
@@ -104,9 +104,19 @@ char **argv;
   struct sockaddr_in serv_addr;
   struct hostent *server;
   time_t txTm;
-  int i;
-
   ntp_packet packet;
+  int i,verbose;
+
+  verbose = 0;
+  for(i=1; i<argc; i++)
+  {
+    if (argv[i][0] == '+' || argv[i][0] == '-')
+    {  
+      if (argv[i][1] == 'v')
+        verbose = 1;
+    }	
+  }
+
   memset( &packet, 0, sizeof( ntp_packet ) );
   packet.li_vn_mode = 0x1b;
 
@@ -162,14 +172,24 @@ char **argv;
 
   /* adjust to our pre-millenium timebase */
   txTm -= (365L*24L*60L*60L * 28L);
-  txTm -= (24*60*60 * 7L);
+  txTm -= (24*60*60 * 6L);
 
   /* print in format for 'date -s' */
   ntptime = localtime(&txTm);
-  
-  printf("%2.2d-%2.2d-%2.2d %2.2d:%2.2d:%2.2d\n", 
+
+  if(verbose)
+  {  
+   printf("%2.2d-%2.2d-%2.2d %2.2d:%2.2d:%2.2d\n", 
      ntptime->tm_mon+1,ntptime->tm_mday,ntptime->tm_year + 1900, 
      ntptime->tm_hour,ntptime->tm_min,ntptime->tm_sec);
-
+  }
+  else
+  {
+   printf("%2.2d-%2.2d-%2.2d %2.2d:%2.2d:%2.2d\n", 
+     ntptime->tm_mon+1,ntptime->tm_mday,ntptime->tm_year + 1900, 
+     ntptime->tm_hour,ntptime->tm_min,ntptime->tm_sec);
+  	
+  }
+  
   return 0;
 }

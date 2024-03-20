@@ -236,12 +236,16 @@ Elf32_Ehdr eh;
 char buffer[1024];
 char *typename;
 off_t crp;
+int exportlocals = 0;
 
 	inputindex = 0;
 	for(i=1; i<argc; i++)
 	{
 		if (!strcmp(argv[i],"-v"))
 			verbose = 1;
+		else
+		if (!strcmp(argv[i],"-l"))
+			exportlocals = 1;
 		else
 			inputindex = i;
 	}
@@ -304,6 +308,8 @@ off_t crp;
 		n += ntohl(sect[dataindex].sh_size);
 		
 	int rodataindex = findnamedsect(".rodata", sect, ntohs(eh.e_shnum));
+	if (rodataindex < 0)
+		rodataindex = findnamedsect(".rodata.str1.1", sect, ntohs(eh.e_shnum));
 	if (rodataindex > 0)
 		n += ntohl(sect[rodataindex].sh_size);
 	// ensure even length
@@ -474,11 +480,15 @@ off_t crp;
 		}
 		
 		int b = ELF32_ST_BIND(elfsymbol.st_info);
-		if (b != STB_GLOBAL)
-			continue;
-				
+
 		if (t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
 		{
+			if (!exportlocals && b != STB_GLOBAL )
+			{
+				if (verbose && symbolname[0]) fprintf(stderr,"%32s *** SKIPPED\n", symbolname);
+				continue;
+			}
+
 			sym.kind = 0;
 			sym.segment = SEGABS;
 			
