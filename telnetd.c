@@ -30,7 +30,7 @@ typedef int socklen_t;
 void setsid() {}
 
 socketopt opt;
-char *telnetprocess[] = {"ash", NULL};
+char *telnetprocess[] = {"/tek/bin/ash", NULL};
 
 
 #else
@@ -94,6 +94,7 @@ char linefeed[] = "\012";
 int sock = -1;
 int state = STOPPED;
 int sessionsock;
+int sessionpty;
 
 int off = 0;
 int on = 1;
@@ -294,6 +295,7 @@ int sig;
   fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
 #endif
   close(sessionsock);
+  close(sessionpty);
 }
 
 void
@@ -388,6 +390,8 @@ char *from;
   fdmaster = ptfd[1];
 
   sessionsock = din;
+  sessionpty = fdslave;
+  
   signal(SIGPIPE, cleanup_child);
   signal(SIGDEAD, cleanup_child);
 
@@ -524,7 +528,7 @@ char *from;
              /* Uniflex pty does not handle Ctrl-C! */
              if (ts.bi.start[0] == 0x03)
              {
-               /* fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid); */
+               fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid);
                kill(sessionpid, SIGINT);
                control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
              }
