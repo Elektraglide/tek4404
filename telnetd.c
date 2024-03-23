@@ -32,7 +32,6 @@ void setsid() {}
 socketopt opt;
 char *telnetprocess[] = {"/tek/bin/ash", NULL};
 
-
 #else
 
 extern int open();
@@ -468,7 +467,7 @@ char *from;
         fflush(stderr);
 */
 
-        if (rc < 0)
+        if (rc < 0 && errno != EINTR)
         {
             fprintf(stderr, "select() error %d\n", errno);
             break;
@@ -496,6 +495,7 @@ char *from;
               {
                 if (errno != EINTR)
                 {
+                 fprintf(stderr, "read() error %d\n", errno);
                   break;
                 }
 
@@ -530,13 +530,18 @@ char *from;
              {
                fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid);
                kill(sessionpid, SIGINT);
+
+#if 0
+               /* we would like to kill any buffered output */
                control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
+#endif
              }
 
               if (n < 0)
               {
                 if (errno != EINTR)
                 {
+                 fprintf(stderr, "fdmaster write() error %d\n", errno);
                   break;
                 }
                 continue;
@@ -570,6 +575,7 @@ char *from;
             {
               if (errno != EINTR)
               {
+                 fprintf(stderr, "fdmaster read() error %d\n", errno);
                 break;
               }
               continue;
