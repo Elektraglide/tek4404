@@ -148,22 +148,25 @@ off_t crp;
 	int textoffset = 0;
 	int dataoffset = 0;
 	int bssoffset = 0;
+	n = 0;
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i];
 
 		// update every reloc record
-		char *rd = inputs[i] + 0x40 + ntohl(header->textsize) + ntohl(header->datasize);
+		char *rd = inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
 		char *endrd = rd + ntohl(header->relocsize);
 		while(rd < endrd)
 		{
 			relocheader *rr = (relocheader *)rd;
+
+			n++;
 			int kind = ntohs(rr->kind);
 			int addendoffset = 0;
 			switch(kind & 0xf0)
 			{
 				case 0x00:
-					addendoffset = textoffset;
+					addendoffset = 0;
 					break;
 				case 0x40:
 					addendoffset = textoffset;
@@ -180,11 +183,11 @@ off_t crp;
 			switch(kind & 0xf)
 			{
 				case 1:
-					addend = (int *)(inputs[i] + 0x40 + ntohl(rr->offset));
+					addend = (int *)(inputs[i] + sizeof(PH) + ntohl(rr->offset));
 					rr->offset = htonl(ntohl(rr->offset) + textoffset);
 					break;
 				case 2:
-					addend = (int *)(inputs[i] + 0x40 + ntohl(header->textsize) + ntohl(rr->offset));
+					addend = (int *)(inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(rr->offset));
 					rr->offset = htonl(ntohl(rr->offset) + dataoffset);
 					break;
 			}
@@ -195,7 +198,7 @@ off_t crp;
 			rd = (char *)(rr+1) + ntohs(rr->len);
 		}
 		
-		write(out_fd, inputs[i] + 0x40 + ntohl(header->textsize) + ntohl(header->datasize), ntohl(header->relocsize));
+		write(out_fd, inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize), ntohl(header->relocsize));
 
 		textoffset += ntohl(header->textsize);
 		dataoffset += ntohl(header->datasize);
@@ -203,6 +206,7 @@ off_t crp;
 
 		ph.relocsize = htonl(ntohl(ph.relocsize) + ntohl(header->relocsize));
 	}
+	if (verbose) fprintf(stderr, "%d relocations\n", n);
 
 	// symbols
 	textoffset = 0;
@@ -213,7 +217,7 @@ off_t crp;
 	{
 		PH *header = (PH *)inputs[i];
 
-		char *sdata = inputs[i] + 0x40 + ntohl(header->textsize) + ntohl(header->datasize) + ntohl(header->relocsize);
+		char *sdata = inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize) + ntohl(header->relocsize);
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
@@ -236,7 +240,7 @@ off_t crp;
 			sdata = (char *)(sym+1) + ntohs(sym->len);
 		}
 
-		write(out_fd, inputs[i] + 0x40 + ntohl(header->textsize) + ntohl(header->datasize) + ntohl(header->relocsize), ntohl(header->symbolsize));
+		write(out_fd, inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize) + ntohl(header->relocsize), ntohl(header->symbolsize));
 
 		textoffset += ntohl(header->textsize);
 		dataoffset += ntohl(header->datasize);
@@ -257,13 +261,13 @@ off_t crp;
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i];
-		write(out_fd, inputs[i] + 0x40, ntohl(header->textsize));
+		write(out_fd, inputs[i] + sizeof(PH), ntohl(header->textsize));
 	}
 	// concat datas
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i];
-		write(out_fd, inputs[i] + 0x40 + ntohl(header->textsize), ntohl(header->datasize));
+		write(out_fd, inputs[i] + sizeof(PH) + ntohl(header->textsize), ntohl(header->datasize));
 	}
 
 	close(out_fd);
