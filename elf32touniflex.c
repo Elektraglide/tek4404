@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <memory.h>
+#include <libgen.h>
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
@@ -88,6 +89,18 @@ int j = ntohl(r2->r_offset);
 	return (i - j);
 }
 
+char *relocrecords;
+int relocoffsetcompare(const void *a, const void *b)
+{
+relocheader *r1 = (relocheader *)(relocrecords + *(int *)a);
+relocheader *r2 = (relocheader *)(relocrecords + *(int *)b);
+
+int i = ntohl(r1->offset);
+int j = ntohl(r2->offset);
+
+	return (i - j);
+}
+
 // fixup rodata section offset to account for data
 void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int rodataindex, int dataoffset)
 {
@@ -111,29 +124,33 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 				// rodata offsets need to be adjusted because they are relative to data (we dont have rodata in Uniflex)
 				if (targetsection == rodataindex)
 				{
-					//rarray[i].r_offset = htonl(ntohl(rarray[i].r_offset) + dataoffset);
 					rarray[i].r_addend = htonl(ntohl(rarray[i].r_addend) + dataoffset);
-					if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
+					//if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
 				}
 			}
+		}
+		else
+		{
+			fprintf(stderr, "error %d\n", rtype);
 		}
 	}
 }
 
-int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int textindex, int dataindex, int rodataindex, int bssindex, PH *ph, int targetsection)
+int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, int textindex, int dataindex, int rodataindex, int bssindex, Elf32_Shdr *sect, int relocsection, int sectionstart)
 {
 	int i;
 	int len = 0;
 
-	// calc offset to targetsection knowing we always have: text,data,(bss)
-	int sectionstart = 0;
-	if (targetsection == dataindex)	sectionstart = ntohl(ph->textsize);
-	if (targetsection == rodataindex)	sectionstart = ntohl(ph->textsize) + ntohl(ph->datasize);
-	
+	if (relocsection < 0)
+	{
+		return 0;
+	}
+
+	// Uniflex section code
 	int instsegment = 1;
-	if (targetsection == dataindex)	instsegment = 2;
-	if (targetsection == rodataindex)	instsegment = 2;
-	if (targetsection == bssindex)	instsegment = 3;
+	if (relocsection == textindex)	instsegment = 1;
+	if (relocsection == dataindex)	instsegment = 2;
+	if (relocsection == rodataindex)	instsegment = 2;
 	
 	for(i=0; i<numrecords; i++)
 	{
@@ -149,7 +166,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 		// lookup symbol
 		int symtype = ELF32_ST_TYPE(symbols[rsymindex].st_info);
 		char *symbolname = strtab + ntohl(symbols[rsymindex].st_name);
-		int namelen = strlen(symbolname);
+		int namelen = (int)strlen(symbolname);
 		rel.len = ntohs(namelen);
 
 		if (rtype == R_68K_NONE)
@@ -190,6 +207,11 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 				}
 				
 			}
+			else
+			if (symtype != STT_NOTYPE)
+			{
+				fprintf(stderr, "error: %d\n", symtype);
+			}
 			
 			// this is horribly inefficient...
 			// Uniflex does not have addend reloc records, so we need to embed its value like a Elf32_Rel
@@ -197,20 +219,25 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 			{
 				off_t crp = lseek(ph_fd, 0, SEEK_CUR);
 					lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
-					int v = htonl(ntohl(elfreloc.r_addend));
-			//		v = htonl(0xDEADDEAD);
-					write(ph_fd, &v, sizeof(v));
+					int S;
+					read(ph_fd, &S, sizeof(S));
+					lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
+
+					if (S != 0)
+					{
+						fprintf(stderr, "applying addend with non-zero S\n");
+					}
+
+					int A = htonl(ntohl(elfreloc.r_addend) + S);
+			//		A = htonl(0xDEADDEAD);
+					write(ph_fd, &A, sizeof(A));
 				lseek(ph_fd, crp, SEEK_SET);
 			}
 		}
 		else
-		if (rtype == R_68K_PC32)
 		{
-			// FIXME:
-			rel.kind = htons(0x0081);
-		}
-		else
-		{
+			// FIXME: R_68K_PC32 etc
+			fprintf(stderr, "error: %d\n", rtype);
 			rel.kind = 0;
 		}
 		
@@ -233,7 +260,7 @@ int fd, ph_fd;
 int len,n,i = 0;
 PH ph = {};
 Elf32_Ehdr eh;
-char buffer[1024];
+char outputname[1024];
 char *typename;
 off_t crp;
 int exportlocals = 0;
@@ -257,18 +284,21 @@ int exportlocals = 0;
       return(1);
   }
 
+	// output filename
+  sprintf(outputname, "%s.r", argv[inputindex]);
+
 	// explore ELF
 	read(fd, &eh, sizeof(Elf32_Ehdr));
 
-  if (verbose) fprintf(stderr, "relocatable:  %s \n", strrchr(argv[inputindex],'/'));
+  if (verbose) fprintf(stderr, "\nconverting:  %s \n", basename(argv[inputindex]));
 	if (ntohs(eh.e_machine) != EM_68K)
 	{
-      fprintf(stderr, "%s: not m68k\n", argv[inputindex]);
+      fprintf(stderr, "not m68k: %s\n", argv[inputindex]);
       return(1);
 	}
 	if (ntohs(eh.e_type) != ET_REL)
 	{
-      fprintf(stderr, "%s: not relocatable file\n", argv[inputindex]);
+      fprintf(stderr, "not relocatable file: %s\n", argv[inputindex]);
       return(1);
 	}
 
@@ -285,9 +315,20 @@ int exportlocals = 0;
 	lseek(fd, ntohl(sect[strindex].sh_offset), SEEK_SET);
 	read(fd, shstrtab, ntohl(sect[strindex].sh_size) );
 
+	// summary of sections
 	for(i=1; i<ntohs(eh.e_shnum); i++)
 	{
-		if (verbose) fprintf(stderr, "%d: %s\n", i, shstrtab + ntohl(sect[i].sh_name));
+		char *typename = "";
+		if (sect[i].sh_type == htonl(SHT_PROGBITS))
+		{
+			if (sect[i].sh_flags & htonl(SHF_EXECINSTR)) typename = "TEXT";
+			else
+			if (sect[i].sh_flags & htonl(SHF_ALLOC)) typename = "DATA";
+		}
+		if (sect[i].sh_type == htonl(SHT_NOBITS))
+			typename = "BSS";
+		
+		if (verbose) fprintf(stderr, "%2d: %14s %8.8x %6s\n", i, shstrtab + ntohl(sect[i].sh_name), ntohl(sect[i].sh_size), typename);
 	}
 
 	int stindex = findnamedsect(".strtab", sect, ntohs(eh.e_shnum));
@@ -300,35 +341,51 @@ int exportlocals = 0;
 		n += ntohl(sect[textindex].sh_size);
 	//ph.textstart = htonl(adddata(n));
 	ph.textsize = htonl(n);
-	
-	// rodata gets appended to data
+
+
+	// rodata gets appended to data  TODO: search for any section with PROGBITS and name like 'data'
 	n = 0;
 	int dataindex = findnamedsect(".data", sect, ntohs(eh.e_shnum));
 	if (dataindex > 0)
-		n += ntohl(sect[dataindex].sh_size);
-		
-	int rodataindex = findnamedsect(".rodata", sect, ntohs(eh.e_shnum));
-	if (rodataindex < 0)
-		rodataindex = findnamedsect(".rodata.str1.1", sect, ntohs(eh.e_shnum));
-	if (rodataindex > 0)
-		n += ntohl(sect[rodataindex].sh_size);
-	// ensure even length
-	if (n & 1)
 	{
-		n++;
-		if (rodataindex > 0)
-			sect[rodataindex].sh_size = htonl(ntohl(sect[rodataindex].sh_size) + 1);
-		else
+		n += ntohl(sect[dataindex].sh_size);
+		// ensure even length
+		if (n & 1)
+		{
+			n++;
 			sect[dataindex].sh_size = htonl(ntohl(sect[dataindex].sh_size) + 1);
+		}
 	}
-		
-		
+	int rodataindex = findnamedsect(".rodata", sect, ntohs(eh.e_shnum));
+	if (rodataindex > 0)
+	{
+		n += ntohl(sect[rodataindex].sh_size);
+		// ensure even length
+		if (n & 1)
+		{
+			n++;
+			sect[rodataindex].sh_size = htonl(ntohl(sect[rodataindex].sh_size) + 1);
+		}
+	}
+
+	int	rodatastringindex = findnamedsect(".rodata.str1.1", sect, ntohs(eh.e_shnum));
+	if (rodatastringindex > 0)
+	{
+		n += ntohl(sect[rodatastringindex].sh_size);
+		// ensure even length
+		if (n & 1)
+		{
+			n++;
+			sect[rodatastringindex].sh_size = htonl(ntohl(sect[rodatastringindex].sh_size) + 1);
+		}
+	}
+
 	//ph.datastart = htonl(adddata(n));
 	ph.datasize = htonl(n);
 
 	int commentindex = findnamedsect(".comment", sect, ntohs(eh.e_shnum));
-//	ph.commentsize = htons(ntohl(sect[commentindex].sh_size));
-	ph.namesize = htons(ntohl(sect[commentindex].sh_size));
+	ph.commentsize = htons(ntohl(sect[commentindex].sh_size));
+	ph.namesize = htons(strlen(basename(outputname)));
 
 	n = 0;
 	int bssindex = findnamedsect(".bss", sect, ntohs(eh.e_shnum));
@@ -339,23 +396,30 @@ int exportlocals = 0;
 	int symindex = findnamedsect(".symtab", sect, ntohs(eh.e_shnum));
 	ph.symbolsize = htonl(ntohl(sect[symindex].sh_size) / ntohl(sect[symindex].sh_entsize));		// NB numentries for now
 	
-	
+	n = 0;
 	int relatextindex = findnamedsect(".rela.text", sect, ntohs(eh.e_shnum));
-	ph.relocsize = htonl(ntohl(sect[relatextindex].sh_size) / ntohl(sect[relatextindex].sh_entsize));		// NB numentries for now;
 	int relatextsect = relatextindex > 0 ? ntohl(sect[relatextindex].sh_info) : -1;
-
+	if (relatextindex > 0)
+		n += ntohl(sect[relatextindex].sh_size) / ntohl(sect[relatextindex].sh_entsize);
+		
 	int reladataindex = findnamedsect(".rela.data", sect, ntohs(eh.e_shnum));
 	int reladatasect = reladataindex > 0 ? ntohl(sect[reladataindex].sh_info) : -1;
+	if (reladataindex > 0)
+		n += ntohl(sect[reladataindex].sh_size) / ntohl(sect[reladataindex].sh_entsize);
 
+	// FIXME:  is this even a thing?  or is it .data.rel.ro?  And is it EVER emitted for static linking?
 	int relarodataindex = findnamedsect(".rela.rodata", sect, ntohs(eh.e_shnum));
 	int relarodatasect = relarodataindex > 0 ? ntohl(sect[relarodataindex].sh_info) : -1;
+	if (relarodataindex > 0)
+		n += ntohl(sect[relarodataindex].sh_size) / ntohl(sect[relarodataindex].sh_entsize);
+
+	ph.relocsize = htonl(n);		// NB numentries for now;
 
   /* writing PH */
-  sprintf(buffer, "%s.r", argv[inputindex]);
-  ph_fd = open(buffer, O_RDWR | O_TRUNC | O_CREAT, 0666);
+  ph_fd = open(outputname, O_RDWR | O_TRUNC | O_CREAT, 0666);
   if (ph_fd < 0)
   {
-    fprintf(stderr, "%s: failed to create: %s\n", buffer, strerror(errno));
+    fprintf(stderr, "%s: failed to create: %s\n", outputname, strerror(errno));
     return(1);
   }
 
@@ -373,9 +437,16 @@ int exportlocals = 0;
 		lseek(fd, ntohl(sect[textindex].sh_offset), SEEK_SET);
 		i = ntohl(sect[textindex].sh_size);
 		datacpy(ph_fd, fd, i);
+		
+		lseek(fd, ntohl(sect[textindex].sh_offset), SEEK_SET);
+		char *buff = (char *)malloc(i);
+		read(fd, buff, i);
+		int dumpfd = open("/Users/adambillyard/text.dat", O_RDWR | O_CREAT, 0666);
+		write(dumpfd, buff, i);
+		close(dumpfd);
 	}
 	
-	// copy data & rodata section
+	// copy data & rodata & rodatastring sections
 	if (dataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
@@ -392,6 +463,14 @@ int exportlocals = 0;
 		i = ntohl(sect[rodataindex].sh_size);
 		datacpy(ph_fd, fd, i);
 	}
+	if (rodatastringindex > 0)
+	{
+		crp = lseek(ph_fd, 0, SEEK_CUR);
+		if (verbose) fprintf(stderr, "rodata str section at %08llx\n", crp);
+		lseek(fd, ntohl(sect[rodatastringindex].sh_offset), SEEK_SET);
+		i = ntohl(sect[rodatastringindex].sh_size);
+		datacpy(ph_fd, fd, i);
+	}
 	
 	// we need all symbols to index into
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
@@ -399,6 +478,9 @@ int exportlocals = 0;
 	read(fd, symbols, ntohl(sect[symindex].sh_size));
 	
 	// reloc
+	int relocstart = lseek(ph_fd, 0, SEEK_CUR);
+	int reloccount = 0;
+	
 	len = 0;
 	if (relatextindex > 0)
 	{
@@ -411,28 +493,42 @@ int exportlocals = 0;
 		Elf32_Rela *rarray = (Elf32_Rela *)malloc(ntohl(sect[relatextindex].sh_size));
 		read(fd, rarray, ntohl(sect[relatextindex].sh_size));
 		n = ntohl(sect[relatextindex].sh_size) / ntohl(sect[relatextindex].sh_entsize);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
-		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
-
-		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, relatextsect);
+		
+		int dataoffset = 0;
+		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
+		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		
+	//	qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		reloccount += n;
+		
+		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, sect, textindex, 0);
 		free(rarray);
 	}
-	
+
 	if (reladataindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
 		if (verbose) fprintf(stderr, "rela.data section at %08llx\n", crp);
+
+		// assert(ntohl(sect[reladataindex].sh_link) == symindex);
+		
 		lseek(fd, ntohl(sect[reladataindex].sh_offset), SEEK_SET);
-
-		//	assert(ntohl(sect[reladataindex].sh_link) == symindex);
-
 		Elf32_Rela *rarray = (Elf32_Rela *)malloc(ntohl(sect[reladataindex].sh_size));
 		read(fd, rarray, ntohl(sect[reladataindex].sh_size));
 		n = ntohl(sect[reladataindex].sh_size) / ntohl(sect[reladataindex].sh_entsize);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
+		
+		int dataoffset = 0;
+		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
+		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		reloccount += n;
 
-		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, reladatasect);
+		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, sect, dataindex, ntohl(sect[textindex].sh_size));
 		free(rarray);
 	}
 
@@ -440,22 +536,63 @@ int exportlocals = 0;
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
 		if (verbose) fprintf(stderr, "rela.rodata section at %08llx\n", crp);
+
+		// assert(ntohl(sect[relarodataindex].sh_link) == symindex);
+		
 		lseek(fd, ntohl(sect[relarodataindex].sh_offset), SEEK_SET);
-
-		//	assert(ntohl(sect[relarodataindex].sh_link) == symindex);
-
 		Elf32_Rela *rarray = (Elf32_Rela *)malloc(ntohl(sect[relarodataindex].sh_size));
 		read(fd, rarray, ntohl(sect[relarodataindex].sh_size));
 		n = ntohl(sect[relarodataindex].sh_size) / ntohl(sect[relarodataindex].sh_entsize);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, ntohl(sect[dataindex].sh_size));
-		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
-
-		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, &ph, relarodatasect);
-		free(rarray);
 		
+		int dataoffset = 0;
+		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
+		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		
+		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		reloccount += n;
+
+		len += emitreloc(ph_fd, rarray, n, symbols, textindex, dataindex, rodataindex, bssindex, sect, rodataindex, ntohl(sect[textindex].sh_size) + ntohl(sect[dataindex].sh_size));
+		free(rarray);
+	}
+
+	ph.relocsize = htonl(len);
+
+	// reloc records need to be in sorted order but they are variable length records
+	crp = lseek(ph_fd, 0, SEEK_CUR);
+	relocrecords = (char *)malloc(len);
+	lseek(ph_fd, relocstart, SEEK_SET);
+	read(ph_fd, relocrecords, len);
+
+	// build an index into variable length records array
+	int *relocrecordindex = (int *)malloc(sizeof(int) * reloccount);
+	char *ptr = relocrecords;
+	for (i=0; i<reloccount; i++)
+	{
+		relocheader *rel = (relocheader *)ptr;
+	
+		relocrecordindex[i] = (int)(ptr - relocrecords);
+		
+		ptr = ptr + sizeof(relocheader) + ntohs(rel->len);
+	}
+	qsort(relocrecordindex, reloccount, sizeof(int), relocoffsetcompare);
+	
+	// rewrite reloc records in ascending offset order
+	lseek(ph_fd, relocstart, SEEK_SET);
+	for (i=0; i<reloccount; i++)
+	{
+		relocheader *rel = (relocheader *)(relocrecords + relocrecordindex[i]);
+		//if (verbose) fprintf(stderr, "relocation %08x\n", ntohl(rel->offset));
+		
+		write(ph_fd, rel, sizeof(relocheader));
+		if (rel->len)
+			write(ph_fd, (rel+1), ntohs(rel->len));
 	}
 	
-	ph.relocsize = htonl(len);
+	free(relocrecordindex);
+	free(relocrecords);
+
 	
 	// symbols
 	crp = lseek(ph_fd, 0, SEEK_CUR);
@@ -469,8 +606,8 @@ int exportlocals = 0;
 		
 		elfsymbol = symbols[i];
 		
-			char *symbolname = strtab + ntohl(elfsymbol.st_name);
-			sym.len = ntohs(strlen(symbolname));
+		char *symbolname = strtab + ntohl(elfsymbol.st_name);
+		sym.len = ntohs(strlen(symbolname));
 		
 		// only interested in GLOBAL symbols
 		int t = ELF32_ST_TYPE(elfsymbol.st_info);
@@ -483,16 +620,17 @@ int exportlocals = 0;
 
 		if (t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
 		{
-			if (!exportlocals && b != STB_GLOBAL )
-			{
-				if (verbose && symbolname[0]) fprintf(stderr,"%32s *** SKIPPED\n", symbolname);
-				continue;
-			}
-
 			sym.kind = 0;
 			sym.segment = SEGABS;
 			
 			sym.offset = htonl(ntohl(elfsymbol.st_value));
+
+			if (!exportlocals && b != STB_GLOBAL )
+			{
+				if (verbose && symbolname[0]) fprintf(stderr,"%32s %08x *** SKIPPED\n", symbolname, ntohl(sym.offset));
+				continue;
+			}
+
 			if (ntohs(elfsymbol.st_shndx) == textindex)
 			{
 				sym.segment = htons(SEGTEXT);
@@ -531,14 +669,17 @@ int exportlocals = 0;
 	}
 	ph.symbolsize = htonl(len);
 	free(symbols);
-	
-	// lastly, any comments
+
+	// any comments
 	crp = lseek(ph_fd, 0, SEEK_CUR);
 	if (verbose) fprintf(stderr, "comment section at %08llx\n", crp);
 	lseek(fd, ntohl(sect[commentindex].sh_offset), SEEK_SET);
 	i = ntohl(sect[commentindex].sh_size);
 	datacpy(ph_fd, fd, i);
 	
+	// name
+	write(ph_fd, outputname, strlen(outputname));
+
 	// update header with final values
 	lseek(ph_fd, 0, SEEK_SET);
 	write(ph_fd, &ph, sizeof(ph));
@@ -553,6 +694,7 @@ int exportlocals = 0;
 		fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
 		fprintf(stderr, "relocsize = %08x\n", ntohl(ph.relocsize));
 		fprintf(stderr, "symbolsize = %08x\n", ntohl(ph.symbolsize));
+		fprintf(stderr, "commentsize = %08x\n", ntohs(ph.commentsize));
 		fprintf(stderr, "namesize = %08x\n", ntohs(ph.namesize));
 	}
 
