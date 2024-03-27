@@ -74,13 +74,16 @@ int sig;
   {
     kill(readerpid,SIGTERM);
     sleep(1);
-        
+
     close(sockpair[1]);
     readerpid = 0;
+
+#if 0  /* why does this hang indefinitely? */
+    fprintf(stderr, "waiting to reap ttyreader\012\n");	
+    pid = wait(&i);  
+    fprintf(stderr, "pid=%d\012\n", pid);
+#endif
   }
-  fprintf(stderr, "waiting to reap ttyreader\012\n");	
-  pid = wait(&i);
-  fprintf(stderr, "pid=%d\012\n", pid);
 }
 
 char *getttysock(sockinput)
@@ -112,7 +115,8 @@ int *sockinput;
   }
   else
   {
-
+	  signal(SIGDEAD, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
     signal(SIGINT, SIG_IGN);
   
     fd = fileno(stdin);
@@ -170,6 +174,10 @@ struct FontHeader *font;
 struct BBCOM bb;
 struct FORM *screen;
 struct RECT screenrect;
+
+char *items[6] = {"quit","shell"};
+int flags[6] = {MENU_LINE,0};
+struct MENU *menu;
 
 int usecustomblit = 0;
 long newtime,oldtime = 0;
@@ -884,7 +892,7 @@ int forcedirty;
   {
     bb.halftoneform =  &GrayMask;
 
-#ifdef DEBUGREPAINTxx
+#ifdef DEBUGREPAINT
 		if ((counter & 1) == 0)
     {
       i = rand() & 255;
@@ -1014,6 +1022,12 @@ int sig;
 	
   fprintf(stderr, "cleanup on %d\n", sig);
 
+#ifdef USE_TTYREADER
+  ttycleanup(sig);
+#else
+  close(fdtty);
+#endif
+
   /* kill all windows */
   for(i=0; i<numwindows; i++)
   {
@@ -1021,12 +1035,6 @@ int sig;
   }
   sleep(1);
   
-#ifdef USE_TTYREADER
-  ttycleanup(sig);
-#else
-  close(fdtty);
-#endif
-
   EventDisable();
   ExitGraphics();
   FontClose(font);
@@ -1109,6 +1117,8 @@ char **argv;
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\n",usecustomblit);
 	sleep(2);
+
+	menu = MenuCreateX(2,items,flags,0,font);
 
   screen = InitGraphics(TRUE);
   screenrect.x = 0;
@@ -1221,10 +1231,13 @@ char **argv;
     exit(23);
   }
   else
-#ifdef POLLINGPTY | POLLINGINP
-#else
-  if (rc > 0)
+#ifdef POLLINGPTY
+	rc = 1;
 #endif
+#ifdef POLLINGINP
+	rc = 1;
+#endif
+  if (rc > 0)
   {
     /* read any stdio input and send to topwindow input */
 #ifdef POLLINGINP
@@ -1301,8 +1314,17 @@ char **argv;
 
 if (GetButtons() & M_MIDDLE)
 {
-	cleanup_and_exit(0);
-  exit(0);
+	 int choice = MenuSelect(menu);
+	 if (choice == 0)
+	 {
+		cleanup_and_exit(0);
+		exit(0);
+	}
+	else
+	{
+			GetMPosition(&origin);
+			WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+	}
 }
 
       if (GetButtons() & M_LEFT)
@@ -1351,11 +1373,11 @@ if (GetButtons() & M_MIDDLE)
             if (offset.x < 20 && offset.y < 20)
             {
               WindowMin(win);
+            }
+
             /* repaint everything */
             Paint(wintopmost, &screenrect, FORCEPAINT);
-            
-            }
-            
+
             /* now has focus */
             break;
           }
@@ -1423,7 +1445,7 @@ if (GetButtons() & M_MIDDLE)
   /* drop shadow for top window ? */
 
   /* focus cursor */
-  if (wintopmost)
+  if (wintopmost && wintopmost->contentrect.h != 0)
     addcursor(wintopmost);
 
 
