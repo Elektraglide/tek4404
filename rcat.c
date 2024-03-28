@@ -23,22 +23,6 @@
 char buffer[4096];
 int verbose = 0;
 
-int readshort(int fd)
-{
-  short val;
-  
-  read(fd, &val, sizeof(val));
-  return ntohs(val);
-}
-int readlong(int fd)
-{
-  int val;
-  
-  read(fd, &val, sizeof(val));
-  return ntohl(val);
-}
-
-
 void datacpy(int dst, int src, int len)
 {
 	char buffer[4096];
@@ -52,29 +36,60 @@ void datacpy(int dst, int src, int len)
 	}
 }
 
-char *relocrecords;
-int relocoffsetcompare(const void *a, const void *b)
+
+int hashcount = 0;
+int hashmax;
+unsigned int *hashes = NULL;
+void symbolclear()
 {
-relocheader *r1 = (relocheader *)(relocrecords + *(int *)a);
-relocheader *r2 = (relocheader *)(relocrecords + *(int *)b);
-
-int i = ntohl(r1->offset);
-int j = ntohl(r2->offset);
-
-	return (i - j);
+	hashcount = 0;
+	hashmax = 1024;
+	hashes = (unsigned int *)malloc(sizeof(unsigned int) * hashmax);
 }
 
+#define HASH_INIT (0x811c9dc5u)
+#define HASH_PRIME (0x01000193u)
 
+int symbolexists(char *name, int len)
+{
+	if (len > 0)
+	{
+		// generate a hash for this string
+		unsigned int hval = HASH_INIT;
+		while (len--)
+		{
+			hval *= HASH_PRIME;
+			hval ^= (unsigned int)*name++;
+		}
+
+		// do we have it?
+		for(int i=0; i<hashcount; i++)
+		{
+			if (hashes[i] == hval)
+				return 1;
+		}
+
+		// add it and resize if needed
+		hashes[hashcount++] = hval;
+		if (hashcount >= hashmax)
+		{
+			hashmax *= 2;
+			hashes = realloc(hashes, sizeof(unsigned int) * hashmax);
+		}
+	}
+	
+	return 0;
+}
 
 
 
 int main(int argc, char *argv[])
 {
 int inputcount;
-char *inputs[64];
+char *inputs[128];
 char outputname[256];
 int fd, out_fd;
-int n,i = 0;
+int len,n,i = 0;
 PH ph = {};
 off_t crp;
 
@@ -208,11 +223,13 @@ off_t crp;
 	}
 	if (verbose) fprintf(stderr, "%d relocations\n", n);
 
-	// symbols
+	// unique symbols
 	textoffset = 0;
 	dataoffset = 0;
 	bssoffset = 0;
 	n = 0;
+	len = 0;
+	symbolclear();
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i];
@@ -223,31 +240,42 @@ off_t crp;
 		{
 			symbolheader *sym = (symbolheader *)sdata;
 			
-			n++;
-			switch(ntohs(sym->segment))
+			// only if we have notr seen it before
+			if (!symbolexists((char *)(sym+1),ntohs(sym->len)))
 			{
-				case SEGTEXT:
-					sym->offset = htonl(ntohl(sym->offset) + textoffset);
-					break;
-				case SEGDATA:
-					sym->offset = htonl(ntohl(sym->offset) + dataoffset);
-					break;
-				case SEGBSS:
-					sym->offset = htonl(ntohl(sym->offset) + bssoffset);
-					break;
-			}
+				n++;
+				switch(ntohs(sym->segment))
+				{
+					case SEGTEXT:
+						sym->offset = htonl(ntohl(sym->offset) + textoffset);
+						break;
+					case SEGDATA:
+						sym->offset = htonl(ntohl(sym->offset) + dataoffset);
+						break;
+					case SEGBSS:
+						sym->offset = htonl(ntohl(sym->offset) + bssoffset);
+						break;
+				}
 
+				write(out_fd, sym, sizeof(symbolheader));
+				if (sym->len)
+					write(out_fd, sym+1, ntohs(sym->len));
+				len += sizeof(symbolheader);
+				len += ntohs(sym->len);
+			}
+			else
+			{
+				if (verbose) fprintf(stderr, "%*s: duplicate symbol in %d\n", ntohs(sym->len), (char *)(sym+1), i);
+			}
+			
 			sdata = (char *)(sym+1) + ntohs(sym->len);
 		}
-
-		write(out_fd, inputs[i] + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize) + ntohl(header->relocsize), ntohl(header->symbolsize));
 
 		textoffset += ntohl(header->textsize);
 		dataoffset += ntohl(header->datasize);
 		bssoffset += ntohl(header->bsssize);
-
-		ph.symbolsize = htonl(ntohl(ph.symbolsize) + ntohl(header->symbolsize));
 	}
+	ph.symbolsize = htonl(len);
 	if (verbose) fprintf(stderr, "%d symbols\n", n);
 	
 	// name
