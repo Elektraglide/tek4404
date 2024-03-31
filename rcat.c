@@ -103,7 +103,7 @@ off_t crp;
 		if (!strcmp(argv[i],"-o"))
 		{
 			i++;
-			out_fd = open(argv[i], O_RDWR | O_CREAT, 0666);
+			out_fd = open(argv[i], O_RDWR | O_CREAT | O_TRUNC, 0666);
 			if (out_fd < 0)
 			{
 				fprintf(stderr, "%s: output file failed\n", argv[i]);
