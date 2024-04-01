@@ -132,7 +132,7 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 	}
 }
 
-int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, Elf32_Shdr *sect, int relocsection, int sectionstart)
+int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols, Elf32_Shdr *sect, int relocsection, int sectionbase)
 {
 	int i;
 	int len = 0;
@@ -207,10 +207,10 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 			if (elfreloc.r_addend != 0)
 			{
 				off_t crp = lseek(ph_fd, 0, SEEK_CUR);
-					lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
+					lseek(ph_fd, sizeof(PH) + sectionbase + ntohl(elfreloc.r_offset), SEEK_SET);
 					int S;
 					read(ph_fd, &S, sizeof(S));
-					lseek(ph_fd, sizeof(PH) + sectionstart + ntohl(elfreloc.r_offset), SEEK_SET);
+					lseek(ph_fd, sizeof(PH) + sectionbase + ntohl(elfreloc.r_offset), SEEK_SET);
 
 					if (S != 0)
 					{
@@ -509,6 +509,7 @@ int exportlocals = 0;
 		reloccount += n;
 
 		len += emitreloc(ph_fd, rarray, n, symbols, sect, dataindex, ntohl(sect[textindex].sh_size));
+		
 		free(rarray);
 	}
 
@@ -533,7 +534,7 @@ int exportlocals = 0;
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
 
-		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size) + ntohl(sect[dataindex].sh_size));
+		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size));
 		free(rarray);
 	}
 
@@ -611,25 +612,27 @@ int exportlocals = 0;
 				continue;
 			}
 
-			if (ntohs(elfsymbol.st_shndx) == textindex)
+			int targetsection = ntohs(elfsymbol.st_shndx);
+
+			if (istext(&sect[targetsection]))
 			{
 				sym.segment = htons(SEGTEXT);
 				typename = "TEXT";
 			}
 			else
-			if (ntohs(elfsymbol.st_shndx) == dataindex || ntohs(elfsymbol.st_shndx) == rodataindex)
+			if (isdata(&sect[targetsection]))
 			{
 				sym.segment = htons(SEGDATA);
 				typename = "DATA";
 			}
 			else
-			if (ntohs(elfsymbol.st_shndx) == bssindex)
+			if (isbss(&sect[targetsection]))
 			{
 				sym.segment = htons(SEGBSS);
 				typename = "BSS";
 			}
 			else
-			if (ntohs(elfsymbol.st_shndx) == commentindex)
+			if (targetsection == commentindex)
 			{
 				typename = "COMMENT";
 			}
