@@ -21,7 +21,8 @@
 
 #define min(A,B)  (A < B ? A : B)
 
-char buffer[4096];
+char outputname[1024];
+
 int verbose = 0;
 
 char strtab[65536] = "\0";
@@ -214,7 +215,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 
 					if (S != 0)
 					{
-						fprintf(stderr, "applying addend with non-zero S\n");
+						fprintf(stderr, "%s: applying addend with non-zero S: %08x\n", basename(outputname), ntohl(S));
 					}
 
 					int A = htonl(ntohl(elfreloc.r_addend) + S);
@@ -249,7 +250,6 @@ int fd, ph_fd;
 int len,n,i = 0;
 PH ph = {};
 Elf32_Ehdr eh;
-char outputname[1024];
 char *typename;
 off_t crp;
 int exportlocals = 0;
@@ -480,7 +480,7 @@ int exportlocals = 0;
 		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
 		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
 		
-	//	qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
+		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
 		
 		len += emitreloc(ph_fd, rarray, n, symbols, sect, textindex, 0);
@@ -534,7 +534,9 @@ int exportlocals = 0;
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
 
-		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size));
+		dataoffset = 0;
+		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
+		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size)+dataoffset);
 		free(rarray);
 	}
 
@@ -599,20 +601,21 @@ int exportlocals = 0;
 		
 		int b = ELF32_ST_BIND(elfsymbol.st_info);
 
-		if (t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
+		int targetsection = ntohs(elfsymbol.st_shndx);
+
+		if (targetsection)
+		if (t == STT_NOTYPE || t == STT_FUNC || t == STT_OBJECT || t == STT_COMMON)
 		{
 			sym.kind = 0;
-			sym.segment = SEGABS;
+			sym.segment = htons(SEGABS);
 			
 			sym.offset = htonl(ntohl(elfsymbol.st_value));
 
-			if (!exportlocals && b != STB_GLOBAL )
+			if (!exportlocals && (b != STB_GLOBAL && t != STT_NOTYPE))
 			{
 				if (verbose && symbolname[0]) fprintf(stderr,"%32s %08x *** SKIPPED\n", symbolname, ntohl(sym.offset));
 				continue;
 			}
-
-			int targetsection = ntohs(elfsymbol.st_shndx);
 
 			if (istext(&sect[targetsection]))
 			{
@@ -639,6 +642,7 @@ int exportlocals = 0;
 			else
 			{
 				typename = "UNDEF";
+				continue;
 			}
 
 			if (verbose) fprintf(stderr,"%32s %6s %08x\n", symbolname, typename, ntohl(sym.offset));
