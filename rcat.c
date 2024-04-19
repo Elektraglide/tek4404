@@ -22,7 +22,8 @@
 
 // cmd line options
 int verbose = 0;
-int withsymbols = 0;
+int stripsymbols = 0;
+int justcat = 0;
 
 
 void datacpy(int dst, int src, int len)
@@ -214,8 +215,11 @@ off_t crp;
 	{
 		if (argv[i][0] == '-' || argv[i][0] == '+')
 		{
-			if (argv[i][1] == 'i')
-				withsymbols = 1;
+			if (argv[i][1] == 'c')
+				justcat = 1;
+			else
+			if (argv[i][1] == 's')
+				stripsymbols = 1;
 			else
 			if (argv[i][1] == 'v')
 				verbose = 1;
@@ -317,7 +321,7 @@ off_t crp;
 	if (verbose) fprintf(stderr, "found %d unique symbols\n", externalsymbolcount);
 	
 
-	// recursively visit nodes from _main
+	// recursively visit nodes from Start
 	externalsymbol *rootsymbol = symbolfind("Start",5);
 	if (rootsymbol)
 	{
@@ -354,15 +358,16 @@ off_t crp;
 	if (verbose) fprintf(stderr, "linking %d compile units\n", inputcount);
 
 
-	// setup header type
-	ph.magic[0] = 0x05;
+	// setup header type based on if this a simple concat or a full link
+	ph.magic[0] = justcat ? 0x05 : 0x04;
 	ph.source = htons(2);
 	ph.configuration = htons(4);
 	ph.namesize = htons(strlen(outputname));
 	write(out_fd, &ph, sizeof(ph));
 
 	// concat text sections and assign final offsets
-	ph.textstart = htonl(0);
+	int textstart = 0;
+	ph.textstart = htonl(textstart);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
@@ -372,16 +377,24 @@ off_t crp;
 		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize));
 	}
 	
-	// concat data sections (and bss)
+	// concat data sections
 	ph.datastart = htonl(ntohl(ph.textsize));
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
 		lseek(out_fd, ntohl(header->datasize), SEEK_CUR);
-		inputs[i].dataoff = ntohl(ph.datasize);
-		inputs[i].bssoff = ntohl(ph.bsssize);
+		inputs[i].dataoff = ntohl(ph.datastart) + ntohl(ph.datasize);
 	
 		ph.datasize = htonl(ntohl(ph.datasize) + ntohl(header->datasize));
+	}
+
+	// concat bss sections
+	int bssstart = ntohl(ph.textsize) + ntohl(ph.datasize);
+	for(i=0; i<inputcount; i++)
+	{
+		PH *header = (PH *)inputs[i].content;
+		inputs[i].bssoff = bssstart + ntohl(ph.bsssize);
+	
 		ph.bsssize = htonl(ntohl(ph.bsssize) + ntohl(header->bsssize));
 	}
 
@@ -439,9 +452,8 @@ off_t crp;
 		{
 			relocheader *rr = (relocheader *)rd;
 
-			n++;
+			// target segment to which this relocation refers
 			int kind = ntohs(rr->kind);
-
 			int addendoffset = 0;
 			switch(kind & 0xf0)
 			{
@@ -475,6 +487,7 @@ off_t crp;
 				}
 			}
 
+			// relocation for which segment
 			int *addend = NULL;
 			switch(kind & 0xf)
 			{
@@ -485,6 +498,9 @@ off_t crp;
 				case 2:
 					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(rr->offset));
 					rr->offset = htonl(ntohl(rr->offset) + inputs[i].dataoff);
+					break;
+				default:
+					fprintf(stderr, "unknown kind %d\n", kind & 0xf);
 					break;
 			}
 
@@ -499,10 +515,13 @@ off_t crp;
 					rd++;
 			}
 		}
-		
-		write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize), ntohl(header->relocsize));
 
-		ph.relocsize = htonl(ntohl(ph.relocsize) + ntohl(header->relocsize));
+		if (justcat)
+		{
+			write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize), ntohl(header->relocsize));
+			ph.relocsize = htonl(ntohl(ph.relocsize) + ntohl(header->relocsize));
+			n++;
+		}
 	}
 	if (verbose) fprintf(stderr, "%d relocations\n", n);
 
@@ -510,7 +529,7 @@ off_t crp;
 	n = 0;
 	len = 0;
 	symbolclear();
-	if (withsymbols)
+	if (stripsymbols == 0)
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
