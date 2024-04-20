@@ -81,6 +81,7 @@ typedef struct
 } ntp_packet;              /* Total: 384 bits or 48 bytes. */
 
 int verbose = 0;
+int setclock = 0;
 
 void error( msg )
 char* msg;
@@ -108,13 +109,26 @@ char **argv;
   int i,verbose;
 
   verbose = 0;
+  setclock = 0;
   for(i=1; i<argc; i++)
   {
     if (argv[i][0] == '+' || argv[i][0] == '-')
     {  
       if (argv[i][1] == 'v')
         verbose = 1;
-    }	
+      if (argv[i][1] == 's')
+      {
+      	if (geteuid() == 0)
+      	{
+	        setclock = 1;
+	    }
+		else
+		{
+			fprintf(stderr,"Only the system manager may change the clock.\n");
+			exit(-1);
+		}
+	  }
+    }
   }
 
   memset( &packet, 0, sizeof( ntp_packet ) );
@@ -177,11 +191,9 @@ char **argv;
   /* print in format for 'date -s' */
   ntptime = localtime(&txTm);
 
-  if(verbose)
-  {  
-   printf("%2.2d-%2.2d-%2.2d %2.2d:%2.2d:%2.2d\n", 
-     ntptime->tm_mon+1,ntptime->tm_mday,ntptime->tm_year + 1900, 
-     ntptime->tm_hour,ntptime->tm_min,ntptime->tm_sec);
+  if(setclock)
+  {
+	stime(&txTm);
   }
   else
   {
