@@ -1,20 +1,14 @@
 #include <stdio.h>
 #include <time.h>
 #include <sys/fcntl.h>
-
-typedef struct
-{
-  char code[8];
-  int unused;  
-  long timestamp;
-} HistoryRecord;
+#include <sys/acct.h>
 
 int main(argc, argv)
 int argc;
 char **argv;
 {
   int fd,n;
-  HistoryRecord record;
+  struct hist record;
   char buffer[32];
       
    fd = open("/act/history", O_RDONLY);	
@@ -22,10 +16,15 @@ char **argv;
   {
     while((n = read(fd, &record, sizeof(record))) > 0)
     {
-      strcpy(buffer, ctime(&record.timestamp));
+      /* some records are init record */
+      if (record.user_name[0] == '\0')
+      	continue;
+      
+      strcpy(buffer, ctime(&record.time_field));
       /* no CR */
       buffer[24] = '\0';
-      printf("%s\t%02s\n", buffer, record.code);
+
+      printf("%s tty%c%c\t%s\n", record.user_name,record.tty_num[0],record.tty_num[1], buffer);
     }
     close(fd);
   }
