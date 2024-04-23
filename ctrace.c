@@ -8,11 +8,22 @@
 
 char *defaultprocess[] = {"/tek/forever", NULL};	/* somthing that sits there doing stuff */
 
-void handlesig(sig)
+int done = 0;
+
+void childreap(sig)
+int sig;
+{
+	done = 1;
+	printf("SIGDEAD\n");
+}
+
+void childstop(sig)
 int sig;
 {
 
-	printf("SIGTRACE\n");
+	printf("SIGTRACE %d\n", sig);
+	
+	signal(sig, childstop);
 }
 
 void printtask(msg, task)
@@ -21,10 +32,11 @@ struct ctask *task;
 {
 	int pid = getpid();
 	
-  printf("------\n%s (%d)\n",msg, pid);
+  printf("------ %s (%d) -------\n",msg, pid);
   printf("task_id    %d\n", task->task_id);
   printf("task_fd    %d\n", task->task_fd);
   printf("task_state %8.8x\n", task->task_state);
+  printf("task_flags %8.8x\n", task->task_flags);
   printf("task_control %8.8x\n", task->task_control);
   
 }
@@ -34,7 +46,7 @@ int argc;
 char **argv;
 {
 	int i,rc;
-	char mem[32];
+	unsigned char mem[32];
 	struct ctask *task;
 	char **tracee;
 
@@ -45,37 +57,58 @@ char **argv;
 		tracee = argv + 1;
 	}
 
-	signal(SIGTRACE, handlesig);
+		signal(SIGTRACE, childstop);
+		signal(SIGDUMP, childstop);
 
 	task = create_controlled_task();
-	printtask("create",task);
+		printtask("create",task);
 	
 	/* do parent processing */
 	if (task->task_fd != 0)
 	{
-		printf("parent wakes watching pmem at %d\n", lseek(task->task_fd, 0, SEEK_CUR));
-		
-		while((task->task_state & 0xff) != TASK_TERMINATED)
+		printf("parent wakes\n");
+/*		signal(SIGDEAD, childreap); */
+
+
+		kill(task->task_id, SIGTRACE);
+
+
+		done = 0;
+		while(!done)
 		{
 			/* execute until breakpoint */
 			execute_controlled_task(task);
+			/* step_controlled_task(task); */
 
-			i = (task->task_state >> 24);
-			if (i)
-			{
-				printf("**** signal(%d)\n", i);
-				/* clear_controlled_task(task); */
-			}
+			printtask("execute",task);
+			if (done)
+				break;
 
-			task->task_PC = 0;
-			get_controlled_task_registers(task);
-			printf("task_PC %8.8x\n", task->task_PC);
+			printf("***********\n");
+				i = (task->task_state >> 24);
+				if (i)
+				{
+					printf(" signal(%d)\n", i);
+					/*  NB documented as being called clear_controlled_task_signals()
+					clear_controlled_task(task);
+					*/
+				}
+				else
+				{
+					task->task_PC = 0;
+					get_controlled_task_registers(task);
+					printf("task_PC %8.8x   D0:%8.8x D1:%8.8x\n", task->task_PC, task->task_REGS[0],task->task_REGS[1]);
 
-			get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
-			printf("memory %2.2x %2.2x %2.2x %2.2x\n", mem[0],mem[1],mem[2],mem[3]);
+					/* NB undocumented parameters */
+					get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
+					printf("memory %2.2x %2.2x %2.2x %2.2x\n", mem[0],mem[1],mem[2],mem[3]);
+				}
+			printf("***********\n");
 
 			resume_controlled_task(task);
+			printtask("resumed",task);
 
+			
 		}
 	}
 	else
