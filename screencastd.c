@@ -6,7 +6,7 @@
 #include <time.h>
 #include <sys/fcntl.h>
 #include <signal.h>
-
+#include <sys/sgtty.h>
 
 #include <net/config.h>
 #include <net/std.h>
@@ -15,6 +15,7 @@
 #include <net/enet.h>
 
 #include <net/inet.h>
+#include <net/nerrno.h>
 
 /* TEKTRONIX UNIFLEX HEADERS */
 
@@ -28,6 +29,8 @@
 #include "fdset.h"
 
 typedef int socklen_t;
+
+#define physXX phys
 
 #else
 
@@ -44,7 +47,15 @@ extern int kill();
 
 #include "uniflexshim.h"
 
-char buffer[1024*1024/8];
+/*
+
+native: cc +v screencastd.c +l=netlib
+
+clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o screencastd screencastd.c 
+
+*/
+
+unsigned char buffer[1024*1024/8];
 char *physXX(code)
 int code;
 {
@@ -79,7 +90,7 @@ struct bmpheader {
   int biClrUsed;
   int biClrImportant;
 
-  int palette[2];
+  unsigned int palette[2];
 };
 
 #define REMOTEDUMP_PORT 7389
@@ -122,6 +133,7 @@ void logtime()
 
     timestamp = time(NULL);
     ts = localtime(&timestamp);
+    if (ts)
     fprintf(stderr, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
         ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
         ts->tm_hour, ts->tm_min);
@@ -130,7 +142,7 @@ void logtime()
 int to_LE16(num)
 int num;
 {
-#ifdef __clang__
+#ifdef __clang__xx
     return num;
 #else
     return (num>>8) | (num<<8);
@@ -140,7 +152,7 @@ int num;
 int to_LE32(val)
 int val;
 {
-#ifdef __clang__
+#ifdef __clang__xx
     return val;
 #else
     val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF ); 
@@ -154,15 +166,15 @@ int rdp_session(din,dout,from)
 int din,dout;
 char *from;
 {
-	struct bmpheader header;
+  struct bmpheader header;
   int i,bytes,x,width,y,height,framenum;
-  char *dst,*src;
+  unsigned char *dst,*src;
   int rc;
-  
+
   unsigned int *fb;
   unsigned short *srcbits;
-	unsigned short last;
-	short run,count, runheader;
+  unsigned short last;
+  short run,count, runheader;
 
   /* write framebuffer RLE to newsock */
   fb = (int *)physXX(1);
@@ -176,14 +188,14 @@ char *from;
   framenum = 0;
 
   header.bfType = to_LE16(0x4d42);
-  header.bfSize = to_LE32(sizeof(struct bmpheader)+(width/8)*height);
+  header.bfSize = to_LE32(14 + 40 + 2*4 + (width/8)*height);
   header.bfReserved1 = 0;
   header.bfReserved2 = 0;
-  header.bfOffBits = to_LE32(sizeof(struct bmpheader));
+  header.bfOffBits = to_LE32(14 + 40);
 
   header.biSize = to_LE32(40);
   header.biWidth = to_LE32(width);
-  header.biHeight = to_LE32(-height);	/* flipped */
+  header.biHeight = to_LE32(height);	/* flipped */
   header.biPlanes = to_LE16(1);
   header.biBitCount = to_LE16(1);
   header.biCompression = 0;
@@ -196,12 +208,17 @@ char *from;
   /* must use palette */
   header.palette[0] = 0xffffffff;	/* white bg */
   header.palette[1] = 0x000000ff;	/* black fg */
+
+fprintf(stderr, "offbits 0x%4.4x \n\012", header.bfOffBits);
+fprintf(stderr, "planes 0x%2.2x \n\012", header.biPlanes);
+fprintf(stderr, "bitcount 0x%2.2x \n\012", header.biBitCount);
+fprintf(stderr, "clrUsed 0x%4.4x \n\012", header.biClrUsed);
   
   while (1)
   {
     /* TODO:  account for origin */
-		/* make a a contiguous buffer */
-    src = (char *)fb;
+	/* make a a contiguous buffer */
+    src = (unsigned char *)fb;
     for(y=0; y<height; y++)
     {
       memcpy(bitmap + y * width/8, src, width/8);
@@ -210,12 +227,29 @@ char *from;
     
     /* BMP header */
     rc = write(dout, &header, sizeof(header));
+    fprintf(stderr, "wrote %d bytes\n\012", rc);
     if (rc != sizeof(header))
     {
       break;
     }
 
-		/* compress width x height 1-bit bitmap */
+#define MAXWRITE 512
+#if 1
+		bytes = height * width/8;
+		src = (char *)bitmap;
+		while(bytes > 0)
+		{
+			i = (bytes > MAXWRITE) ? MAXWRITE : bytes;
+  			rc = write(dout, src, i);
+  			if (rc < 0)
+				break;
+				  			
+			/* fprintf(stderr, "wrote %d bytes\012\n", rc); */
+			src += rc;
+			bytes -= rc;
+		}
+#else
+	/* compress width x height 1-bit bitmap */
     bytes = 0;
     srcbits = (unsigned short *)bitmap;
     last = srcbits[0];
@@ -259,9 +293,10 @@ char *from;
         count++;
       }
     }
+#endif
 
     framenum++;
-    fprintf(stderr, "send frame %d in %d bytes\n", framenum,bytes);
+    fprintf(stderr, "send frame %d in %d bytes\n\012", framenum,bytes);
     sleep(1);
   }
 
@@ -341,11 +376,11 @@ char **argv;
       
       if (state == STOPPED) break;
 
-  #ifndef __clang__
+#ifndef __clang__
       /* is turning off Nagle supported? */
-  #else
+#else
       setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
-  #endif
+#endif
 
       /* Uniflex accept() doesn't fill this in.. */
       cli_addr_len = sizeof(cli_addr);
