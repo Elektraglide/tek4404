@@ -1,8 +1,14 @@
 #include "ph.h"
 
+extern int kernbootfile();
+extern char *kernalloc();
+extern int kernfree();
+
 extern char *getsymbols();
 extern symbolheader * findsymbol();
+extern int getkconstant();
 extern int getkvalue();
+extern int readkint32();
 
 #ifdef __clang__
 #pragma pack(push, 1)
@@ -13,16 +19,17 @@ struct kerntask {
 	unsigned int tslink,tsslnk;
 	short tsuid, tstid, tstidp, tstty;
 	short x10;
-	int tsevnt;
-	int tstext;
-	int tsswap;
+	unsigned int tsevnt;
+	unsigned int tstext;
+	unsigned int tsswap;
 	short tsalrm,tscpu,tssize,tstxtp,tsdatp,tsstkp,tsutop,x2c,tssignal;
 	
 	short x30,x32,x34;
 	
-	int tssigsoft[2];
-	int tssigmsk[2];
-	char tsstat,tsmode,tsmode2,tsprir,tsprb,tsact;
+	unsigned int tssigsoft[2];
+	unsigned int tssigmsk[2];
+	unsigned char tsstat,tsmode,tsmode2,tsprir;
+	unsigned char	tsprb,tsact;
 	short tsage;
 };
 

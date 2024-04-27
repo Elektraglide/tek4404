@@ -11,6 +11,10 @@
 #define ntohl(A) (A)
 #define ntohs(A) (A)
 #define htonl(A) (A)
+#else
+#include <stdlib.h>
+#include <unistd.h>
+
 #endif
 
 /*******************************************************/
@@ -92,6 +96,27 @@ char *needle;
 	return NULL;
 }
 
+int getkconstant(symbols, symbolsize, needle, pmem)
+char *symbols;
+int symbolsize;
+char *needle;
+int pmem;
+{
+	symbolheader *unalignedsym;
+	symbolheader sym;
+	int setting = 0;
+	
+	unalignedsym = findsymbol(symbols, symbolsize, needle);
+	if (unalignedsym)
+	{
+		memcpy(&sym, unalignedsym, sizeof(sym));
+	
+		setting = sym.offset;
+	}
+
+	return ntohl(setting);
+}
+
 int getkvalue(symbols, symbolsize, needle, pmem)
 char *symbols;
 int symbolsize;
@@ -109,11 +134,25 @@ int pmem;
 	
 		lseek(pmem, ntohl(sym.offset), 0);
 		read(pmem, &setting, 4);		/* always 4 bytes? */
-		printf("%s 0x%8.8x %s => 0x%8.8x\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), needle, ntohl(setting));
+		/* printf("%s 0x%8.8x %s => 0x%8.8x\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), needle, ntohl(setting)); */
 	}
 
-	return setting;
+	return ntohl(setting);
 }
 
+int readkint32(addr, pmem)
+int addr;
+int pmem;
+{
+	int setting = 0;
+	
+	if (addr)
+	{
+		lseek(pmem, addr, 0);
+		read(pmem, &setting, 4);		/* always 4 bytes? */
+	}
+
+	return ntohl(setting);
+}
 
 
