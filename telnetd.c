@@ -98,6 +98,8 @@ int sessionpty;
 int off = 0;
 int on = 1;
 
+FILE  *console;
+
 char sessionname[64];
 char *sessionargv[2];
 
@@ -291,7 +293,7 @@ int sig;
   int result;
   
 #ifdef DEBUG
-  fprintf(stderr,"cleanup telnet session on %d\012\n",sig);
+  fprintf(console,"cleanup telnet session on %d\012\n",sig);
 #endif
   close(sessionsock);
   close(sessionpty);
@@ -303,8 +305,9 @@ int sig;
 {
   int result;
   
-  fprintf(stderr,"signal(%d) \012\n",sig);
+  fprintf(console,"signal(%d) for pid%d\012\n",sig, getpid());
 
+  signal(sig, testsig);
 }
 
 void writewithlf(socket, buffer, len)
@@ -381,7 +384,7 @@ char *from;
   rc = create_pty(ptfd);
   if (rc < 0)
   {
-    fprintf(stderr, "Error %d on create_pty\012\n", errno);
+    fprintf(console, "Error %d on create_pty\012\n", errno);
     exit(1);
   }
 
@@ -394,7 +397,11 @@ char *from;
   signal(SIGPIPE, cleanup_child);
   signal(SIGDEAD, cleanup_child);
 
-  signal(SIGINT, SIG_DFL);
+  signal(SIGHUP, testsig);
+  signal(SIGINT, testsig);
+  signal(SIGQUIT, testsig);
+  signal(SIGTERM, testsig);
+  signal(SIGEMT, testsig);
 
   sessionpid = fork();
   if (sessionpid)
@@ -469,7 +476,7 @@ char *from;
 
         if (rc < 0 && errno != EINTR)
         {
-            fprintf(stderr, "select() error %d\n", errno);
+            fprintf(console, "select() error %d\n", errno);
             break;
         }
 
@@ -495,7 +502,7 @@ char *from;
               {
                 if (errno != EINTR)
                 {
-                 fprintf(stderr, "read() error %d\n", errno);
+                 fprintf(console, "read() error %d\n", errno);
                   break;
                 }
 
@@ -528,7 +535,7 @@ char *from;
              /* Uniflex pty does not handle Ctrl-C! */
              if (ts.bi.start[0] == 0x03)
              {
-               fprintf(stderr, "sent SIGINT to %d\012\n", sessionpid);
+               fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
                kill(sessionpid, SIGINT);
 
 #if 0
@@ -541,7 +548,7 @@ char *from;
               {
                 if (errno != EINTR)
                 {
-                 fprintf(stderr, "fdmaster write() error %d\n", errno);
+                 fprintf(console, "fdmaster write() error %d\n", errno);
                   break;
                 }
                 continue;
@@ -575,7 +582,7 @@ char *from;
             {
               if (errno != EINTR)
               {
-                 fprintf(stderr, "fdmaster read() error %d\n", errno);
+                 fprintf(console, "fdmaster read() error %d\n", errno);
                 break;
               }
               continue;
@@ -583,13 +590,13 @@ char *from;
 
             if (n == 0)
             {
-                /* fprintf(stderr,"broken connection\012\n"); */
+                /* fprintf(console,"broken connection\012\n"); */
                 break;
             }
             else
             if (n == 4096)
             {
-              fprintf(stderr,"read chocked\n");
+              fprintf(console,"read chocked\n");
             }
 
             ts.bo.start = ts.bo.data;
@@ -609,7 +616,7 @@ char *from;
             }
             if (n < ts.bo.end - ts.bo.start)
             {
-              fprintf(stderr, "output choked\n");
+              fprintf(console, "output choked\n");
             }
             ts.bo.start += n;
           }
@@ -624,14 +631,16 @@ char *from;
   {
     /* CHILD */
     signal(SIGHUP, SIG_DFL);
-    signal(SIGINT, testsig);
     signal(SIGQUIT, SIG_DFL);
+
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
 
     /* Close the master side of the PTY */
     close(fdmaster);
 
     /* make a friendly name */
-    strcpy(sessionname, "tn_");
+    strcpy(sessionname, "telnet_");
     strcat(sessionname, from);
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
@@ -662,7 +671,7 @@ char *from;
       rc = execvp(telnetprocess[0], sessionargv);
       if (rc < 0)
       {
-        fprintf(stderr, "Error %d on exec\n", errno);
+        fprintf(console, "Error %d on exec\n", errno);
       }
     }
 
@@ -671,7 +680,7 @@ char *from;
   }
 
 #ifdef DEBUG
-  fprintf(stderr, "EXIT telnet_session\n");
+  fprintf(console, "EXIT telnet_session\n");
 #endif
   return errno;
 }
@@ -707,7 +716,7 @@ void logtime()
 
     timestamp = time(NULL);
     ts = localtime(&timestamp);
-    fprintf(stderr, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
+    fprintf(console, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
         ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
         ts->tm_hour, ts->tm_min);
 }
@@ -728,6 +737,8 @@ char **argv;
 #endif
   int reuse = 1;
 
+  console = fopen(nget_str("console"), "a");
+
   state = RUNNING;
 
    /* listen for connections too? */
@@ -735,7 +746,7 @@ char **argv;
   {
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-      fprintf(stderr, "socket: %s\n",strerror(errno));
+      fprintf(console, "socket: %s\n",strerror(errno));
       return 1;
     }
 
@@ -746,7 +757,7 @@ char **argv;
     serv_addr.sin_port = htons(IPO_TELNET);
     rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
     if (rc < 0) {
-      fprintf(stderr, "bind: %s\n",strerror(errno));
+      fprintf(console, "bind: %s\n",strerror(errno));
       close(sock);
       return errno;
     }
@@ -759,12 +770,12 @@ char **argv;
 
     rc = listen(sock, 5);
     if (rc < 0) {
-      fprintf(stderr, "listen: %s\n",strerror(errno));
+      fprintf(console, "listen: %s\n",strerror(errno));
       close(sock);
       return errno;
     }
 
-    fprintf(stderr, "telnetd started\n");
+    fprintf(console, "telnetd started\n");
     while (state == RUNNING)
     {
       newsock = 0;
@@ -780,7 +791,7 @@ char **argv;
           if (errno == ENETDOWN) continue;
           if (errno == ENOPROTOOPT) continue;
 
-          fprintf(stderr, "error %d (%s) in accept\n", errno, strerror(errno));
+          fprintf(console, "error %d (%s) in accept\n", errno, strerror(errno));
           close(sock);
           return errno;
         }
@@ -802,7 +813,7 @@ char **argv;
       if (fork())
       {
         logtime();
-        fprintf(stderr, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(console, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
       
         sleep(5);
         close(newsock);
@@ -814,7 +825,7 @@ char **argv;
         rc = telnet_session(newsock, newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
       
         logtime();
-        fprintf(stderr, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(console, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
 
         break;
       }
@@ -835,10 +846,11 @@ char **argv;
     }
     else
     {
-      fprintf(stderr, "stdin is not a pipe.\n");	
+      fprintf(console, "stdin is not a pipe.\n");	
     }
   }
-  
+
+  fclose(console);  
   return 0;
 }
 
