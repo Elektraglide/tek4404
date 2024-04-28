@@ -1,13 +1,10 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include <string.h>
+#include <errno.h>
 #include <ctype.h>
 #include <memory.h>
-#include <libgen.h>
-#include <arpa/inet.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
-#include <sys/errno.h>
   
 #include "ph.h"
 
@@ -20,13 +17,30 @@
 
 #define min(A,B)  (A < B ? A : B)
 
-// cmd line options
+#ifndef __clang__
+#define ntohl(A) (A)
+#define ntohs(A) (A)
+#define htonl(A) (A)
+#define htons(A) (A)
+#define off_t int
+extern char *basename();
+#else
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <libgen.h>
+#endif
+
+/* cmd line options */
 int verbose = 0;
 int stripsymbols = 0;
 int justcat = 0;
 
 
-void datacpy(int dst, int src, int len)
+void datacpy(dst, src, len)
+int dst;
+int src;
+int len;
 {
 	char buffer[4096];
 	int n;
@@ -38,6 +52,22 @@ void datacpy(int dst, int src, int len)
 		len -= n;
 	}
 }
+
+typedef struct
+{
+	char srcfile[64];
+	char *content;
+	char *relocs;
+	char *symbols;
+	int textoff,dataoff,bssoff;
+
+	int used;
+
+} compileunit;
+
+#define MAXINPUTS 512
+compileunit inputs[MAXINPUTS];
+
 
 typedef struct
 {
@@ -57,23 +87,33 @@ void symbolclear()
 	symbols = (externalsymbol *)malloc(sizeof(externalsymbol) * externalsymbolmax);
 }
 
-#define HASH_INIT (0x811c9dc5u)
-#define HASH_PRIME (0x01000193u)
+#define HASH_INIT (0x811c9dc5)
+#define HASH_PRIME (0x01000193)
 
-int symboladd(int unit, char *name, int len, int segment, int finaloffset)
+int symboladd( unit, name,  len,  segment,  finaloffset)
+int unit;
+char *name;
+int len;
+int segment;
+int finaloffset;
 {
+	unsigned int hval;
+	int i;
+		
 	if (len > 0)
 	{
-		// generate a hash for this string
-		unsigned int hval = HASH_INIT;
+		if (verbose) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
+	
+		/* generate a hash for this string */
+		hval = HASH_INIT;
 		while (len--)
 		{
 			hval *= HASH_PRIME;
 			hval ^= (unsigned int)*name++;
 		}
 
-		// do we have it?
-		for(int i=0; i<externalsymbolcount; i++)
+		/* do we have it? */
+		for(i=0; i<externalsymbolcount; i++)
 		{
 			if (symbols[i].namehash == hval)
 			{
@@ -81,7 +121,7 @@ int symboladd(int unit, char *name, int len, int segment, int finaloffset)
 			}
 		}
 
-		// add it and resize if needed
+		/* add it and resize if needed */
 		symbols[externalsymbolcount].srcunit = unit;
 		symbols[externalsymbolcount].namehash = hval;
 		symbols[externalsymbolcount].segment = segment;
@@ -90,27 +130,32 @@ int symboladd(int unit, char *name, int len, int segment, int finaloffset)
 		if (externalsymbolcount >= externalsymbolmax)
 		{
 			externalsymbolmax *= 2;
-			symbols = realloc(symbols, sizeof(externalsymbol) * externalsymbolmax);
+			symbols = (externalsymbol *)realloc(symbols, sizeof(externalsymbol) * externalsymbolmax);
 		}
 	}
 	
 	return 0;
 }
 
-externalsymbol *symbolfind(char *name, int len)
+externalsymbol *symbolfind(name, len)
+char *name;
+int len;
 {
+	unsigned int hval;
+	int i;
+	
 	if (len > 0)
 	{
-		// generate a hash for this string
-		unsigned int hval = HASH_INIT;
+		/* generate a hash for this string */
+		hval = HASH_INIT;
 		while (len--)
 		{
 			hval *= HASH_PRIME;
 			hval ^= (unsigned int)*name++;
 		}
 
-		// do we have it?
-		for(int i=0; i<externalsymbolcount; i++)
+		/* do we have it? */
+		for(i=0; i<externalsymbolcount; i++)
 		{
 			if (symbols[i].namehash == hval)
 			{
@@ -122,14 +167,16 @@ externalsymbol *symbolfind(char *name, int len)
 	return 0;
 }
 
-// simple set of integers
+/* simple set of integers representing compileunit index */
 typedef struct
 {
-	int members[4096];
+	int members[MAXINPUTS];
 	int last;
 } set;
 
-int addmember(set *results, int unit)
+int addmember(results,unit)
+set *results;
+int unit;
 {
 	int i;
 	for(i=0; i<results->last; i++)
@@ -142,56 +189,81 @@ int addmember(set *results, int unit)
 	return 1;
 }
 
-typedef struct
+/* all missing symbols */
+set missing;
+int addmissing(char *name, int len)
 {
-	char srcfile[64];
-	char *content;
-	char *relocs;
-	char *symbols;
-	int textoff,dataoff,bssoff;
+	unsigned int hval;
+	int i;
 
-	int used;
+		/* generate a hash for this string */
+		hval = HASH_INIT;
+		while (len--)
+		{
+			hval *= HASH_PRIME;
+			hval ^= (unsigned int)*name++;
+		}
 
-} compileunit;
+		/* do we have it? */
+		for(i=0; i<missing.last; i++)
+		{
+			if (missing.members[i] == hval)
+				return 0;
+		}
+		missing.members[missing.last] = hval;
+		missing.last++;
+		return 1;
+}
 
-compileunit inputs[4096];
-
-void gatherdependence(set *results, int i)
+void gatherdependence(results, i, depth)
+set *results;
+int i;
+int depth;
 {
-	// append unitid
+PH *header;
+char *rd,*endrd;
+int kind;
+
+	/* append unitid */
 	if (!addmember(results, i))
 		return;
 	
-	// find all other dependencies of this unit
-	PH *header = (PH *)inputs[i].content;
+	/* find all other dependencies of this unit */
+	header = (PH *)inputs[i].content;
 
-	char *rd = inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
-	char *endrd = rd + ntohl(header->relocsize);
+	if (verbose) fprintf(stderr, "%.*s searching %s\n", depth, "  ", inputs[i].srcfile);
+
+	rd = inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
+	endrd = rd + ntohl(header->relocsize);
 	while(rd < endrd)
 	{
-		relocheader *rr = (relocheader *)rd;
+		relocheader rr;
 
-		int kind = ntohs(rr->kind);
+		/* aligned for m68k */		
+		memcpy(&rr, rd, sizeof(rr));
 
-		// follow external symbols
+		kind = ntohs(rr.kind);
+
+		/* follow external symbols */
 		if (kind & 0x8000)
 		{
-			// lookup symbol
-			externalsymbol *es = symbolfind((char *)(rr+1),ntohs(rr->len));
+			/* lookup symbol */
+			externalsymbol *es = symbolfind((char *)(rd+sizeof(rr)),ntohs(rr.len));
 			if (es)
 			{
 				if (es->srcunit != i)
-					gatherdependence(results, es->srcunit);
+					gatherdependence(results, es->srcunit, depth+1);
 			}
 			else
+			if (addmissing((rd+sizeof(rr)),(int)ntohs(rr.len)))
 			{
-				if (verbose) fprintf(stderr, "%32s: missing symbol for %s\n", (char *)(rr+1), inputs[i].srcfile);
+				if (verbose) fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile);
 			}
 		}
 
-		rd = (char *)(rr+1) + ntohs(rr->len);
+		rd = (char *)(rd+sizeof(rr)) + ntohs(rr.len);
 		/* handle broken len fields */
-		if (ntohs(rr->len) > 9)
+		if (ntohs(rr.len) > 9)
 		{
 			while (*rd)
 				rd++;
@@ -199,14 +271,19 @@ void gatherdependence(set *results, int i)
 	}
 }
 
-int main(int argc, char *argv[])
+int main(argc, argv)
+int argc;
+char **argv;
 {
 int inputcount;
 char outputname[256];
 int fd, out_fd;
 int len,n,j,i = 0;
-PH ph = {};
+int bssstart;
+PH ph;
 off_t crp;
+externalsymbol *rootsymbol;
+set missing;
 
 	/* cmd line args */
 	inputcount = 0;
@@ -227,7 +304,7 @@ off_t crp;
 			if (argv[i][1] == 'o')
 			{
 				i++;
-				out_fd = open(argv[i], O_RDWR | O_CREAT | O_TRUNC, 0666);
+				out_fd = creat(argv[i], S_IREAD | S_IWRITE);
 				if (out_fd < 0)
 				{
 					fprintf(stderr, "%s: output file failed\n", argv[i]);
@@ -248,11 +325,11 @@ off_t crp;
 				PH header;
 				char *unitname;
 				
-				// read all compile units in file
+				/* read all compile units in file */
 				while(1)
 				{
 					n = read(fd, &header, sizeof(header));
-					// no more units..
+					/* no more units.. */
 					if (n != sizeof(header))
 						break;
 
@@ -273,10 +350,10 @@ off_t crp;
 					inputs[inputcount].relocs = inputs[inputcount].content + sizeof(PH) + ntohl(header.textsize) + ntohl(header.datasize);
 					inputs[inputcount].symbols = inputs[inputcount].relocs + ntohl(header.relocsize);
 
-					// track usage stats
+					/* track usage stats */
 					inputs[inputcount].used = 0;
 					
-					// do we have a name for this unit?
+					/* do we have a name for this unit? */
 					unitname = basename(argv[i]);
 					if (ntohs(header.namesize))
 						unitname = inputs[inputcount].content + n - ntohs(header.namesize);
@@ -286,7 +363,12 @@ off_t crp;
 					memset(inputs[inputcount].srcfile, 0, sizeof(inputs[inputcount].srcfile));
 					strncpy(inputs[inputcount].srcfile, unitname, sizeof(inputs[inputcount].srcfile));
 					inputcount++;
-					if (verbose) fprintf(stderr, "added %08x %08lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
+					if (inputcount >= MAXINPUTS)
+					{
+					  fprintf(stderr, "too many inputs\n");
+					  exit(2);	
+					}
+					if (verbose) fprintf(stderr, "added %8.8x %8.8lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
 				}
 				close(fd);
 			}
@@ -294,7 +376,8 @@ off_t crp;
 	}
 	if (verbose) fprintf(stderr, "processing %d compile units\n", inputcount);
 
-	// gather all symbols so we can see what is actually referenced
+	/* gather all symbols so we can see what is actually referenced */
+	missing.last = 0;
 	symbolclear();
 	for(i=0; i<inputcount; i++)
 	{
@@ -304,70 +387,80 @@ off_t crp;
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
-			symbolheader *sym = (symbolheader *)sdata;
+			symbolheader sym;
+
+			/* aligned for m68k */
+			memcpy(&sym, sdata, sizeof(sym));
 
 			/* we dont care about finaloffsets, just gathering all symbols */
-			symboladd(i, (char *)(sym+1),ntohs(sym->len), ntohs(sym->segment), 0);
-			
-			sdata = (char *)(sym+1) + ntohs(sym->len);
-			// NB need to handle broken len?
+			symboladd(i, (char *)(sdata+sizeof(sym)),
+			    ntohs(sym.len), ntohs(sym.segment), 0);
+
+			/* tek-cc gets this wrong... */
+			sdata = (sdata+sizeof(sym)) + ntohs(sym.len);
+
+			/* NB need to handle broken len? */
 		}
 	}
-	// adding predefined loader symbols
+	/* adding predefined loader symbols */
 	symboladd(0, "$$syscall", 9, SEGABS, 0);
 	symboladd(0, "ETEXT", 5, SEGTEXT, 0);
 	symboladd(0, "EDATA", 5, SEGDATA, 0);
 	symboladd(0, "END", 3, SEGBSS, 0);
 	if (verbose) fprintf(stderr, "found %d unique symbols\n", externalsymbolcount);
 	
-
-	// recursively visit nodes from Start
-	externalsymbol *rootsymbol = symbolfind("Start",5);
-	if (rootsymbol)
+	/* if we are performing full link, then walk dependencies to determine working set */
+	if (justcat == 0)
 	{
-		set depends;
-		
-		depends.last = 0;
-		gatherdependence(&depends, rootsymbol->srcunit);
-		for(i=0; i<depends.last; i++)
+		/* recursively visit nodes from Start */
+		rootsymbol = symbolfind("Start",5);
+		if (rootsymbol)
 		{
-			inputs[depends.members[i]].used++;
+			set depends;
+			
+			depends.last = 0;
+			gatherdependence(&depends, rootsymbol->srcunit, 0);
+			for(i=0; i<depends.last; i++)
+			{
+				inputs[depends.members[i]].used++;
+			}
 		}
-	}
-	else
-	{
-		fprintf(stderr, "can't find Start entrypoint\n");
-		return -1;
+		else
+		{
+			fprintf(stderr, "can't find Start entrypoint\n");
+			return -1;
+		}
+		
+		/* now we can cull unreferenced compileunits */
+		for(i=0; i<inputcount; i++)
+		{
+			/* is it never referenced? */
+			if (inputs[i].used == 0)
+			{
+				/* if (verbose) fprintf(stderr, "%s: unreferenced\n",inputs[i].srcfile); */
+				inputcount--;
+				for(j=i; j<inputcount; j++)
+				{
+					inputs[j] = inputs[j+1];
+				}
+				i--;
+			}
+		}
+		if (verbose) fprintf(stderr, "linking %d compile units\n", inputcount);
 	}
 	
-	/* now we can cull unreferenced compileunits */
-	for(i=0; i<inputcount; i++)
-	{
-		/* is it never referenced? */
-		if (inputs[i].used == 0)
-		{
-			//if (verbose) fprintf(stderr, "%s: unreferenced\n",inputs[i].srcfile);
-			inputcount--;
-			for(j=i; j<inputcount; j++)
-			{
-				inputs[j] = inputs[j+1];
-			}
-			i--;
-		}
-	}
-	if (verbose) fprintf(stderr, "linking %d compile units\n", inputcount);
 
-
-	// setup header type based on if this a simple concat or a full link
+	/* setup header type based on if this a simple concat or a full link */
+	memset(&ph, 0, sizeof(ph));
 	ph.magic[0] = justcat ? 0x05 : 0x04;
 	ph.source = htons(2);
 	ph.configuration = htons(4);
 	ph.namesize = htons(strlen(outputname));
 	write(out_fd, &ph, sizeof(ph));
 
-	// concat text sections and assign final offsets
-	int textstart = 0;
-	ph.textstart = htonl(textstart);
+	/* concat text sections and assign final offsets */
+
+	ph.textstart = htonl(0);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
@@ -377,7 +470,7 @@ off_t crp;
 		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize));
 	}
 	
-	// concat data sections
+	/* concat data sections */
 	ph.datastart = htonl(ntohl(ph.textsize));
 	for(i=0; i<inputcount; i++)
 	{
@@ -388,8 +481,8 @@ off_t crp;
 		ph.datasize = htonl(ntohl(ph.datasize) + ntohl(header->datasize));
 	}
 
-	// concat bss sections
-	int bssstart = ntohl(ph.textsize) + ntohl(ph.datasize);
+	/* concat bss sections */
+	bssstart = ntohl(ph.textsize) + ntohl(ph.datasize);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
@@ -398,7 +491,7 @@ off_t crp;
 		ph.bsssize = htonl(ntohl(ph.bsssize) + ntohl(header->bsssize));
 	}
 
-	// gather all symbols with final offsets
+	/* gather all symbols with final offsets */
 	symbolclear();
 	for(i=0; i<inputcount; i++)
 	{
@@ -408,53 +501,61 @@ off_t crp;
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
-			symbolheader *sym = (symbolheader *)sdata;
+			symbolheader sym;
+			int finaloffset;
+			
+			/* aligned for m68k */
+			memcpy(&sym, sdata, sizeof(sym));
 
-			int finaloffset = 0;
-			switch(ntohs(sym->segment))
+			finaloffset = 0;
+			switch(ntohs(sym.segment))
 			{
 				case SEGTEXT:
-					finaloffset = (ntohl(sym->offset) + inputs[i].textoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].textoff);
 					break;
 				case SEGDATA:
-					finaloffset = (ntohl(sym->offset) + inputs[i].dataoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].dataoff);
 					break;
 				case SEGBSS:
-					finaloffset = (ntohl(sym->offset) + inputs[i].bssoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].bssoff);
 					break;
 			}
 			
-			symboladd(i, (char *)(sym+1),ntohs(sym->len), ntohs(sym->segment), finaloffset);
+			symboladd(i, (char *)(sdata+sizeof(sym)),
+				ntohs(sym.len), ntohs(sym.segment), finaloffset);
 			
-			sdata = (char *)(sym+1) + ntohs(sym->len);
-			// NB need to handle broken len?
+			sdata = (char *)(sdata+sizeof(sym)) + ntohs(sym.len);
+			/* NB need to handle broken len? */
 		}
 	}
-	// adding predefined loader symbols
-	symboladd(0, "$$syscall", 9, SEGABS, 0x00004e4f);		// this is an ABS symbol in system.boot,  available elsewhere (systat)?
+	/* adding predefined loader symbols */
+	symboladd(0, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
 	symboladd(0, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
 	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
 	symboladd(0, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
-	if (verbose) fprintf(stderr, "using %d unique symbols\n", externalsymbolcount);
-	
-	
+	if (verbose) fprintf(stderr, "referencing %d unique symbols\n", externalsymbolcount);
 
-	// rebase reloc records and resolve external symbols
+
+	/* rebase reloc records and resolve external symbols */
 	n = 0;
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
 
-		// update every reloc record
+		/* update every reloc record */
 		char *rd = inputs[i].relocs;
 		char *endrd = rd + ntohl(header->relocsize);
 		while(rd < endrd)
 		{
-			relocheader *rr = (relocheader *)rd;
+			relocheader rr;
+			int *addend,addendoffset,kind;
+			
+			/* alignment for m68k */
+			memcpy(&rr, rd, sizeof(relocheader));
 
-			// target segment to which this relocation refers
-			int kind = ntohs(rr->kind);
-			int addendoffset = 0;
+			/* target segment to which this relocation refers */
+			kind = ntohs(rr.kind);
+			addendoffset = 0;
 			switch(kind & 0xf0)
 			{
 				case 0x00:
@@ -471,33 +572,34 @@ off_t crp;
 					break;
 			}
 
-			// resolve external to internal
+			/* resolve external to internal */
 			if (kind & 0x8000)
 			{
-				// lookup final offset
-				externalsymbol *es = symbolfind((char *)(rr+1),ntohs(rr->len));
+				/* lookup final offset */
+				externalsymbol *es = symbolfind((char *)(rd+sizeof(rr)),ntohs(rr.len));
 				if (es)
 				{
-					//fprintf(stderr, "%32s: resolved symbol for %s with symbol in %s\n", (char *)(rr+1), inputs[i].srcfile, inputs[es->srcunit].srcfile);
+					if (verbose) fprintf(stderr, "%20s: resolved symbol for %s with symbol in %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile, inputs[es->srcunit].srcfile);
 					addendoffset = es->finaloffset;
 				}
 				else
+				if (addmissing((rd+sizeof(rr)),(int)ntohs(rr.len)))
 				{
-					fprintf(stderr, "%32s: missing symbol for %s\n", (char *)(rr+1), inputs[i].srcfile);
+					fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile);
 				}
 			}
 
-			// relocation for which segment
-			int *addend = NULL;
+			/* relocation for which segment */
+			addend = NULL;
 			switch(kind & 0xf)
 			{
 				case 1:
-					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(rr->offset));
-					rr->offset = htonl(ntohl(rr->offset) + inputs[i].textoff);
+					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(rr.offset));
+					rr.offset = htonl(ntohl(rr.offset) + inputs[i].textoff);
 					break;
 				case 2:
-					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(rr->offset));
-					rr->offset = htonl(ntohl(rr->offset) + inputs[i].dataoff);
+					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(rr.offset));
+					rr.offset = htonl(ntohl(rr.offset) + inputs[i].dataoff);
 					break;
 				default:
 					fprintf(stderr, "unknown kind %d\n", kind & 0xf);
@@ -507,9 +609,9 @@ off_t crp;
 			if (addend)
 				*addend = htonl(ntohl(*addend) + addendoffset);
 
-			rd = (char *)(rr+1) + ntohs(rr->len);
+			rd = (rd+sizeof(rr)) + ntohs(rr.len);
 			/* handle broken len fields */
-			if (ntohs(rr->len) > 9)
+			if (ntohs(rr.len) > 9)
 			{
 				while (*rd)
 					rd++;
@@ -523,9 +625,9 @@ off_t crp;
 			n++;
 		}
 	}
-	if (verbose) fprintf(stderr, "%d relocations\n", n);
+	if (verbose) fprintf(stderr, "%d relocation records\n", n);
 
-	// export symbols if requested
+	/* export symbols if requested */
 	n = 0;
 	len = 0;
 	symbolclear();
@@ -538,52 +640,55 @@ off_t crp;
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
-			symbolheader *sym = (symbolheader *)sdata;
+			symbolheader sym;
 			
-			// only if we have not seen it before
-			if (!symboladd(i, (char *)(sym+1),ntohs(sym->len), ntohs(sym->segment), 0))
+			/* aligned for m68k */
+			memcpy(&sym, sdata, sizeof(sym));
+			
+			/* only if we have not seen it before */
+			if (!symboladd(i, (char *)(sdata+sizeof(sym)),ntohs(sym.len), ntohs(sym.segment), 0))
 			{
 				n++;
-				switch(ntohs(sym->segment))
+				switch(ntohs(sym.segment))
 				{
 					case SEGTEXT:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].textoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].textoff);
 						break;
 					case SEGDATA:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].dataoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].dataoff);
 						break;
 					case SEGBSS:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].bssoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].bssoff);
 						break;
 				}
 
-				write(out_fd, sym, sizeof(symbolheader));
-				if (sym->len)
-					write(out_fd, sym+1, ntohs(sym->len));
+				write(out_fd, &sym, sizeof(symbolheader));
+				if (sym.len)
+					write(out_fd, sdata+sizeof(sym), ntohs(sym.len));
 				len += sizeof(symbolheader);
-				len += ntohs(sym->len);
+				len += ntohs(sym.len);
 			}
 			
-			sdata = (char *)(sym+1) + ntohs(sym->len);
+			sdata = (sdata+sizeof(sym)) + ntohs(sym.len);
 		}
 	}
 	ph.symbolsize = htonl(len);
 	if (verbose) fprintf(stderr, "%d symbols\n", n);
 
-	// name section
+	/* name section */
 	write(out_fd, outputname, strlen(outputname));
 	
-	// update header with final values
+	/* update header with final values */
 	lseek(out_fd, 0, SEEK_SET);
 	write(out_fd, &ph, sizeof(ph));
 
-	// write edited text
+	/* write edited text */
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
 		write(out_fd, inputs[i].content + sizeof(PH), ntohl(header->textsize));
 	}
-	// write edited datas
+	/* write edited datas */
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
@@ -592,17 +697,16 @@ off_t crp;
 
 	close(out_fd);
 
-	if (verbose)
 	{
 		fprintf(stderr, "-----------------\n");
-		fprintf(stderr, "textstart = %08x\n", ntohl(ph.textstart));
-		fprintf(stderr, "textsize = %08x\n", ntohl(ph.textsize));
-		fprintf(stderr, "datastart = %08x\n", ntohl(ph.datastart));
-		fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
-		fprintf(stderr, "bsssize = %08x\n", ntohl(ph.bsssize));
-		fprintf(stderr, "relocsize = %08x\n", ntohl(ph.relocsize));
-		fprintf(stderr, "symbolsize = %08x\n", ntohl(ph.symbolsize));
-		fprintf(stderr, "namesize = %08x\n", ntohs(ph.namesize));
+		fprintf(stderr, "textstart = %8.8x\n", ntohl(ph.textstart));
+		fprintf(stderr, "textsize  = %8.8x\n", ntohl(ph.textsize));
+		fprintf(stderr, "datastart = %8.8x\n", ntohl(ph.datastart));
+		fprintf(stderr, "datasize  = %8.8x\n", ntohl(ph.datasize));
+		fprintf(stderr, "bsssize   = %8.8x\n", ntohl(ph.bsssize));
+		fprintf(stderr, "relocsize = %8.8x\n", ntohl(ph.relocsize));
+		fprintf(stderr, "symbolsize= %8.8x\n", ntohl(ph.symbolsize));
+		fprintf(stderr, "namesize  = %8.8x\n", ntohs(ph.namesize));
 	}
 
   return 0;
