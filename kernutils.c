@@ -58,35 +58,32 @@ char *needle;
 {
 	char *sdata;
 	char *send;
-	char buffer[128];
-	symbolheader *sym;
 
-	sym = (symbolheader *)buffer;
 	sdata = symbols;
 	send = sdata + symbolsize;
 	while(sdata < send)
 	{
+		symbolheader sym;
+
 		/* need to copy so we get on a word aligned boundary for m68k */
-		memset(buffer, 0, sizeof(buffer));
-		memcpy(buffer, sdata, sizeof(symbolheader));
- 		memcpy(buffer+sizeof(symbolheader), sdata+sizeof(symbolheader), ntohs(sym->len));
+		memcpy(&sym, sdata, sizeof(symbolheader));
 
 		/* SEGABS are kernel settings */
 		/* SEGDATA are kernel runtimes */
-		if(ntohs(sym->segment) == SEGABS || ntohs(sym->segment) == SEGDATA)
+		if(ntohs(sym.segment) == SEGABS || ntohs(sym.segment) == SEGDATA)
 		{
 			if (!needle)
-				printf("%s 0x%8.8x  %*s\n", (ntohs(sym->segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym->offset), ntohs(sym->len),(char *)(sym+1));
+				printf("%s 0x%8.8x  %.*s\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), ntohs(sym.len),sdata+sizeof(symbolheader));
 
-			if (needle && !strncmp((char *)(sym+1), needle, ntohs(sym->len)))
+			if (needle && !strncmp(sdata+sizeof(symbolheader), needle, ntohs(sym.len)))
 			{
 				return (symbolheader *)sdata;
 			}
 		}
 
-		sdata += sizeof(symbolheader) + ntohs(sym->len);
+		sdata += sizeof(symbolheader) + ntohs(sym.len);
 		/* broken len fields... */
-		if (sym->len > 9)
+		if (sym.len > 9)
 		{
 			while (*sdata)
 				sdata++;
