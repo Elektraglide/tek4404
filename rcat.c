@@ -77,20 +77,51 @@ typedef struct
 	int finaloffset;
 } externalsymbol;
 
-int externalsymbolcount = 0;
-int externalsymbolmax;
-externalsymbol *symbols = NULL;
+typedef struct
+{
+	int symbolcount;
+	int symbolmax;
+	externalsymbol *symbols;
+} symbolbucket;
+
+/* 8 buckets */
+symbolbucket buckets[8];
+
 void symbolclear()
 {
-	externalsymbolcount = 0;
-	externalsymbolmax = 1024;
-	symbols = (externalsymbol *)malloc(sizeof(externalsymbol) * externalsymbolmax);
+	int i;
+
+	if (buckets[0].symbols)
+	{
+		for(i=0; i<8; i++)
+			free(buckets[i].symbols);
+	}
+	
+	for(i=0; i<8; i++)
+	{
+		buckets[i].symbolcount = 0;
+		buckets[i].symbolmax = 128;
+		buckets[i].symbols = (externalsymbol *)malloc(sizeof(externalsymbol) * buckets[i].symbolmax);
+	}
+}
+
+int symbolcount()
+{
+	int total = 0;
+	int i;
+
+	for(i=0; i<8; i++)
+	{
+		total += buckets[i].symbolcount;
+	}
+	
+	return total;
 }
 
 #define HASH_INIT (0x811c9dc5)
 #define HASH_PRIME (0x01000193)
 
-int symboladd( unit, name,  len,  segment,  finaloffset)
+int symboladd(unit, name, len, segment, finaloffset)
 int unit;
 char *name;
 int len;
@@ -98,39 +129,47 @@ int segment;
 int finaloffset;
 {
 	unsigned int hval;
-	int i;
-		
+	symbolbucket *abucket;
+	register int i;
+	register externalsymbol *sptr;
+	
 	if (len > 0)
 	{
 		if (verbose) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
 	
 		/* generate a hash for this string */
-		hval = HASH_INIT;
-		while (len--)
-		{
-			hval *= HASH_PRIME;
-			hval ^= (unsigned int)*name++;
-		}
+		/* Larson hash */
+    hval = HASH_INIT;
+    while(len--)
+    {
+			/* times 101 */
+			hval = (hval<<6)+(hval<<5)+(hval<<2) + hval;
+      hval ^= (unsigned int)*name++;
+    }
 
+		/* which bucket are we using? */
+		abucket = &buckets[hval & 7];
+		
 		/* do we have it? */
-		for(i=0; i<externalsymbolcount; i++)
+		i = abucket->symbolcount;
+		sptr = abucket->symbols;
+		do
 		{
-			if (symbols[i].namehash == hval)
-			{
-				return 1;
-			}
-		}
+			if (sptr->namehash == hval) return 1;
+			sptr++;
+		} while(i--);
 
 		/* add it and resize if needed */
-		symbols[externalsymbolcount].srcunit = unit;
-		symbols[externalsymbolcount].namehash = hval;
-		symbols[externalsymbolcount].segment = segment;
-		symbols[externalsymbolcount].finaloffset = finaloffset;
-		externalsymbolcount++;
-		if (externalsymbolcount >= externalsymbolmax)
+		abucket->symbols[abucket->symbolcount].srcunit = unit;
+		abucket->symbols[abucket->symbolcount].namehash = hval;
+		abucket->symbols[abucket->symbolcount].segment = segment;
+		abucket->symbols[abucket->symbolcount].finaloffset = finaloffset;
+		
+		abucket->symbolcount++;
+		if (abucket->symbolcount >= abucket->symbolmax)
 		{
-			externalsymbolmax *= 2;
-			symbols = (externalsymbol *)realloc(symbols, sizeof(externalsymbol) * externalsymbolmax);
+			abucket->symbolmax *= 2;
+			abucket->symbols = (externalsymbol *)realloc(abucket->symbols, sizeof(externalsymbol) * abucket->symbolmax);
 		}
 	}
 	
@@ -142,26 +181,31 @@ char *name;
 int len;
 {
 	unsigned int hval;
-	int i;
-	
+	symbolbucket *abucket;
+	register int i;
+	register externalsymbol *sptr;
+
 	if (len > 0)
 	{
 		/* generate a hash for this string */
-		hval = HASH_INIT;
-		while (len--)
-		{
-			hval *= HASH_PRIME;
-			hval ^= (unsigned int)*name++;
-		}
+    hval = HASH_INIT;
+    while(len--)
+    {
+			/* times 101 */
+			hval = (hval<<6)+(hval<<5)+(hval<<2) + hval;
+      hval ^= (unsigned int)*name++;
+    }
 
-		/* do we have it? */
-		for(i=0; i<externalsymbolcount; i++)
+		/* which bucket are we using? */
+		abucket = &buckets[hval & 7];
+
+		i = abucket->symbolcount;
+		sptr = abucket->symbols;
+		do
 		{
-			if (symbols[i].namehash == hval)
-			{
-				return symbols + i;
-			}
-		}
+			if (sptr->namehash == hval) return sptr;
+			sptr++;
+		} while(i--);
 	}
 	
 	return 0;
@@ -215,9 +259,9 @@ int addmissing(char *name, int len)
 		return 1;
 }
 
-void gatherdependence(results, i, depth)
+void gatherdependence(results, unitid, depth)
 set *results;
-int i;
+int unitid;
 int depth;
 {
 PH *header;
@@ -225,15 +269,15 @@ char *rd,*endrd;
 int kind;
 
 	/* append unitid */
-	if (!addmember(results, i))
+	if (!addmember(results, unitid))
 		return;
 	
 	/* find all other dependencies of this unit */
-	header = (PH *)inputs[i].content;
+	header = (PH *)inputs[unitid].content;
 
-	if (verbose) fprintf(stderr, "%.*s searching %s\n", depth, "  ", inputs[i].srcfile);
+	if (verbose) fprintf(stderr, "%.*s searching %s\n", depth, "  ", inputs[unitid].srcfile);
 
-	rd = inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
+	rd = inputs[unitid].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
 	endrd = rd + ntohl(header->relocsize);
 	while(rd < endrd)
 	{
@@ -251,13 +295,13 @@ int kind;
 			externalsymbol *es = symbolfind((char *)(rd+sizeof(rr)),ntohs(rr.len));
 			if (es)
 			{
-				if (es->srcunit != i)
+				if (es->srcunit != unitid)
 					gatherdependence(results, es->srcunit, depth+1);
 			}
 			else
 			if (addmissing((rd+sizeof(rr)),(int)ntohs(rr.len)))
 			{
-				if (verbose) fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile);
+				if (verbose) fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[unitid].srcfile);
 			}
 		}
 
@@ -269,6 +313,30 @@ int kind;
 				rd++;
 		}
 	}
+}
+
+int symbolemit(out_fd,name, len, segment, finaloffset)
+int out_fd;
+char *name;
+int len;
+int segment;
+int finaloffset;
+{
+  int bytes = 0;
+	symbolheader sym;
+  
+  sym.kind = 0;
+  sym.offset = htonl(finaloffset);
+  sym.segment = htons(segment);
+  sym.len = htons(len);
+  
+	write(out_fd, &sym, sizeof(symbolheader));
+	if (sym.len)
+		write(out_fd, name, ntohs(sym.len));
+	bytes += sizeof(symbolheader);
+	bytes += ntohs(sym.len);
+
+	return bytes;
 }
 
 int main(argc, argv)
@@ -304,7 +372,7 @@ set missing;
 			if (argv[i][1] == 'o')
 			{
 				i++;
-				out_fd = creat(argv[i], S_IREAD | S_IWRITE);
+				out_fd = creat(argv[i], S_IREAD | S_IWRITE | S_IEXEC);
 				if (out_fd < 0)
 				{
 					fprintf(stderr, "%s: output file failed\n", argv[i]);
@@ -376,8 +444,11 @@ set missing;
 	}
 	if (verbose) fprintf(stderr, "processing %d compile units\n", inputcount);
 
-	/* gather all symbols so we can see what is actually referenced */
+	/* one off init */
 	missing.last = 0;
+	buckets[0].symbols = NULL;
+
+	/* gather all symbols so we can see what is actually referenced */
 	symbolclear();
 	for(i=0; i<inputcount; i++)
 	{
@@ -407,7 +478,7 @@ set missing;
 	symboladd(0, "ETEXT", 5, SEGTEXT, 0);
 	symboladd(0, "EDATA", 5, SEGDATA, 0);
 	symboladd(0, "END", 3, SEGBSS, 0);
-	if (verbose) fprintf(stderr, "found %d unique symbols\n", externalsymbolcount);
+	if (verbose) fprintf(stderr, "found %d unique symbols\n", symbolcount());
 	
 	/* if we are performing full link, then walk dependencies to determine working set */
 	if (justcat == 0)
@@ -456,6 +527,11 @@ set missing;
 	ph.source = htons(2);
 	ph.configuration = htons(4);
 	ph.namesize = htons(strlen(outputname));
+	if (justcat == 0)
+	{
+		ph.flags = htons(0x8040);
+		ph.xferaddress = htonl(0x00000000);
+	}
 	write(out_fd, &ph, sizeof(ph));
 
 	/* concat text sections and assign final offsets */
@@ -533,8 +609,10 @@ set missing;
 	symboladd(0, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
 	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
 	symboladd(0, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
-	if (verbose) fprintf(stderr, "referencing %d unique symbols\n", externalsymbolcount);
+	if (verbose) fprintf(stderr, "referencing %d unique symbols\n", symbolcount());
 
+	for(i=0;i<8; i++)
+		printf("bucket[%d] = %d\n",i, buckets[i].symbolcount);
 
 	/* rebase reloc records and resolve external symbols */
 	n = 0;
@@ -630,6 +708,15 @@ set missing;
 	/* export symbols if requested */
 	n = 0;
 	len = 0;
+
+#if 0
+	/* emit standard symbols */
+	len += symbolemit(out_fd, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
+	len += symbolemit(out_fd, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
+	len += symbolemit(out_fd, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
+	len += symbolemit(out_fd, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
+#endif
+
 	symbolclear();
 	if (stripsymbols == 0)
 	for(i=0; i<inputcount; i++)
