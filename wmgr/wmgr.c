@@ -15,6 +15,7 @@
 
 #ifdef __clang__
 
+#include <stdarg.h>
 #include "uniflexshim.h"
 
 #define	AF_INTRA	AF_UNIX
@@ -37,6 +38,7 @@ char *nserror()
 
 #else
 
+#include <varargs.h>
 #include <net/in.h>
 #include <net/socket.h>
 #include "../fdset.h"
@@ -146,7 +148,6 @@ int *sockinput;
     close(2);
     execvp(droneprocess[0], droneprocess);
 
-
     fprintf(stderr, "ttyreader exit\012\n");
     exit(1);
   }
@@ -175,8 +176,8 @@ struct BBCOM bb;
 struct FORM *screen;
 struct RECT screenrect;
 
-char *items[6] = {"quit","shell"};
-int flags[6] = {MENU_LINE,0};
+char *items[6] = {"quit","shell","refresh"};
+int flags[6] = {MENU_LINE,0,0};
 struct MENU *menu;
 
 int usecustomblit = 0;
@@ -203,13 +204,15 @@ Window *wintopmost;
 Window allwindows[32];
 int numwindows = 0;
 #ifdef __clang__
+char *logprocess[] = {"tail","-f", "/var/log/system.log", NULL};
 char *winprocess[] = {"sh", NULL};
 #else
+/* native tail is kinda noddy, this one supports follow (-f) */
+char *logprocess[] = {"/bin/UNIXtools/tail","-f", "/etc/log/system.log", NULL};
 char *winprocess[] = {"ash", NULL};
 #endif
-char *logprocess[] = {"tail", "-f", "/var/log/system.log", NULL};
 
-char welcome[] = "Welcome to Tektronix 4404\r\n";
+char welcome[] = "Welcome to Tektronix 4404\012\n";
 
 void SetClip(r)
 struct RECT *r;
@@ -253,11 +256,12 @@ struct RECT *r2;
   return 0;	
 }
 
-int cleanup_child(sig)
+int WindowLog(char *fmt, ...);
+void cleanup_child(sig)
 int sig;
 {
 
-  fprintf(stderr,"signal(%d): child of parent %d\n", sig, getpid());
+  WindowLog("signal(%d): child of parent %d\n", sig, getpid());
   exit(sig);
 }
 
@@ -333,7 +337,7 @@ int islogger;
 
     /* use preferred shell */
     if (getenv("SHELL"))
-      winprocess[0] = getenv("SHELL");
+      winprocess[0] = (char *)getenv("SHELL");
     
     /* Execution of the session shell */
     rc = islogger ? execvp(logprocess[0], logprocess) : execvp(winprocess[0], winprocess);
@@ -461,6 +465,45 @@ int n;
   return 0;
 }
 
+#ifdef __clang__
+int WindowLog(char *fmt, ...)
+{
+va_list p;
+char buffer[256];
+unsigned int val1;
+unsigned int val2;
+unsigned int val3;
+unsigned int val4;
+
+	va_start(p, fmt);
+
+#else
+int WindowLog(_varargs)
+int _varargs;
+{
+va_list p;
+char buffer[256];
+char *fmt;
+unsigned int val1;
+unsigned int val2;
+unsigned int val3;
+unsigned int val4;
+
+	va_start(p);
+#endif
+    fmt = va_arg(p, char *);
+    val1 = va_arg(p, unsigned int);
+    val2 = va_arg(p, unsigned int);
+    val3 = va_arg(p, unsigned int);
+    val4 = va_arg(p, unsigned int);
+	va_end(p);
+    
+	sprintf(buffer, fmt, val1, val2, val3, val4);
+	if(wintopmost)
+ 		WindowOutput(0, buffer, strlen(buffer));
+ 		
+ 	return 0;
+}
 
 int WindowCreate(title, x, y, islogger)
 char *title;
@@ -516,7 +559,8 @@ int islogger;
     numwindows++;
     WindowTop(win);
 
-    WindowOutput(numwindows-1, welcome, sizeof(welcome));
+    if (!islogger)
+	  	WindowOutput(numwindows-1, welcome, sizeof(welcome));
 
     return numwindows;
   }
@@ -566,12 +610,11 @@ int n,ox,oy;
   register unsigned char *src,*dst;
   
   /* assumes font is fixed 8px and font bitmap stride=1024 and framebuffer stride=1024 */
-  src = (unsigned char *)font->bitmap;
+  src = (unsigned char *)font->bitmap - 1;
   dst = (unsigned char *)screen->addr + ((oy-font->maps->baseline)<<7) + (ox>>3);
   for(k=0; k<n; k++)
   {
-    /* subtract makes no sense but needed on Tek */
-    ch = line[k] - 1;
+    ch = line[k];
 
     j = 0;
     rows = 12;
@@ -582,6 +625,30 @@ int n,ox,oy;
     }
   }
 }
+
+void renderstring2(line, n, ox, oy)
+register char *line;
+int n,ox,oy;
+{
+  int j,k,rows,ch;
+  unsigned char *src,*dst,*p;
+  
+  /* assumes font is fixed 8px and font bitmap stride=1024 and framebuffer stride=1024 */
+  src = (unsigned char *)font->bitmap - 1;
+  dst = (unsigned char *)screen->addr + ((oy-font->maps->baseline)<<7) + (ox>>3);
+	rows = 12;
+	while(rows-- > 0)
+	{
+		for(k=0; k<n; k++)
+		{
+			ch = line[k];
+			dst[k] = src[ch];
+		}
+		src += 128;
+		dst += 128;
+	}
+}
+
 
 /* adjust line[] to be inside clipprect */
 static int cropline(aline, len, origin, glyph)
@@ -784,7 +851,7 @@ int forcedirty;
             line[n] = '\0';
             if (usecustomblit && !style)
             {
-              renderstring(line, n, origin.x, origin.y);
+              renderstring2(line, n, origin.x, origin.y);
             }
             else
             {
@@ -1050,7 +1117,7 @@ int sig;
   int i,pid;
 
   pid = wait(&i);
-  fprintf(stderr, "child proc(%d) died by %d\012\n", pid, i);
+  WindowLog("child proc(%d) died by %d\012\n", pid, i);
   for(i=0; i<numwindows; i++)
   {
     if (allwindows[i].pid == pid)
@@ -1116,9 +1183,8 @@ char **argv;
   /* can we use a custom text render? */
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\n",usecustomblit);
-	sleep(2);
 
-	menu = MenuCreateX(2,items,flags,0,font);
+  menu = MenuCreateX(3,items,flags,0,font);
 
   screen = InitGraphics(TRUE);
   screenrect.x = 0;
@@ -1158,7 +1224,7 @@ char **argv;
 #if 0 
   WindowCreate("SysLog", 50, 50, TRUE);
 #else
-  WindowCreate("Console", 64-WINBORDER, 50, FALSE);
+  WindowCreate("Console", 64-WINBORDER, 50, TRUE);
 #endif
 
 #ifdef USE_TTYREADER
@@ -1290,8 +1356,8 @@ char **argv;
         {
 	  rc = 0;
 	  wait(&rc);
-          fprintf(stderr,"window%d destroyed because %04x\n", i, rc);
           WindowDestroy(i);
+          WindowLog("window%d destroyed because %04x\n", i, rc);
           break;
         }
       }
@@ -1321,9 +1387,16 @@ if (GetButtons() & M_MIDDLE)
 		exit(0);
 	}
 	else
+	if (choice == 1)
 	{
 			GetMPosition(&origin);
 			WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+	}
+	else
+	{
+      /* repaint everything */
+      SetClip(&screenrect);
+      Paint(wintopmost, &screenrect, FORCEPAINT);
 	}
 }
 
