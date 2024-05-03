@@ -94,9 +94,9 @@ void symbolclear()
 	if (buckets[0].symbols)
 	{
 		for(i=0; i<8; i++)
-			free(buckets[i].symbols);
+			buckets[i].symbolcount = 0;
 	}
-	
+	else
 	for(i=0; i<8; i++)
 	{
 		buckets[i].symbolcount = 0;
@@ -135,7 +135,7 @@ int finaloffset;
 	
 	if (len > 0)
 	{
-		if (verbose) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
+		if (verbose==2) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
 	
 		/* generate a hash for this string */
 		/* Larson hash */
@@ -153,11 +153,11 @@ int finaloffset;
 		/* do we have it? */
 		i = abucket->symbolcount;
 		sptr = abucket->symbols;
-		do
+		while(i--)
 		{
 			if (sptr->namehash == hval) return 1;
 			sptr++;
-		} while(i--);
+		}
 
 		/* add it and resize if needed */
 		abucket->symbols[abucket->symbolcount].srcunit = unit;
@@ -188,6 +188,7 @@ int len;
 	if (len > 0)
 	{
 		/* generate a hash for this string */
+		/* Larson hash */
     hval = HASH_INIT;
     while(len--)
     {
@@ -201,11 +202,11 @@ int len;
 
 		i = abucket->symbolcount;
 		sptr = abucket->symbols;
-		do
+		while(i--)
 		{
 			if (sptr->namehash == hval) return sptr;
 			sptr++;
-		} while(i--);
+		}
 	}
 	
 	return 0;
@@ -217,6 +218,7 @@ typedef struct
 	int members[MAXINPUTS];
 	int last;
 } set;
+
 
 int addmember(results,unit)
 set *results;
@@ -234,8 +236,10 @@ int unit;
 }
 
 /* all missing symbols */
-set missing;
-int addmissing(char *name, int len)
+int addmissing(missing, name, len)
+set *missing;
+char *name;
+int len;
 {
 	unsigned int hval;
 	int i;
@@ -249,13 +253,13 @@ int addmissing(char *name, int len)
 		}
 
 		/* do we have it? */
-		for(i=0; i<missing.last; i++)
+		for(i=0; i<missing->last; i++)
 		{
-			if (missing.members[i] == hval)
+			if (missing->members[i] == hval)
 				return 0;
 		}
-		missing.members[missing.last] = hval;
-		missing.last++;
+		missing->members[missing->last] = hval;
+		missing->last++;
 		return 1;
 }
 
@@ -275,7 +279,7 @@ int kind;
 	/* find all other dependencies of this unit */
 	header = (PH *)inputs[unitid].content;
 
-	if (verbose) fprintf(stderr, "%.*s searching %s\n", depth, "  ", inputs[unitid].srcfile);
+	if (verbose==2) fprintf(stderr, "%.*s searching %s\n", depth, "  ", inputs[unitid].srcfile);
 
 	rd = inputs[unitid].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize);
 	endrd = rd + ntohl(header->relocsize);
@@ -297,11 +301,6 @@ int kind;
 			{
 				if (es->srcunit != unitid)
 					gatherdependence(results, es->srcunit, depth+1);
-			}
-			else
-			if (addmissing((rd+sizeof(rr)),(int)ntohs(rr.len)))
-			{
-				if (verbose) fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[unitid].srcfile);
 			}
 		}
 
@@ -436,7 +435,7 @@ set missing;
 					  fprintf(stderr, "too many inputs\n");
 					  exit(2);	
 					}
-					if (verbose) fprintf(stderr, "added %8.8x %8.8lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
+					if (verbose==2) fprintf(stderr, "added %8.8x %8.8lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
 				}
 				close(fd);
 			}
@@ -444,7 +443,7 @@ set missing;
 	}
 	if (verbose) fprintf(stderr, "processing %d compile units\n", inputcount);
 
-	/* one off init */
+	/* one off initialization */
 	missing.last = 0;
 	buckets[0].symbols = NULL;
 
@@ -464,8 +463,7 @@ set missing;
 			memcpy(&sym, sdata, sizeof(sym));
 
 			/* we dont care about finaloffsets, just gathering all symbols */
-			symboladd(i, (char *)(sdata+sizeof(sym)),
-			    ntohs(sym.len), ntohs(sym.segment), 0);
+			symboladd(i, (char *)(sdata+sizeof(sym)), ntohs(sym.len), ntohs(sym.segment), 0);
 
 			/* tek-cc gets this wrong... */
 			sdata = (sdata+sizeof(sym)) + ntohs(sym.len);
@@ -508,7 +506,7 @@ set missing;
 			/* is it never referenced? */
 			if (inputs[i].used == 0)
 			{
-				/* if (verbose) fprintf(stderr, "%s: unreferenced\n",inputs[i].srcfile); */
+				if (verbose==2) fprintf(stderr, "%s: unreferenced\n",inputs[i].srcfile);
 				inputcount--;
 				for(j=i; j<inputcount; j++)
 				{
@@ -597,8 +595,7 @@ set missing;
 					break;
 			}
 			
-			symboladd(i, (char *)(sdata+sizeof(sym)),
-				ntohs(sym.len), ntohs(sym.segment), finaloffset);
+			symboladd(i, (char *)(sdata+sizeof(sym)), ntohs(sym.len), ntohs(sym.segment), finaloffset);
 			
 			sdata = (char *)(sdata+sizeof(sym)) + ntohs(sym.len);
 			/* NB need to handle broken len? */
@@ -610,9 +607,6 @@ set missing;
 	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
 	symboladd(0, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
 	if (verbose) fprintf(stderr, "referencing %d unique symbols\n", symbolcount());
-
-	for(i=0;i<8; i++)
-		printf("bucket[%d] = %d\n",i, buckets[i].symbolcount);
 
 	/* rebase reloc records and resolve external symbols */
 	n = 0;
@@ -657,11 +651,11 @@ set missing;
 				externalsymbol *es = symbolfind((char *)(rd+sizeof(rr)),ntohs(rr.len));
 				if (es)
 				{
-					if (verbose) fprintf(stderr, "%20s: resolved symbol for %s with symbol in %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile, inputs[es->srcunit].srcfile);
+					if (verbose==2) fprintf(stderr, "%20s: resolved symbol for %s with symbol in %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile, inputs[es->srcunit].srcfile);
 					addendoffset = es->finaloffset;
 				}
 				else
-				if (addmissing((rd+sizeof(rr)),(int)ntohs(rr.len)))
+				if (addmissing(&missing, (rd+sizeof(rr)),(int)ntohs(rr.len)))
 				{
 					fprintf(stderr, "%20s: missing symbol for %s\n", (char *)(rd+sizeof(rr)), inputs[i].srcfile);
 				}
@@ -704,7 +698,7 @@ set missing;
 		}
 	}
 	if (verbose) fprintf(stderr, "%d relocation records\n", n);
-
+	
 	/* export symbols if requested */
 	n = 0;
 	len = 0;
@@ -761,6 +755,8 @@ set missing;
 	}
 	ph.symbolsize = htonl(len);
 	if (verbose) fprintf(stderr, "%d symbols\n", n);
+	if (missing.last)
+		fprintf(stderr, "**** %d missing (unresolved) symbols ****\n", missing.last);
 
 	/* name section */
 	write(out_fd, outputname, strlen(outputname));
