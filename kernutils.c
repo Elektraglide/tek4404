@@ -50,15 +50,14 @@ int *symbolsize;
 	return symbols;
 }
 
-
-symbolheader * findsymbol(symbols, symbolsize, needle)
+symbolheader * listsymbol(symbols, symbolsize)
 char *symbols;
 int symbolsize;
-char *needle;
 {
 	char *sdata;
 	char *send;
-
+	char *sname;
+	
 	sdata = symbols;
 	send = sdata + symbolsize;
 	while(sdata < send)
@@ -72,10 +71,48 @@ char *needle;
 		/* SEGDATA are kernel runtimes */
 		if(ntohs(sym.segment) == SEGABS || ntohs(sym.segment) == SEGDATA)
 		{
-			if (!needle)
-				printf("%s 0x%8.8x  %.*s\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), ntohs(sym.len),sdata+sizeof(symbolheader));
+			sname = sdata + sizeof(symbolheader);
 
-			if (needle && !strncmp(sdata+sizeof(symbolheader), needle, ntohs(sym.len)))
+			printf("%s 0x%8.8x  %.*s\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), ntohs(sym.len),sname);
+		}
+
+		sdata += sizeof(symbolheader) + ntohs(sym.len);
+		/* broken len fields... */
+		if (sym.len > 9)
+		{
+			while (*sdata)
+				sdata++;
+		}
+	}
+	
+	return NULL;
+}
+
+symbolheader * findsymbol(symbols, symbolsize, needle)
+char *symbols;
+int symbolsize;
+char *needle;
+{
+	char *sdata;
+	char *send;
+	char *sname;
+	
+	sdata = symbols;
+	send = sdata + symbolsize;
+	while(sdata < send)
+	{
+		symbolheader sym;
+
+		/* need to copy so we get on a word aligned boundary for m68k */
+		memcpy(&sym, sdata, sizeof(symbolheader));
+
+		/* SEGABS are kernel settings */
+		/* SEGDATA are kernel runtimes */
+		if(ntohs(sym.segment) == SEGABS || ntohs(sym.segment) == SEGDATA)
+		{
+			sname = sdata + sizeof(symbolheader);
+
+			if ((*sname == *needle) && !strncmp(sname, needle, ntohs(sym.len)))
 			{
 				return (symbolheader *)sdata;
 			}
@@ -120,21 +157,14 @@ int symbolsize;
 char *needle;
 int pmem;
 {
-	symbolheader *unalignedsym;
-	symbolheader sym;
-	int setting = 0;
-	
-	unalignedsym = findsymbol(symbols, symbolsize, needle);
-	if (unalignedsym)
-	{
-		memcpy(&sym, unalignedsym, sizeof(sym));
-	
-		lseek(pmem, ntohl(sym.offset), 0);
-		read(pmem, &setting, 4);		/* always 4 bytes? */
-		/* printf("%s 0x%8.8x %s => 0x%8.8x\n", (ntohs(sym.segment)==SEGABS) ? "ABS" : "DAT", ntohl(sym.offset), needle, ntohl(setting)); */
-	}
+	int offset,setting;
+
+	offset = getkconstant(symbols, symbolsize, needle, pmem);
+	lseek(pmem, offset, 0);
+	read(pmem, &setting, 4);		/* always 4 bytes? */
 
 	return ntohl(setting);
+
 }
 
 int readkint32(addr, pmem)

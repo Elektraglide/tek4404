@@ -5,6 +5,7 @@ extern char *kernalloc();
 extern int kernfree();
 
 extern char *getsymbols();
+extern symbolheader * listsymbol();
 extern symbolheader * findsymbol();
 extern int getkconstant();
 extern int getkvalue();
