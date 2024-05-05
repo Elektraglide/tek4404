@@ -31,6 +31,12 @@ extern char *basename();
 #include <libgen.h>
 #endif
 
+/* MMU page size */
+#define TEXTBASE 0x0000
+#define PAGESZ 4096
+
+char rcs[] = "rcat v1.0 " __DATE__;
+
 /* cmd line options */
 int verbose = 0;
 int stripsymbols = 0;
@@ -59,7 +65,7 @@ typedef struct
 	char *content;
 	char *relocs;
 	char *symbols;
-	int textoff,dataoff,bssoff;
+	int textaddr,dataaddr,bssaddr;
 
 	int used;
 
@@ -346,7 +352,7 @@ int inputcount;
 char outputname[256];
 int fd, out_fd;
 int len,n,j,i = 0;
-int bssstart;
+int textstart,datastart,bssstart;
 PH ph;
 off_t crp;
 externalsymbol *rootsymbol;
@@ -357,8 +363,18 @@ set missing;
 	out_fd = -1;
 	for(i=1; i<argc; i++)
 	{
-		if (argv[i][0] == '-' || argv[i][0] == '+')
+		if ((argv[i][0] == '-' || argv[i][0] == '+'))
 		{
+			if (argv[i][1] == '?')
+			{
+				printf("Concanetates relocatable object files (.r) into a single file\n");
+				printf("Symbols and relocation records are rebased.\n");
+				printf("In addition, for a full link, rcat also performs:\n");
+				printf("Dependencies are followed from symbol 'Start' to determine\nwhat objects are needed.\n");
+				printf("External symbols are resolved to addresses\n");
+				exit(0);
+			}
+			else
 			if (argv[i][1] == 'c')
 				justcat = 1;
 			else
@@ -366,7 +382,11 @@ set missing;
 				stripsymbols = 1;
 			else
 			if (argv[i][1] == 'v')
+			{
 				verbose = 1;
+				if (argv[i][2] == 'v')
+					verbose = 2;
+			}
 			else
 			if (argv[i][1] == 'o')
 			{
@@ -402,7 +422,8 @@ set missing;
 
 					if (header.magic[0] != 0x05)
 					{
-						fprintf(stderr, "0x%02x: unknown header type\n",header.magic[0]);
+							/* fprintf(stderr, "0x%02x: unknown header type\n",header.magic[0]); */
+							/* appears to be some kind of catalog of symbols... */
 							crp = lseek(fd, 0, SEEK_CUR);
 
 						break;
@@ -524,46 +545,66 @@ set missing;
 	ph.magic[0] = justcat ? 0x05 : 0x04;
 	ph.source = htons(2);
 	ph.configuration = htons(4);
+	ph.rcssize = htons(strlen(rcs));
 	ph.namesize = htons(strlen(outputname));
 	if (justcat == 0)
 	{
 		ph.flags = htons(0x8040);
-		ph.xferaddress = htonl(0x00000000);
+		ph.xferaddress = htonl(TEXTBASE);
 	}
 	write(out_fd, &ph, sizeof(ph));
 
-	/* concat text sections and assign final offsets */
+	/* concat text sections and assign final layout */
+	/* segments snapped to 4k page bpoundaries */
+	/* compileunits rounded to 4-byte */
 
-	ph.textstart = htonl(0);
+	textstart = TEXTBASE;
+	ph.textstart = htonl(textstart);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		lseek(out_fd, ntohl(header->textsize), SEEK_CUR);
-		inputs[i].textoff = ntohl(ph.textsize);
+		int roundedsize = (ntohl(header->textsize) + 15) & -16;		/* round to 16-byte boundary */
+		lseek(out_fd, roundedsize, SEEK_CUR);
+		inputs[i].textaddr = ntohl(ph.textstart) + ntohl(ph.textsize);
 	
-		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize));
+		ph.textsize = htonl(ntohl(ph.textsize) + roundedsize);
 	}
 	
 	/* concat data sections */
-	ph.datastart = htonl(ntohl(ph.textsize));
+	datastart = (ntohl(ph.textstart) + ntohl(ph.textsize) + (PAGESZ-1)) & -PAGESZ;
+	ph.datastart = htonl(datastart);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		lseek(out_fd, ntohl(header->datasize), SEEK_CUR);
-		inputs[i].dataoff = ntohl(ph.datastart) + ntohl(ph.datasize);
+		int roundedsize = (ntohl(header->datasize) + 3) & -4;		/* round to 4-byte boundary */
+		lseek(out_fd, roundedsize, SEEK_CUR);
+
+		inputs[i].dataaddr = datastart + ntohl(ph.datasize);
 	
-		ph.datasize = htonl(ntohl(ph.datasize) + ntohl(header->datasize));
+		ph.datasize = htonl(ntohl(ph.datasize) + roundedsize);
 	}
 
 	/* concat bss sections */
-	bssstart = ntohl(ph.textsize) + ntohl(ph.datasize);
+	bssstart = datastart + ntohl(ph.datasize);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		inputs[i].bssoff = bssstart + ntohl(ph.bsssize);
+		int roundedsize = (ntohl(header->bsssize) + 3) & -4;		/* round to 4-byte boundary */
+		
+		inputs[i].bssaddr = bssstart + ntohl(ph.bsssize);
 	
-		ph.bsssize = htonl(ntohl(ph.bsssize) + ntohl(header->bsssize));
+		ph.bsssize = htonl(ntohl(ph.bsssize) + roundedsize);
 	}
+
+	/* if this is a full link, we want addresses, not relative offsets */
+	if (justcat == 0)
+	{
+		if (verbose) fprintf(stderr, "Generating addresses\n");
+		textstart = 0;
+		datastart = 0;
+		bssstart = 0;
+	}
+
 
 	/* gather all symbols with final offsets */
 	symbolclear();
@@ -581,17 +622,18 @@ set missing;
 			/* aligned for m68k */
 			memcpy(&sym, sdata, sizeof(sym));
 
+			/* NB finaloffset relative to section starts */
 			finaloffset = 0;
 			switch(ntohs(sym.segment))
 			{
 				case SEGTEXT:
-					finaloffset = (ntohl(sym.offset) + inputs[i].textoff);
+					finaloffset = ntohl(sym.offset) + inputs[i].textaddr - textstart;
 					break;
 				case SEGDATA:
-					finaloffset = (ntohl(sym.offset) + inputs[i].dataoff);
+					finaloffset = ntohl(sym.offset) + inputs[i].dataaddr - datastart;
 					break;
 				case SEGBSS:
-					finaloffset = (ntohl(sym.offset) + inputs[i].bssoff);
+					finaloffset = ntohl(sym.offset) + inputs[i].bssaddr - bssstart;
 					break;
 			}
 			
@@ -604,9 +646,9 @@ set missing;
 	/* adding predefined loader symbols */
 	symboladd(0, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
 	symboladd(0, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
-	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
-	symboladd(0, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
-	if (verbose) fprintf(stderr, "referencing %d unique symbols\n", symbolcount());
+	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.datasize));
+	symboladd(0, "END", 3, SEGBSS, ntohl(ph.bsssize));
+	if (verbose) fprintf(stderr, "using %d unique symbols\n", symbolcount());
 
 	/* rebase reloc records and resolve external symbols */
 	n = 0;
@@ -634,13 +676,13 @@ set missing;
 					addendoffset = 0;
 					break;
 				case 0x40:
-					addendoffset = inputs[i].textoff;
+					addendoffset = inputs[i].textaddr - textstart;
 					break;
 				case 0x80:
-					addendoffset = inputs[i].dataoff;
+					addendoffset = inputs[i].dataaddr - datastart;
 					break;
 				case 0xc0:
-					addendoffset = inputs[i].bssoff;
+					addendoffset = inputs[i].bssaddr - bssstart;
 					break;
 			}
 
@@ -661,18 +703,22 @@ set missing;
 				}
 			}
 
-			/* relocation for which segment */
+			/* relocation for which segment; NB addend is relative to in-file sections not in-memory address */
 			addend = NULL;
 			switch(kind & 0xf)
 			{
+				/* TEXT */
 				case 1:
 					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(rr.offset));
-					rr.offset = htonl(ntohl(rr.offset) + inputs[i].textoff);
+					rr.offset = htonl(ntohl(rr.offset) + inputs[i].textaddr - textstart);
 					break;
+					
+				/* DATA */
 				case 2:
 					addend = (int *)(inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(rr.offset));
-					rr.offset = htonl(ntohl(rr.offset) + inputs[i].dataoff);
+					rr.offset = htonl(ntohl(rr.offset) + inputs[i].dataaddr - datastart);
 					break;
+
 				default:
 					fprintf(stderr, "unknown kind %d\n", kind & 0xf);
 					break;
@@ -707,8 +753,8 @@ set missing;
 	/* emit standard symbols */
 	len += symbolemit(out_fd, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
 	len += symbolemit(out_fd, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
-	len += symbolemit(out_fd, "EDATA", 5, SEGDATA, ntohl(ph.textsize) + ntohl(ph.datasize));
-	len += symbolemit(out_fd, "END", 3, SEGBSS, ntohl(ph.textsize) + ntohl(ph.datasize) + ntohl(ph.bsssize));
+	len += symbolemit(out_fd, "EDATA", 5, SEGDATA, ntohl(ph.datasize));
+	len += symbolemit(out_fd, "END", 3, SEGBSS, ntohl(ph.bsssize));
 #endif
 
 	symbolclear();
@@ -733,20 +779,20 @@ set missing;
 				switch(ntohs(sym.segment))
 				{
 					case SEGTEXT:
-						sym.offset = htonl(ntohl(sym.offset) + inputs[i].textoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].textaddr - textstart);
 						break;
 					case SEGDATA:
-						sym.offset = htonl(ntohl(sym.offset) + inputs[i].dataoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].dataaddr - datastart);
 						break;
 					case SEGBSS:
-						sym.offset = htonl(ntohl(sym.offset) + inputs[i].bssoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].bssaddr - bssstart);
 						break;
 				}
 
 				write(out_fd, &sym, sizeof(symbolheader));
+				len += sizeof(symbolheader);
 				if (sym.len)
 					write(out_fd, sdata+sizeof(sym), ntohs(sym.len));
-				len += sizeof(symbolheader);
 				len += ntohs(sym.len);
 			}
 			
@@ -758,6 +804,9 @@ set missing;
 	if (missing.last)
 		fprintf(stderr, "**** %d missing (unresolved) symbols ****\n", missing.last);
 
+	/* RCS section */
+	write(out_fd, rcs, strlen(rcs));
+	
 	/* name section */
 	write(out_fd, outputname, strlen(outputname));
 	
@@ -765,17 +814,22 @@ set missing;
 	lseek(out_fd, 0, SEEK_SET);
 	write(out_fd, &ph, sizeof(ph));
 
-	/* write edited text */
+	/* write edited text (accounting for rounding) */
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		write(out_fd, inputs[i].content + sizeof(PH), ntohl(header->textsize));
+		int roundedsize = (ntohl(header->textsize) + 15) & -16;		/* round to 16-byte boundary */
+		fprintf(stderr,"t%d: offset=%8.8x %8.8x %8.8x\n", i, lseek(out_fd,0,SEEK_CUR), ntohl(header->textsize), roundedsize );
+		write(out_fd, inputs[i].content + sizeof(PH), roundedsize);
 	}
-	/* write edited datas */
+	/* write edited datas (accounting for rounding) */
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize), ntohl(header->datasize));
+		int roundedsize = (ntohl(header->datasize) + 3) & -4;		/* round to 4-byte boundary */
+		fprintf(stderr,"d%d: offset=%8.8x %8.8x %8.8x\n", i, lseek(out_fd,0,SEEK_CUR), ntohl(header->datasize), roundedsize );
+
+		write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize), roundedsize);
 	}
 
 	close(out_fd);
@@ -789,6 +843,7 @@ set missing;
 		fprintf(stderr, "bsssize   = %8.8x\n", ntohl(ph.bsssize));
 		fprintf(stderr, "relocsize = %8.8x\n", ntohl(ph.relocsize));
 		fprintf(stderr, "symbolsize= %8.8x\n", ntohl(ph.symbolsize));
+		fprintf(stderr, "rcssize  = %8.8x\n", ntohs(ph.rcssize));
 		fprintf(stderr, "namesize  = %8.8x\n", ntohs(ph.namesize));
 	}
 
