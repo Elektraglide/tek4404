@@ -256,7 +256,9 @@ struct RECT *r2;
   return 0;	
 }
 
+#ifdef __clang__
 int WindowLog(char *fmt, ...);
+#endif
 void cleanup_child(sig)
 int sig;
 {
@@ -441,7 +443,7 @@ Window *win;
     VTfocus(win->vt, win->master);
 
     win->dirty |= DIRTYFRAME;
-    win->vt.dirtylines |= (1 << win->vt.rows) - 1;
+    win->vt.dirtylines |= ALLDIRTY;
   }
   
   SetClip(&win->windowrect);
@@ -550,7 +552,7 @@ int islogger;
 
     /* needs rendering */
     win->dirty = DIRTYFRAME;
-    win->vt.dirtylines = (1 << (win->vt.rows-1)) - 1;
+    win->vt.dirtylines = ALLDIRTY;
 
     /* link it */
     win->next = wintopmost;
@@ -592,7 +594,7 @@ int x, y;
 
     /* frame is dirty */
     win->dirty |= DIRTYFRAME;
-    win->vt.dirtylines |= (1 << win->vt.rows) - 1;
+    win->vt.dirtylines |= ALLDIRTY;
     
     return 1;
   }
@@ -777,7 +779,7 @@ int forcedirty;
 
 		/* make all lines dirty */
     if (forcedirty)
-			win->vt.dirtylines = (1 << (win->vt.rows-1)) - 1;
+			win->vt.dirtylines = ALLDIRTY;
 			
     /* render contents */
     if (win->vt.dirtylines)
@@ -870,6 +872,14 @@ int forcedirty;
             
       bb.rule = bbS;
     }
+    
+		/* this is now clean */
+		if (forcedirty)
+		{
+      win->dirty = 0;
+      win->vt.dirtylines = 0;
+		}
+
   }
 
   return 0;
@@ -1264,6 +1274,9 @@ char **argv;
 #else
   dummysock = fdtty;
 #endif
+
+	/* we want this to be snappy */
+	nice(-32);
 
   /* mainloop */
   last_read = 0;

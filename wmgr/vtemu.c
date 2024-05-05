@@ -82,7 +82,7 @@ VTemu *vt;
   
   clearregion(vt, 0, MAXTERMROWS*MAXTERMCOLS);
   memset(vt->linelengths, 0, MAXTERMROWS);
-  vt->dirtylines |= (1 << vt->rows) - 1;
+  vt->dirtylines |= ALLDIRTY;
 }
 
 void VTmovelines(vt, dst, src, n)

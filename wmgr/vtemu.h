@@ -15,6 +15,9 @@ enum VTstyle
 #define RC2OFF(R,C)  (((R)<<7) + (C))
 #define OFF2R(O)  ((O)>>7)
 
+/* (1<<vt.rows)-1 overflows uint32_t, so we dont want 64bit arithmetic */
+#define ALLDIRTY 0xffffffff
+
 typedef struct
 {
   char state;
