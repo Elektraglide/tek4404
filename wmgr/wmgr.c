@@ -54,12 +54,12 @@ extern int open();
 
 #ifdef __clang__
 #define POLLINGPTYx
-#define POLLINGINPx
 #define USE_TTYREADERx
-#else
-#define POLLINGPTY
 #define POLLINGINPx
-#define USE_TTYREADER
+#else
+#define POLLINGPTY			/* cannot select() pty; only way to check for pty input is to poll using control_pty() */
+#define USE_TTYREADER		/* cannot select() stdin; use a socketpair + child process */
+#define POLLINGINPx			/* PLAN Z;  Poll stdin by checking (sg_speed & INCHR) */
 #endif
 
 #ifdef USE_TTYREADER
