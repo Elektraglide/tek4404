@@ -1,5 +1,17 @@
 	lib sysdef
 
+	global _kernscsidump
+	
+	text
+_kernscsidump	link a6,#0
+	movem.l d2-d7/a2-a5,-(sp)
+	move.l 8(a6),a0
+	move #70,d0
+	trap #13
+	movem.l (sp)+,d2-d7/a2-a5
+	unlk a6
+	rts
+
 	global _kernbootfile
 	
 	text
@@ -39,9 +51,9 @@ _kernfree	link a6,#0
 	move.l 12(a6),d1
 	move #62,d0
 	trap #13
-	bcs L2
+	bcs L3
 	move #1,d0
-L2
+L3
 	movem.l (sp)+,d2-d7/a2-a5
 	unlk a6
 	rts

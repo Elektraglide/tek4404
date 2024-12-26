@@ -603,6 +603,8 @@ char *from;
             ts.bo.end = ts.bo.data + n;
           }
 
+        }
+        
           if (ts.bo.start != ts.bo.end)
           {
 #ifdef DEBUGEX
@@ -620,7 +622,7 @@ char *from;
             }
             ts.bo.start += n;
           }
-        }
+        
       }
     
       /* collect child process */

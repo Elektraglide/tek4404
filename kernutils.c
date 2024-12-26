@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/types.h>
 #include <sys/fcntl.h>
 #include <pwd.h>
 
@@ -151,35 +153,117 @@ int pmem;
 	return ntohl(setting);
 }
 
-int getkvalue(symbols, symbolsize, needle, pmem)
+int getkint32(symbols, symbolsize, needle, pmem)
 char *symbols;
 int symbolsize;
 char *needle;
 int pmem;
 {
-	int offset,setting;
+	int orig,offset,setting;
 
+	orig = lseek(pmem, 0, 1);
 	offset = getkconstant(symbols, symbolsize, needle, pmem);
 	lseek(pmem, offset, 0);
-	read(pmem, &setting, 4);		/* always 4 bytes? */
+	read(pmem, &setting, 4);
+
+	lseek(pmem, orig, 0);
 
 	return ntohl(setting);
+}
 
+int getkint16(symbols, symbolsize, needle, pmem)
+char *symbols;
+int symbolsize;
+char *needle;
+int pmem;
+{
+	int orig,offset;
+	short setting;
+
+	orig = lseek(pmem, 0, 1);
+	offset = getkconstant(symbols, symbolsize, needle, pmem);
+	lseek(pmem, offset, 0);
+	read(pmem, &setting, 2);
+
+	lseek(pmem, orig, 0);
+
+	return ntohs(setting);
 }
 
 int readkint32(addr, pmem)
 int addr;
 int pmem;
 {
-	int setting = 0;
+	int orig,setting = 0;
 	
 	if (addr)
 	{
+		orig = lseek(pmem, 0, 1);
 		lseek(pmem, addr, 0);
-		read(pmem, &setting, 4);		/* always 4 bytes? */
+		read(pmem, &setting, 4);
+
+		lseek(pmem, orig, 0);
 	}
 
 	return ntohl(setting);
 }
 
+int readkint16(addr, pmem)
+int addr;
+int pmem;
+{
+	int orig;
+	short setting = 0;
+	
+	if (addr)
+	{
+		orig = lseek(pmem, 0, 1);
+		lseek(pmem, addr, 0);
+		read(pmem, &setting, 2);
+
+		lseek(pmem, orig, 0);
+	}
+
+	return ntohs(setting);
+}
+
+char * readkstring(buffer, len, addr, pmem)
+char *buffer;
+int len;
+int addr;
+int pmem;
+{
+	int orig;
+	int rc;
+	
+	if (addr)
+	{
+		orig = lseek(pmem, 0, 1);
+		lseek(pmem, addr, 0);
+    buffer[0] = '\0';
+		rc = read(pmem, buffer, len);
+
+		lseek(pmem, orig, 0);
+	}
+
+	return buffer;
+}
+
+char *kernboottime(symbols, symbolsize, pmem)
+char *symbols;
+int symbolsize;
+int pmem;
+{
+  static char buffer[64];
+  time_t timestamp;
+  struct tm *ts;
+  
+  timestamp = getkint32(symbols, symbolsize, "sbttim", pmem);
+  ts = localtime(&timestamp);
+  sprintf(buffer, "%2.2d-%2.2d-%4.4d %2.2d:%2.2d",
+      ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
+      ts->tm_hour, ts->tm_min);
+
+  return buffer;
+}
 
