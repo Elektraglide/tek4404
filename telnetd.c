@@ -30,13 +30,15 @@ typedef int socklen_t;
 void setsid() {}
 
 socketopt opt;
-char *telnetprocess[] = {"/tek/bin/ash", NULL};
+char *telnetprocess[] = {"/etc/login", NULL};
 
 #else
 
 extern int open();
 extern int wait();
 extern int kill();
+
+extern int system_control();  /* arg=1 does something,  arg=2 makes pty controlling terminal.. */
 
 #define in_sockaddr sockaddr_in
 #define  IPO_TELNET    23
@@ -56,7 +58,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 
 #define DEBUGxx
 #define DEBUGEXxx
-
+#define DEBUGCONSOLE
 /***********************************/
 
 
@@ -292,7 +294,7 @@ int sig;
 {
   int result;
   
-#ifdef DEBUG
+#ifdef DEBUGCONSOLE
   fprintf(console,"cleanup telnet session on %d\012\n",sig);
 #endif
   close(sessionsock);
@@ -407,6 +409,7 @@ char *from;
   if (sessionpid)
   {
     /* PARENT */
+    console = fopen("/dev/console", "a");
     
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     n |= PTY_READ_WAIT; 
@@ -441,7 +444,7 @@ char *from;
         /* Uniflex select appears to only expect actual socket fds */
         /* having stdin in the FD_SET wreaks havoc */
         timeout.tv_sec = 0;
-        timeout.tv_usec = 250000;
+        timeout.tv_usec = 500000;
         FD_ZERO(&fd_in);
         n = 0;
         
@@ -465,8 +468,11 @@ char *from;
 /*
         fprintf(stderr,"select(%d, %x,0,0,%d)\012\n",n+1,fd_in.fdmask[0],timeout.tv_usec);
         fflush(stderr);
-*/
 
+*/
+#ifdef DEBUGCONSOLE
+fprintf(console, "**Select n(%d) timeout(%d)\012\n", n, timeout.tv_usec);
+#endif
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
 /*
@@ -476,15 +482,14 @@ char *from;
 
         if (rc < 0 && errno != EINTR)
         {
-            fprintf(console, "select() error %d\n", errno);
+            fprintf(console, "select(): error %d\n", errno);
             break;
         }
 
 
         if (rc == 0)
         {
-          sprintf(buffer, "nothing from %d\012\n", din);
-          /* write(dout, buffer, strlen(buffer)); */
+          fprintf(console, "select(): nothing from %d\012\n", din);
         }
         else
 
@@ -493,6 +498,9 @@ char *from;
         {
           if (ts.bi.start == ts.bi.end)
           {
+#ifdef DEBUGCONSOLE
+fprintf(console, "**Read din\012\n");
+#endif
               n = (int)read(din, ts.bi.data, sizeof(ts.bi.data));
 #ifdef DEBUGEX
               fprintf(stderr, "read %d bytes from %d\012\n", n, din);
@@ -528,6 +536,9 @@ char *from;
           /* Application ready to receive */
           if (ts.bi.start != ts.bi.end)
           {
+#ifdef DEBUGCONSOLE
+fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
+#endif
               n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
 #ifdef DEBUGEX
              fprintf(stderr, "write %d bytes to fdmaster%d\012\n", n, fdmaster);
@@ -573,9 +584,8 @@ char *from;
           /* Data arrived from application */
           if (ts.bo.start == ts.bo.end)
           {
-#ifdef DEBUGEX
-            fprintf(stderr, "about to try read from fdmaster%d\012\n", fdmaster);
-            fflush(stderr);
+#ifdef DEBUGCONSOLE
+fprintf(console, "**Read master\012\n");
 #endif
             n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
             if (n < 0)
@@ -590,7 +600,7 @@ char *from;
 
             if (n == 0)
             {
-                /* fprintf(console,"broken connection\012\n"); */
+                fprintf(console,"broken connection\012\n");
                 break;
             }
             else
@@ -607,9 +617,8 @@ char *from;
         
           if (ts.bo.start != ts.bo.end)
           {
-#ifdef DEBUGEX
-            fprintf(stderr, "writing %d bytes to %d\012\n", ts.bo.end - ts.bo.start, dout);
-            fflush(stderr);
+#ifdef DEBUGCONSOLE
+fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
 #endif
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
             if (n < 0)
@@ -651,6 +660,9 @@ char *from;
     /*
       https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
     */
+    
+    /* calls pty_make_controlling_terminal */
+    system_control(2);
     
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
     dup2(fdslave, 1); /* PTY becomes standard output (1) */
