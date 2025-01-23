@@ -23,18 +23,6 @@ extern int kill();
 extern int wait();
 extern char *getenv();
 
-char *nget_str(char *name)
-{
-  if (!strcmp(name, "cur_tty"))
-    return ttyname(fileno(stdin));
-		
-  return "unknown";
-}
-
-char *nserror()
-{
-  return strerror(errno);
-}
 
 #else
 
@@ -159,7 +147,7 @@ int fdtty;
 
 /**********************************/
 
-#define DEBUGREPAINTxxx
+#define DEBUGREPAINTxx
 
 #define WINTITLEBAR 16
 #define WINBORDER 16
@@ -492,8 +480,8 @@ unsigned int val3;
 unsigned int val4;
 
 	va_start(p);
+  fmt = va_arg(p, char *);
 #endif
-    fmt = va_arg(p, char *);
     val1 = va_arg(p, unsigned int);
     val2 = va_arg(p, unsigned int);
     val3 = va_arg(p, unsigned int);
@@ -692,7 +680,7 @@ int WindowRender(win, forcedirty)
 Window *win;
 int forcedirty;
 {
-  struct RECT r,glyph;
+  struct RECT r,r2,glyph;
   struct POINT origin;
   struct POINT strpos;
   register int j,k;
@@ -1085,7 +1073,7 @@ int wid;
   numwindows--;
 
   if (numwindows > 0)
-    WindowTop(&allwindows[0]);
+    WindowTop(&allwindows[numwindows-1]);
 
 	SetClip(&oldrect);
   Paint(wintopmost, &oldrect, FORCEPAINT);
@@ -1367,8 +1355,8 @@ char **argv;
         else
         if (n == 0)
         {
-	  rc = 0;
-	  wait(&rc);
+          rc = 0;
+          wait(&rc);
           WindowDestroy(i);
           WindowLog("window%d destroyed because %04x\n", i, rc);
           break;
@@ -1517,11 +1505,18 @@ if (GetButtons() & M_MIDDLE)
   win = wintopmost;
   while(win)
   {
-    if (win->dirty || win->vt.dirtylines)
+    if (win->dirty )
     {
     	SetClip(&win->windowrect);
       Paint(wintopmost, &win->windowrect, FALSE);
       win->dirty = 0;
+      win->vt.dirtylines = 0;
+    }
+    else
+    if (win->vt.dirtylines)
+    {
+    	SetClip(&win->contentrect);
+      Paint(wintopmost, &win->contentrect, FALSE);
       win->vt.dirtylines = 0;
     }
 
