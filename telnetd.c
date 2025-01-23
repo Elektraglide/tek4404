@@ -57,8 +57,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define DEBUGxx
-#define DEBUGEXxx
-#define DEBUGCONSOLE
+#define DEBUGCONSOLExx
 /***********************************/
 
 
@@ -190,7 +189,7 @@ int len;
         lines = ntohs(*(unsigned short *) (data + 2));
         if (cols != 0) ts->term.cols = cols;
         if (lines != 0) ts->term.lines = lines;
-        /* fprintf(stderr, "parseoptdat: term(%d,%d)\n",ts->term.cols,ts->term.lines); */
+        fprintf(console, "parseoptdat: term(%d,%d)\012\n",ts->term.cols,ts->term.lines);
 
         /* TODO: send child new window size; we dont have SIGWINCH */
 
@@ -418,6 +417,7 @@ char *from;
     /* motd; Uniflex maps \n to \r so force it in */
     writewithlf(dout, copyright, sizeof(copyright)-1);
 
+#ifdef SHOW_MOTD
     fd = open("/etc/log/motd", O_RDONLY);
     if (fd < 0)
     {
@@ -433,6 +433,7 @@ char *from;
       }
       close(fd);
     }
+#endif
 
     /* Close the slave side of the PTY */
     close(fdslave);
@@ -460,7 +461,7 @@ char *from;
         if(last_read > 0)
         {
           /* if there is input, for a few loops use a short timeout */
-          timeout.tv_usec = 50000;
+          timeout.tv_usec = 5000;
           last_read--;
         }
 #endif
@@ -475,11 +476,6 @@ fprintf(console, "**Select n(%d) timeout(%d)\012\n", n, timeout.tv_usec);
 #endif
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
-/*
-        fprintf(stderr,"select(%x) => %d\012\n", fd_in.fdmask[0], rc);
-        fflush(stderr);
-*/
-
         if (rc < 0 && errno != EINTR)
         {
             fprintf(console, "select(): error %d\n", errno);
@@ -489,7 +485,7 @@ fprintf(console, "**Select n(%d) timeout(%d)\012\n", n, timeout.tv_usec);
 
         if (rc == 0)
         {
-          fprintf(console, "select(): nothing from %d\012\n", din);
+          /* fprintf(console, "select(): nothing from %d\012\n", din); */
         }
         else
 
@@ -502,9 +498,6 @@ fprintf(console, "**Select n(%d) timeout(%d)\012\n", n, timeout.tv_usec);
 fprintf(console, "**Read din\012\n");
 #endif
               n = (int)read(din, ts.bi.data, sizeof(ts.bi.data));
-#ifdef DEBUGEX
-              fprintf(stderr, "read %d bytes from %d\012\n", n, din);
-#endif
 
               if (n < 0)
               {
@@ -540,12 +533,12 @@ fprintf(console, "**Read din\012\n");
 fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
 #endif
               n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
-#ifdef DEBUGEX
-             fprintf(stderr, "write %d bytes to fdmaster%d\012\n", n, fdmaster);
-#endif
+
              /* Uniflex pty does not handle Ctrl-C! */
              if (ts.bi.start[0] == 0x03)
              {
+               /* should skip iff RAW mode.. */
+             
                fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
                kill(sessionpid, SIGINT);
 
@@ -577,8 +570,8 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
         if (FD_ISSET(fdmaster, &fd_in))
 #else
         n = control_pty(fdmaster, PTY_INQUIRY, 0);
-        last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
-        if (n & PTY_OUTPUT_QUEUED)
+        last_read = (n & PTY_OUTPUT_QUEUED) ? 20 : last_read;
+        while (n & PTY_OUTPUT_QUEUED)
 #endif
         {
           /* Data arrived from application */
@@ -604,7 +597,7 @@ fprintf(console, "**Read master\012\n");
                 break;
             }
             else
-            if (n == 4096)
+            if (n == sizeof(ts.bo.data))
             {
               fprintf(console,"read chocked\n");
             }
@@ -612,8 +605,6 @@ fprintf(console, "**Read master\012\n");
             ts.bo.start = ts.bo.data;
             ts.bo.end = ts.bo.data + n;
           }
-
-        }
         
           if (ts.bo.start != ts.bo.end)
           {
@@ -631,7 +622,17 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
             }
             ts.bo.start += n;
           }
-        
+
+#ifndef __clang__
+          /* check again if any output */
+          n = control_pty(fdmaster, PTY_INQUIRY, 0);
+          if (n & PTY_OUTPUT_QUEUED)
+          {
+            fprintf(console, "MORE slave output is waiting\012\n");
+          }
+#endif
+        }
+
       }
     
       /* collect child process */
