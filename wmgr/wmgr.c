@@ -1294,8 +1294,15 @@ char **argv;
 
   if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
   {
-    fprintf(stderr, "select(%d) error %s\n", n, strerror(errno));
-    exit(23);
+    if (errno != EINTR)
+    {
+      fprintf(stderr, "select(%d) error %s\n", n, strerror(errno));
+      exit(23);
+    }
+    else
+    {
+    
+    }
   }
   else
 #ifdef POLLINGPTY
@@ -1340,7 +1347,7 @@ char **argv;
 #ifdef POLLINGPTY
       n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
       last_read = (n & PTY_OUTPUT_QUEUED) ? 5 : last_read;
-      if (n & PTY_OUTPUT_QUEUED)
+      while (n & PTY_OUTPUT_QUEUED)
 #else
       if (FD_ISSET(allwindows[i].master, &fd_in))
 #endif
@@ -1361,6 +1368,12 @@ char **argv;
           WindowLog("window%d destroyed because %04x\n", i, rc);
           break;
         }
+        
+#ifdef POLLINGPTY
+          /* check again if any output */
+          n = control_pty(fdmaster, PTY_INQUIRY, 0);
+#endif
+
       }
     }
   }
