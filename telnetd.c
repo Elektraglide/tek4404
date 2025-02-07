@@ -541,11 +541,10 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
              
                fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
                kill(sessionpid, SIGINT);
-
-#if 0
+               
+               write(dout, "SIGINT\n", 7);
                /* we would like to kill any buffered output */
                control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
-#endif
              }
 
               if (n < 0)
@@ -628,7 +627,7 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
           n = control_pty(fdmaster, PTY_INQUIRY, 0);
           if (n & PTY_OUTPUT_QUEUED)
           {
-            fprintf(console, "MORE slave output is waiting\012\n");
+            /* fprintf(console, "MORE slave output is waiting\012\n"); */
           }
 #endif
         }
