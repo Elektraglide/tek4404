@@ -1144,7 +1144,6 @@ int sig;
 int sh_input(sig)
 int sig;
 {
-  WindowOutput(0, "event\n", 6);
 	
   signal(SIGEVT, sh_input);
   ESetSignal();
@@ -1217,8 +1216,10 @@ char **argv;
   SetKBCode(0);
 #else
 
+  /*
   signal(SIGEVT, sh_input);
   ESetSignal();
+ */
 
   EventEnable();
   SetKBCode(0);
