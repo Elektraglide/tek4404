@@ -539,15 +539,29 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
              {
                /* should skip iff RAW mode.. */
              
-               fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
-               kill(sessionpid, SIGINT);
-               
-               write(dout, "SIGINT\n", 7);
                /* we would like to kill any buffered output */
                control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
+               write(dout, "SIGINT\012\n", 8);
+
+               fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
+               kill(sessionpid, SIGINT);
              }
 
-              if (n < 0)
+             /* Uniflex pty does not handle Ctrl-D! */
+             if (ts.bi.start[0] == 0x04)
+             {
+                 /* should skip iff RAW mode.. */
+
+                 /* we would like to kill any buffered output */
+                 control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
+                 write(dout, "SIGHUP\012\n", 8);
+
+                 fprintf(console, "sent SIGHUP to %d\012\n", sessionpid);
+                 kill(sessionpid, SIGHUP);
+
+             }
+             
+             if (n < 0)
               {
                 if (errno != EINTR)
                 {
