@@ -1303,7 +1303,7 @@ dummysock = fdtty;
     timeout.tv_usec =  500000;
     if (last_read > 0)
     {
-      timeout.tv_usec = 500000;
+      timeout.tv_usec = 20000;
       last_read--;
     }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
@@ -1335,8 +1335,12 @@ dummysock = fdtty;
 
       /* tek4404 event system only used for keypress input */
       n = readkeyboardevents(inputbuffer, 32);
-      if (wintopmost)
+
+      /* window#0 is immortal */
+      if (n > 0 && wintopmost > allwindows)
       {
+          last_read = 5;
+
           n = (int)write(wintopmost->master, inputbuffer, n);
 
           /* Uniflex pty does not handle Ctrl-C! */
