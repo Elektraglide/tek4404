@@ -46,7 +46,8 @@ extern int open();
 #define POLLINGINPx
 #else
 #define POLLINGPTY			/* cannot select() pty; only way to check for pty input is to poll using control_pty() */
-#define USE_TTYREADER		/* cannot select() stdin; use a socketpair + child process */
+#define USE_EVENTS			/* use Event system to get input */
+#define USE_TTYREADERx		/* cannot select() stdin; use a socketpair + child process */
 #define POLLINGINPx			/* PLAN Z;  Poll stdin by checking (sg_speed & INCHR) */
 #endif
 
@@ -1100,7 +1101,9 @@ int sig;
   }
   sleep(1);
   
+
   EventDisable();
+  SetKBCode(1);
   ExitGraphics();
   FontClose(font);
   RestoreDisplayState(&ds);
@@ -1134,6 +1137,7 @@ int sig;
   WindowOutput(0, "event\n", 6);
 	
   signal(SIGEVT, sh_input);
+  ESetSignal();
 }
 
 int
@@ -1142,9 +1146,7 @@ int argc;
 char **argv;
 {
   int n,i,j,k,rc,dummysock;
-#ifdef POLLINGINP
   struct in_sockaddr serv_addr;
-#endif
   fd_set fd_in;
   char ch, *name, inputbuffer[4096];
   struct timeval timeout;
@@ -1204,11 +1206,12 @@ char **argv;
   EventEnable();
   SetKBCode(0);
 #else
-  
+
   signal(SIGEVT, sh_input);
   ESetSignal();
-    
-  SetKBCode(1);
+
+  EventEnable();
+  SetKBCode(0);
 #endif
 
   /* window chain */
@@ -1232,6 +1235,7 @@ char **argv;
 
 #endif
 
+
 #ifdef POLLINGINP
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
@@ -1252,15 +1256,15 @@ char **argv;
 #endif
 #endif
 
-#ifdef POLLINGINP
+dummysock = fdtty;
+
+#ifndef USE_TTYREADER
   /* this is just so we can get a ms timeout! */
   dummysock = socket(AF_INET, SOCK_STREAM, 0);
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
   serv_addr.sin_port = 12345;
   bind(dummysock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-#else
-  dummysock = fdtty;
 #endif
 
 	/* we want this to be snappy */
@@ -1274,6 +1278,7 @@ char **argv;
     FD_ZERO(&fd_in);
     FD_SET(dummysock, &fd_in);
     n = dummysock;
+
 #ifndef POLLINGPTY
     for(i=0; i<numwindows; i++)
     {
@@ -1282,17 +1287,18 @@ char **argv;
         n = allwindows[i].master;
     }
 #endif
+
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec = 200000;
+    timeout.tv_usec =  500000;
     if (last_read > 0)
     {
-      timeout.tv_usec = 50000;
+      timeout.tv_usec = 500000;
       last_read--;
     }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 
-  if (rc < 0 && errno != EINTR) /* what is Uniflex equiv? */
+  if (rc < 0)
   {
     if (errno != EINTR)
     {
@@ -1301,7 +1307,7 @@ char **argv;
     }
     else
     {
-    
+      fprintf(stderr, "select EINTR\n"    );
     }
   }
   else
@@ -1311,8 +1317,30 @@ char **argv;
 #ifdef POLLINGINP
 	rc = 1;
 #endif
+
   if (rc > 0)
   {
+
+#ifdef USE_EVENTS
+
+      /* tek4404 event system only used for keypress input */
+      n = readkeyboardevents(inputbuffer, 32);
+      if (wintopmost)
+      {
+          n = (int)write(wintopmost->master, inputbuffer, n);
+
+          /* Uniflex pty does not handle Ctrl-C! */
+          if (inputbuffer[0] == 0x03)
+          {
+              kill(wintopmost->pid, SIGINT);
+              control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
+
+              WindowOutput(wintopmost - allwindows, "SIGINT\n", 7);
+              write(wintopmost->master, "\n", 1);
+          }
+      }
+
+#else
     /* read any stdio input and send to topwindow input */
 #ifdef POLLINGINP
     gtty(fdtty, &new_term_settings);
@@ -1340,6 +1368,8 @@ char **argv;
         }
       }
     }
+#endif
+
 
     /* read any output from window process */
     for(i=0; i<numwindows; i++)
@@ -1371,48 +1401,37 @@ char **argv;
         
 #ifdef POLLINGPTY
           /* check again if any output */
-          n = control_pty(fdmaster, PTY_INQUIRY, 0);
+          n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
 #endif
 
       }
     }
   }
+
   /* manage windows */
   {
 
-#ifdef __clang__
-     /*  THIS CALL TOTALLY HANGS THE MACHINE */
-      /* tek4404 event system only used for keypress input */
-      ev = (union EVENTUNION)EGetNext();
-      if (ev.estruct.etype == E_PRESS)
-      {
-        char ch = ev.estruct.eparam;
-        if (wintopmost)
-          n = (int)write(wintopmost->master, &ch, 1);
-      }
-#endif
-
-if (GetButtons() & M_MIDDLE)
-{
-	 int choice = MenuSelect(menu);
-	 if (choice == 0)
-	 {
-		cleanup_and_exit(0);
-		exit(0);
-	}
-	else
-	if (choice == 1)
-	{
-			GetMPosition(&origin);
-			WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
-	}
-	else
-	{
-      /* repaint everything */
-      SetClip(&screenrect);
-      Paint(wintopmost, &screenrect, FORCEPAINT);
-	}
-}
+    if (GetButtons() & M_MIDDLE)
+    {
+        int choice = MenuSelect(menu);
+        if (choice == 0)
+        {
+            cleanup_and_exit(0);
+            exit(0);
+        }
+        else
+        if (choice == 1)
+        {
+            GetMPosition(&origin);
+            WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+        }
+        else
+        {
+            /* repaint everything */
+            SetClip(&screenrect);
+            Paint(wintopmost, &screenrect, FORCEPAINT);
+        }
+    }
 
       if (GetButtons() & M_LEFT)
       {
