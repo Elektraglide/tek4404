@@ -1089,6 +1089,7 @@ void
 cleanup_and_exit(sig)
 int sig;
 {
+  struct POINT p;
   int i;
 	
   fprintf(stderr, "cleanup on %d\n", sig);
@@ -1106,13 +1107,17 @@ int sig;
   }
   sleep(1);
   
+  /* reset viewport */
+  p.x = p.y = 0;
+  SetViewport(&p);
 
   EventDisable();
   SetKBCode(1);
   ExitGraphics();
   FontClose(font);
   RestoreDisplayState(&ds);
-  
+
+  fprintf(stderr, "Sic transit gloria Tektronix 4404\n");
   exit(2);
 }
 
@@ -1574,10 +1579,6 @@ dummysock = fdtty;
 
     }
   }
-  SetKBCode(1);
-  EventDisable();
-  ExitGraphics();
-  FontClose(font);
-  RestoreDisplayState(&ds);
-  fprintf(stderr, "Done\n");
+
+  cleanup_and_exit(0);
 }
