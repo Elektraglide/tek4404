@@ -1034,6 +1034,11 @@ int wid;
   struct RECT oldrect;
   int i;
 
+  if (wid == 0)
+  {
+      WindowLog("trying to destroy Window 0\012\n");
+      return;
+  }
   /* unlink it */
   prevwin = NULL;
   awin = wintopmost;
