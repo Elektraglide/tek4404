@@ -547,11 +547,11 @@ int islogger;
     win->next = wintopmost;
     wintopmost = win;
 
+    if (!islogger)
+	  	WindowOutput(numwindows, welcome, sizeof(welcome));
+
     numwindows++;
     WindowTop(win);
-
-    if (!islogger)
-	  	WindowOutput(numwindows-1, welcome, sizeof(welcome));
 
     return numwindows;
   }
@@ -1128,7 +1128,8 @@ int sig;
   int i,pid;
 
   pid = wait(&i);
-  WindowLog("child proc(%d) died by %d\012\n", pid, i);
+  WindowLog("child proc(%d) died with exit code %d\012\n", pid, i);
+
   for(i=0; i<numwindows; i++)
   {
     if (allwindows[i].pid == pid)
@@ -1137,7 +1138,7 @@ int sig;
       break;
     }
   }
-  
+
   signal(SIGDEAD, cleanup_window);
 }
 
@@ -1347,11 +1348,17 @@ dummysock = fdtty;
           /* Uniflex pty does not handle Ctrl-C! */
           if (inputbuffer[0] == 0x03)
           {
-              kill(wintopmost->pid, SIGINT);
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
+              WindowOutput(wintopmost - allwindows, "SIGINT\012\n", 8);
+              kill(wintopmost->pid, SIGINT);
 
-              WindowOutput(wintopmost - allwindows, "SIGINT\n", 7);
-              write(wintopmost->master, "\n", 1);
+              WindowLog("Sent SIGINT to window%d\012\n", wintopmost - allwindows);
+          }
+          if (inputbuffer[0] == 0x04)
+          {
+              control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
+              WindowOutput(wintopmost - allwindows, "SIGHUP\012\n", 8);
+              kill(wintopmost->pid, SIGHUP);
           }
       }
 
@@ -1366,16 +1373,17 @@ dummysock = fdtty;
 #endif
     {
       n = (int)read(fdtty, inputbuffer, sizeof(inputbuffer));
-      if (n>0 && wintopmost)
+      if (n>0 && wintopmost > allwindows)
       {
         n = (int)write(wintopmost->master, inputbuffer, n);
         
         /* Uniflex pty does not handle Ctrl-C! */
         if (inputbuffer[0] == 0x03)
         {
-          kill(wintopmost->pid, SIGINT);
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-        } 
+          WindowOutput(wintopmost - allwindows, "SIGINT\012\n", 8);
+          kill(wintopmost->pid, SIGINT);
+      }
       
         if (n < 0)
         {
@@ -1410,7 +1418,7 @@ dummysock = fdtty;
           rc = 0;
           wait(&rc);
           WindowDestroy(i);
-          WindowLog("window%d destroyed because %04x\n", i, rc);
+          WindowLog("window%d destroyed with exit code 0x%04x\012\n", i, rc);
           break;
         }
         
