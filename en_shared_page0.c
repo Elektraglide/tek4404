@@ -11,7 +11,7 @@ char *argv[];
   unsigned short nop_instr = 0x4e71;
   unsigned int shared_page0 = 0x704;
   unsigned int shared_page1 = 0x708;
-  unsigned int fpumem = 0x0078c000;   /* NS32081 mapped here */
+  unsigned int fpumem = 0x0078a000;   /* NS32081 mapped here */
   unsigned char buffer[16];
   unsigned int *ptr;
   
