@@ -1,7 +1,24 @@
 	lib sysdef
 
-	global _system_control
+	global _systat
 	
+; this is just missing from clibs
+	text
+_systat	link a6,#0
+	movem.l d2-d7/a2-a5,-(sp)
+	move.l 8(a6),ibuffer+2
+	sys ind,ibuffer
+    move.l 8(a6),d0
+	movem.l (sp)+,d2-d7/a2-a5
+	unlk a6
+	rts
+
+	data
+ibuffer	dc.w systat
+		dc.l 0
+
+	global _system_control
+
 ; this is just missing from clibs
 	text
 _system_control	link a6,#0
@@ -113,7 +130,7 @@ _kernmapper	link a6,#0
 
 fpu_seg    EQU     *
         dc.l 0x007db000
-        dc.l 0x0078c000   ;fpu
+        dc.l 0x0078a000   ;fpu
         dc.w 1
 
 mappersize    EQU     *-_kernmapper
