@@ -165,8 +165,8 @@ struct BBCOM bb;
 struct FORM *screen;
 struct RECT screenrect;
 
-char *items[6] = {"quit","shell","refresh"};
-int flags[6] = {MENU_LINE,0,0};
+char *items[6] = {"shell","refresh", "quit to console"};
+int flags[6] = {0,MENU_LINE,0};
 struct MENU *menu;
 
 int usecustomblit = 0;
@@ -295,7 +295,7 @@ int islogger;
     signal(SIGQUIT, cleanup_child);    
     signal(SIGTERM, cleanup_child);
     signal(SIGPIPE, cleanup_child);
-    signal(SIGDEAD, SIG_DFL);
+    signal(SIGDEAD, SIG_IGN);
     
     /* Close the master side of the PTY */
     close(fdmaster);
@@ -1439,20 +1439,21 @@ dummysock = fdtty;
         int choice = MenuSelect(menu);
         if (choice == 0)
         {
-            cleanup_and_exit(0);
-            exit(0);
-        }
-        else
-        if (choice == 1)
-        {
             GetMPosition(&origin);
             WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
         }
         else
+        if (choice == 1)
         {
             /* repaint everything */
             SetClip(&screenrect);
             Paint(wintopmost, &screenrect, FORCEPAINT);
+        }
+        else
+        if (choice == 2)
+        {
+            cleanup_and_exit(0);
+            exit(0);
         }
     }
 
