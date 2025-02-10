@@ -1145,7 +1145,6 @@ int sig;
 int sh_input(sig)
 int sig;
 {
-	
   signal(SIGEVT, sh_input);
   ESetSignal();
 }
@@ -1217,13 +1216,14 @@ char **argv;
   SetKBCode(0);
 #else
 
-  /*
-  signal(SIGEVT, sh_input);
-  ESetSignal();
- */
+
+
 
   EventEnable();
   SetKBCode(0);
+
+  ESetSignal();
+  signal(SIGEVT, sh_input);
 #endif
 
   /* window chain */
@@ -1319,7 +1319,8 @@ dummysock = fdtty;
     }
     else
     {
-      fprintf(stderr, "select EINTR\n"    );
+      /* allow reading events */
+  
     }
   }
   else
