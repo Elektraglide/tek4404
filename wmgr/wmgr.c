@@ -36,6 +36,7 @@ void setsid() {}
 #endif
 
 #include "vtemu.h"
+#include "win.h"
 
 extern int rand();
 extern int open();
@@ -150,10 +151,6 @@ int fdtty;
 
 #define DEBUGREPAINTxx
 
-#define WINTITLEBAR 16
-#define WINBORDER 16
-#define CLOSEBOX 8
-
 #define FORCEPAINT 	0x0001
 #define DRAGGED 		0x8000
 
@@ -173,21 +170,6 @@ int usecustomblit = 0;
 long newtime,oldtime = 0;
 char cursor;
 
-typedef struct _win
-{
-  /* term emulator; NB always first so we can cast it to a Window */
-  VTemu vt;
-
-  struct _win *next;
-  char title[64];
-  struct RECT oldrect;
-  struct RECT windowrect;
-  struct RECT contentrect;
-  int master,slave;
-  int pid;
-  int dirty;
- 
-} Window;
 
 Window *wintopmost;
 Window allwindows[32];
@@ -704,27 +686,36 @@ int forcedirty;
     if (forcedirty || (win->dirty & DIRTYFRAME))
     {
       /* render (just) frame */
-      r = win->windowrect;
-      r.y += WINTITLEBAR;
-      r.h -= WINTITLEBAR;
+      r.x = win->windowrect.x;
+      r.y = win->windowrect.y + WINTITLEBAR;
+      r.w = win->windowrect.w;
+      r.h = win->windowrect.h - WINTITLEBAR;
       bb.halftoneform = &WhiteMask;
       RectDrawX(&r, &bb);
 
       /* margins */
       bb.halftoneform = &BlackMask;
-      r = win->windowrect;
-      r.x += 1;
+
+      /* left */
+      r.x = win->windowrect.x + 1;
+      r.y = win->windowrect.y;
       r.w = WINBORDER - 2;
+      r.h = win->windowrect.h;
       RectBoxDrawX(&r, 1, &bb);
+
+      /* right */
       r.x += win->windowrect.w - 1 - (WINBORDER-1);
       RectBoxDrawX(&r, 1, &bb);
-      r = win->windowrect;
-      r.y += win->windowrect.h - 1 - (WINBORDER-1) + 1;
+
+      /* bottom */
+      r.x = win->windowrect.x;
+      r.y = win->windowrect.y + win->windowrect.h - 1 - (WINBORDER-1) + 1;
+      r.w = win->windowrect.w;
       r.h = WINBORDER - 2;
       RectBoxDrawX(&r, 1, &bb);
 
       /* title bar */
-      r = win->windowrect;
+      r.y = win->windowrect.y;
       r.h = WINTITLEBAR;
       bb.halftoneform = &VeryLightGrayMask;
       RectDrawX(&r, &bb);
@@ -738,9 +729,8 @@ int forcedirty;
 #ifdef CLOSEBOX
       /* render closebox */
       bb.halftoneform = &WhiteMask;
-      r = win->windowrect;
-      r.x += (WINBORDER-CLOSEBOX)>>1;
-      r.y += (WINTITLEBAR-CLOSEBOX)>>1;
+      r.x = win->windowrect.x + ((WINBORDER-CLOSEBOX)>>1);
+      r.y = win->windowrect.y + ((WINTITLEBAR-CLOSEBOX)>>1);
       r.w = CLOSEBOX;
       r.h = CLOSEBOX;
       RectDrawX(&r, &bb);
@@ -1211,14 +1201,7 @@ char **argv;
   CursorVisible(1);
   CursorTrack(1);
 
-#ifdef __clang__
-  EventEnable();
-  SetKBCode(0);
-#else
-
-
-
-
+#ifdef USE_EVENTS
   EventEnable();
   SetKBCode(0);
 
@@ -1302,10 +1285,10 @@ dummysock = fdtty;
 
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec =  500000;
+    timeout.tv_usec = 25000;
     if (last_read > 0)
     {
-      timeout.tv_usec = 20000;
+      timeout.tv_usec = 50000;
       last_read--;
     }
     rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
