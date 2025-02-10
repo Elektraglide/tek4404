@@ -6,6 +6,7 @@ char *confignames[] =
   "Unknown",
   "Momentum_Hawk_32",
   "PIXEL_100/AP",
+  "Unknown",
   "Tektronix_4404",
   "TSC_SBC",
   "Tektronix_CBI",
@@ -35,5 +36,13 @@ int i;
 
   ptr = systat(&results);
   ss = (struct sstat *)ptr;
-  printf("config:%s ver:%2.2x vendor:%2.2x memsize:%d\n",confignames[ss->ss_config], ss->ss_ver, ss->ss_vendor,ss->ss_memsiz);
+  printf("config:%s ver:%2.2x vendor:%2.2x\n",confignames[ss->ss_config], ss->ss_ver, ss->ss_vendor);
+  printf("memsize:%d\n", ss->ss_memsiz);
+
+  printf("protected memory: %s\n", ss->ss_hdwr[0] & SS_PROT ? "YES" : "NO");
+  printf("virtual memory: %s\n", ss->ss_hdwr[0] & SS_VM ? "YES" : "NO");
+  printf("long filenames: %s\n", ss->ss_hdwr[0] & SS_LNAM ? "YES" : "NO");
+  printf("68020: %s\n", ss->ss_hdwr[0] & SS_68020 ? "YES" : "NO");
+  printf("68881: %s\n", ss->ss_hdwr[0] & SS_68881 ? "YES" : "NO");
+  
 }
