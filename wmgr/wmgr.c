@@ -1,4 +1,3 @@
-	
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -40,6 +39,8 @@ void setsid() {}
 
 extern int rand();
 extern int open();
+
+extern int system_control(); /* arg=1 does something, arg=2 makes controlling termnal */
 
 #ifdef __clang__
 #define POLLINGPTYx
@@ -209,9 +210,9 @@ struct POINT *point;
 {
    if (point->x > rect->x && point->x < rect->x + rect->w &&
        point->y > rect->y && point->y < rect->y + rect->h)
-     return 0;
+     return 1;
   else
-   return 1;
+   return 0;
 }
 
 int myRectIntersects(r1,r2)
@@ -289,14 +290,12 @@ int islogger;
     new_term_settings.sg_flag &= ~ECHO;
     stty(fdslave, &new_term_settings);
 
-    /* The slave side of the PTY becomes the standard input and outputs of the child process */
-    close(0); /* Close standard input (current terminal) */
-    close(1); /* Close standard output (current terminal) */
-    close(2); /* Close standard error (current terminal) */
-
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
     dup2(fdslave, 1); /* PTY becomes standard output (1) */
     dup2(fdslave, 2); /* PTY becomes standard error (2) */
+
+    /* calls pty_make_controlling_terminal */
+    system_control(2);
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
@@ -348,7 +347,7 @@ Window *win;
       bb.rule = bbSxorD;
 
       r.w = font->maps->maxw;
-      r.h = font->maps->baseline;
+      r.h = font->maps->baseline - 2;
       bb.halftoneform = &BlackMask;
       RectDrawX(&r, &bb);
       bb.rule = bbS;
@@ -1333,7 +1332,6 @@ dummysock = fdtty;
           if (inputbuffer[0] == 0x03)
           {
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-              WindowOutput(wintopmost - allwindows, "SIGINT\012\n", 8);
               kill(wintopmost->pid, SIGINT);
 
               WindowLog("Sent SIGINT to window%d\012\n", wintopmost - allwindows);
@@ -1341,9 +1339,26 @@ dummysock = fdtty;
           if (inputbuffer[0] == 0x04)
           {
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-              WindowOutput(wintopmost - allwindows, "SIGHUP\012\n", 8);
               kill(wintopmost->pid, SIGHUP);
+
+              WindowLog("Sent SIGHUP to window%d\012\n", wintopmost - allwindows);
           }
+
+/* we dont know whether we are in RAW mode.. */
+#if 0
+          /* flow control DC1 / DC3 */
+          if (inputbuffer[0] == 0x11)
+          {
+              control_pty(wintopmost->master, PTY_START_OUTPUT, 0);
+              WindowLog( "XON\012\n");
+          }
+          if (inputbuffer[0] == 0x13)
+          {
+              control_pty(wintopmost->master, PTY_STOP_OUTPUT, 0);
+              WindowLog( "XOFF\012\n");
+          }
+#endif
+
       }
 
 #else
@@ -1450,7 +1465,7 @@ dummysock = fdtty;
         while (win)
         {
           /* docs wrong; returns 0 if contained */
-          if (!myRectContainsPoint(&win->windowrect, &origin))
+          if (myRectContainsPoint(&win->windowrect, &origin))
           {
             WindowTop(win);
 
@@ -1458,8 +1473,9 @@ dummysock = fdtty;
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
 
+
             /* track drag of window frame (ie not in contentrect) */
-            if (myRectContainsPoint(&win->contentrect, &origin))
+            if (!myRectContainsPoint(&win->contentrect, &origin))
             while (GetButtons() & M_LEFT)
             {
               GetMPosition(&p);
