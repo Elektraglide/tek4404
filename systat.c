@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <fcntl.h>
 #include <sys/systat.h>
 
 #include "kernutils.h"
