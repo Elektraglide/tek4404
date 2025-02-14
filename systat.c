@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <sys/systat.h>
 
+#include "kernutils.h"
+
 char *confignames[] =
 {
   "Unknown",
@@ -32,12 +34,30 @@ char **argv;
 struct sstat results;
 struct sstat *ss;
 unsigned char *ptr;
-int i;
+int i, pmem;
+char *symbols;
+int symbolsize;
+char bootfile[256];
+  
+	kernbootfile(bootfile);
+
+	pmem = open("/dev/pmem", O_RDWR);
+	if (pmem < 0)
+	{
+		fprintf(stderr, "%s: failed to open /dev/pmem\n", argv[0]);
+		exit(1);
+	}
+
+	symbols = getsymbols(bootfile, &symbolsize);
+
+  printf("system boot file: %s\n", bootfile);
+  printf("system boot time:  %s\n", kernboottime(symbols, symbolsize, pmem));
 
   ptr = systat(&results);
   ss = (struct sstat *)ptr;
   printf("config:%s ver:%2.2x vendor:%2.2x\n",confignames[ss->ss_config], ss->ss_ver, ss->ss_vendor);
-  printf("memsize:%d\n", ss->ss_memsiz);
+  printf("memsize:%dk\n", ss->ss_memsiz / 1024);
+  printf("usedmem: %dk\n", getkint32(symbols, symbolsize, "usedmem", pmem) / 1024);
 
   printf("protected memory: %s\n", ss->ss_hdwr[0] & SS_PROT ? "YES" : "NO");
   printf("virtual memory: %s\n", ss->ss_hdwr[0] & SS_VM ? "YES" : "NO");
