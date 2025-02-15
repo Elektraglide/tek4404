@@ -66,5 +66,12 @@ char bootfile[32],buffer[32];
   printf("long filenames: %s\n", ss->ss_hdwr[0] & SS_LNAM ? "YES" : "NO");
   printf("68020: %s\n", ss->ss_hdwr[0] & SS_68020 ? "YES" : "NO");
   printf("68881: %s\n", ss->ss_hdwr[0] & SS_68881 ? "YES" : "NO");
-  
+
+  printf("68000: %d\n", getkconstant(symbols, symbolsize, "IS_68000", pmem));
+  printf("68010: %d\n", getkconstant(symbols, symbolsize, "IS_68010", pmem));
+  printf("68020: %d\n", getkconstant(symbols, symbolsize, "IS_68020", pmem));
+
+  printf("RAM_DISK: %d\n", getkconstant(symbols, symbolsize, "RAM_DISK_OPTION", pmem));
+  printf("REAL_TIME: %d\n", getkconstant(symbols, symbolsize, "REAL_TIME_OPTION", pmem));
+  printf("CLOCK Hz: %d\n", getkconstant(symbols, symbolsize, "CLOCKS_PER_SECOND", pmem));
 }
