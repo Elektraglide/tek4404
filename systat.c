@@ -38,9 +38,10 @@ unsigned char *ptr;
 int i, pmem;
 char *symbols;
 int symbolsize;
-char bootfile[256];
-  
-	kernbootfile(bootfile);
+char bootfile[32],buffer[32];
+
+  kernbootfile(buffer);
+  sprintf(bootfile, "/%s", buffer);
 
 	pmem = open("/dev/pmem", O_RDWR);
 	if (pmem < 0)
@@ -49,7 +50,7 @@ char bootfile[256];
 		exit(1);
 	}
 
-	symbols = getsymbols(bootfile, &symbolsize);
+  symbols = getsymbols(bootfile, &symbolsize);
 
   printf("system boot file: %s\n", bootfile);
   printf("system boot time:  %s\n", kernboottime(symbols, symbolsize, pmem));
