@@ -1,6 +1,8 @@
 #include<stdio.h>
 #include <sys/signal.h>
 #include <sys/ctask.h>
+#include <sys/fcntl.h>
+#include "kernutils.h"
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -14,6 +16,7 @@ void childreap(sig)
 int sig;
 {
 	done = 1;
+
 	printf("SIGDEAD\n");
 }
 
@@ -21,7 +24,7 @@ void childstop(sig)
 int sig;
 {
 
-	printf("SIGTRACE %d\n", sig);
+	printf("******* SIGNAL %d *******\n", sig);
 	
 	signal(sig, childstop);
 }
@@ -33,12 +36,13 @@ struct ctask *task;
 	int pid = getpid();
 	
   printf("------ %s (%d) -------\n",msg, pid);
+/***
   printf("task_id    %d\n", task->task_id);
   printf("task_fd    %d\n", task->task_fd);
   printf("task_state %8.8x\n", task->task_state);
   printf("task_flags %8.8x\n", task->task_flags);
   printf("task_control %8.8x\n", task->task_control);
-  
+***/  
 }
 
 int main(argc, argv)
@@ -47,6 +51,7 @@ char **argv;
 {
 	int i,rc;
 	unsigned char mem[32];
+	unsigned int special[32];
 	struct ctask *task;
 	char **tracee;
 
@@ -57,30 +62,29 @@ char **argv;
 		tracee = argv + 1;
 	}
 
-		signal(SIGTRACE, childstop);
-		signal(SIGDUMP, childstop);
-
 	task = create_controlled_task();
-		printtask("create",task);
+	printtask("create",task);
 	
 	/* do parent processing */
 	if (task->task_fd != 0)
 	{
 		printf("parent wakes\n");
-/*		signal(SIGDEAD, childreap); */
+		signal(SIGDEAD, childreap);
 
-
-		kill(task->task_id, SIGTRACE);
+		/* this makes this process show up in status as "trce"  Why? */
+/*		signal(SIGTRACE, childstop);
+		signal(SIGTRAP6, childstop);
+*/
 
 
 		done = 0;
 		while(!done)
 		{
 			/* execute until breakpoint */
-			execute_controlled_task(task);
-			/* step_controlled_task(task); */
+		execute_controlled_task(task); 
+/*		    step_controlled_task(task); 	*/
 
-			printtask("execute",task);
+			printtask("PAUSE",task);
 			if (done)
 				break;
 
@@ -89,9 +93,8 @@ char **argv;
 				if (i)
 				{
 					printf(" signal(%d)\n", i);
-					/*  NB documented as being called clear_controlled_task_signals()
-					clear_controlled_task(task);
-					*/
+			/*  NB documented as being called clear_controlled_task_signals() */
+			/* clear_controlled_task(task); */
 				}
 				else
 				{
@@ -105,14 +108,31 @@ char **argv;
 				}
 			printf("***********\n");
 
-			resume_controlled_task(task);
+
+/*			resume_controlled_task(task);	*/
 			printtask("resumed",task);
 
-			
 		}
 	}
 	else
 	{
+	
+			signal(SIGTRACE, childstop);
+			
+			signal(SIGTRAPV, childstop);
+			signal(SIGTRAP1, childstop);
+			signal(SIGTRAP2, childstop);
+			signal(SIGTRAP3, childstop);
+			signal(SIGTRAP4, childstop);
+			signal(SIGTRAP5, childstop);
+			signal(SIGTRAP6, childstop);
+
+			signal(SIGUSR1, childstop);
+			signal(SIGUSR2, childstop);
+			signal(SIGUSR3, childstop);
+
+			kill(getpid(), SIGTRACE);		/* this arrives at PARENT! */
+			
 			printf("child doing execvp(%s)\n",tracee[0]);
 
       /* launch cmd */
