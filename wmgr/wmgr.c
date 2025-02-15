@@ -288,6 +288,11 @@ int islogger;
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
+
+    new_term_settings.sg_prot |= ESC;
+    new_term_settings.sg_prot |= OXON;
+    new_term_settings.sg_prot |= TRANS;
+
     stty(fdslave, &new_term_settings);
 
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
