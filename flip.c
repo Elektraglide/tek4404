@@ -16,6 +16,7 @@ typedef struct
 {
   struct FORM *form;
   fixed x,y;
+  fixed dx,dy;
 
   struct FORM *back[2];
   int oldx[2],oldy[2];
@@ -28,6 +29,7 @@ int pindex;
 struct POINT page;
 
 sprite thesprite;
+sprite thesprite2;
 
 waitbutton(msg)
 char *msg;
@@ -58,7 +60,18 @@ void flip()
 #endif
 }
 
-void drawsprite(asprite)
+void sh_timer(sig)
+int sig;
+{
+  unsigned long nexttime;
+  nexttime = EGetTime() + 50;
+
+  signal(sig, sh_timer);
+  ESetAlarm(nexttime);
+}
+
+
+void restoresprite(asprite)
 sprite *asprite;
 {
 
@@ -73,7 +86,11 @@ sprite *asprite;
     bb.destrect.h = asprite->form->h;
  	bb.rule = bbS;
 	BitBlt(&bb);
+}
 
+void drawsprite(asprite)
+sprite *asprite;
+{
 
     /* save under */
     bb.srcform = screen;
@@ -102,16 +119,6 @@ sprite *asprite;
  	bb.rule = bbSorD;
 	BitBlt(&bb);
 
-}
-
-void sh_timer(sig)
-int sig;
-{
-  unsigned long nexttime;
-  nexttime = EGetTime() + 50;
-
-  signal(sig, sh_timer);
-  ESetAlarm(nexttime);
 }
 
 struct FORM *makesprite()
@@ -144,6 +151,32 @@ struct FORM *makesprite()
    }
 
    return form;
+}
+
+void movesprite(asprite)
+sprite *asprite;
+{
+    asprite->x += asprite->dx;
+    if (asprite->x < INT2FIX(page.x)) 
+    {
+      asprite->x = INT2FIX(page.x); asprite->dx = -asprite->dx;
+    }
+    if (asprite->x > INT2FIX(page.x+640-64)) 
+    {
+      asprite->x = INT2FIX(page.x+640-64); asprite->dx = -asprite->dx;
+    }
+
+    asprite->y += asprite->dy;
+    if (asprite->y > INT2FIX(480-64)) 
+    {
+      asprite->y = INT2FIX(480-64);
+      asprite->dy = -asprite->dy;
+    }
+
+    /* gravity */
+    asprite->dy += 4000; 
+    if (asprite->dy > INT2FIX(50)) asprite->dy = INT2FIX(50);
+
 }
 
 main(argc,argv)
@@ -206,6 +239,19 @@ char *argv[];
 
    thesprite.back[0] = FormCreate(64,64);
    thesprite.back[1] = FormCreate(64,64);
+   thesprite.dx = INT2FIX(3);
+   thesprite.dy = INT2FIX(1);
+
+   /* make a sprite2 to use */
+   thesprite2.form = makesprite();
+   thesprite2.x = INT2FIX(200);
+   thesprite2.y = INT2FIX(40);
+   thesprite2.oldx[0] = thesprite2.oldx[1] = -1000;
+
+   thesprite2.back[0] = FormCreate(64,64);
+   thesprite2.back[1] = FormCreate(64,64);
+   thesprite2.dx = INT2FIX(-5);
+   thesprite2.dy = INT2FIX(1);
 
 
     /* set up the bitblt command stuff */
@@ -223,25 +269,18 @@ char *argv[];
     bb.cliprect.h = 1024;
 
    /* animate it */
-   dx = INT2FIX(3);
-   dy = INT2FIX(1);
    while(1)
    {
      frametime = EGetTime() + 50;
 
+     restoresprite(&thesprite);
+     restoresprite(&thesprite2);
+
+     movesprite(&thesprite);
+     movesprite(&thesprite2);
+
      drawsprite(&thesprite);
-
-     thesprite.x += dx;
-     if (thesprite.x < INT2FIX(page.x)) {thesprite.x = INT2FIX(page.x); dx = -dx;}
-     if (thesprite.x > INT2FIX(page.x+640-64)) {thesprite.x = INT2FIX(page.x+640-64); dx = -dx;}
-
-     thesprite.y += dy;
-     if (thesprite.y > INT2FIX(480-64)) dy = -dy;
-
-     /* gravity */
-     dy += 4000; 
-     if (dy > INT2FIX(50)) dy = INT2FIX(50);
-
+     drawsprite(&thesprite2);
 
      /* need an accurate way of flipping at 30Hz */
      flip();
