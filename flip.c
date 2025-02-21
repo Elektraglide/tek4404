@@ -27,6 +27,8 @@ struct FORM *screen;
 struct BBCOM bb;
 int pindex;
 struct POINT page;
+unsigned long frametime;
+unsigned int framenum;
 
 sprite thesprite;
 sprite thesprite2;
@@ -63,11 +65,12 @@ void flip()
 void sh_timer(sig)
 int sig;
 {
-  unsigned long nexttime;
-  nexttime = EGetTime() + 50;
+
+  frametime += 50;
+  framenum++;
 
   signal(sig, sh_timer);
-  ESetAlarm(nexttime);
+  ESetAlarm(frametime);
 }
 
 
@@ -88,7 +91,7 @@ sprite *asprite;
 	BitBlt(&bb);
 }
 
-void drawsprite(asprite)
+void savesprite(asprite)
 sprite *asprite;
 {
 
@@ -105,8 +108,11 @@ sprite *asprite;
 	BitBlt(&bb);
     asprite->oldx[pindex] = bb.srcpoint.x;
     asprite->oldy[pindex] = bb.srcpoint.y;
+}
 
-
+void drawsprite(asprite)
+sprite *asprite;
+{
     /* draw over */
     bb.srcform = asprite->form;
     bb.srcpoint.x = 0;
@@ -127,7 +133,7 @@ struct FORM *makesprite()
   struct RECT r;
   struct FORM *form;
    
-   form = FormCreate(64,64);
+   form = FormCreate(128,64);
    
    if (font && form)
    {
@@ -137,7 +143,7 @@ struct FORM *makesprite()
      bb.destrect.y = 0;
      bb.destrect.w = 1024;
      bb.destrect.h = 1024;
-     bb.rule = bbS;
+     bb.rule = bbSorD;
      bb.halftoneform = &BlackMask;
      bb.cliprect.x = 0;
      bb.cliprect.y = 0;
@@ -146,8 +152,14 @@ struct FORM *makesprite()
 
      origin.x = 0;
      origin.y = font->maps->line;
-     StringDrawX("Tek", &origin, &bb, font);
+     StringDrawX("Tektronix", &origin, &bb, font);
 
+     bb.halftoneform = &GrayMask;
+     bb.srcform = NULL;
+     r.x = r.y = 4;
+     r.w = 120;
+     r.h = 4;
+     RectDrawX(&r,&bb);
    }
 
    return form;
@@ -179,6 +191,18 @@ sprite *asprite;
 
 }
 
+void sh_int(sig)
+int sig;
+{
+  struct POINT p;
+  p.x = p.y = 0;
+  SetViewport(&p);
+  ExitGraphics();
+  FontClose(font);
+
+  exit(2);
+}
+
 main(argc,argv)
 int argc;
 char *argv[];
@@ -187,22 +211,24 @@ char *argv[];
     fixed x,y,dx,dy;
     struct POINT origin,p2;
     struct RECT r;
-    long frametime;
+    unsigned int currpage,waiting;
 
-    signal(SIGMILLI, flip);
+    signal(SIGINT, sh_int);
+    signal(SIGMILLI, sh_timer);
 
     screen = InitGraphics(FALSE);
-    font = FontOpen("/fonts/PellucidaSans-Serif36.font");
+    font = FontOpen("/fonts/PellucidaSans-Serif24.font");
    fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
 
     printf("starting alarm\n");
+    ESetSignal();
     page.x = page.y = 0;
     pindex = 0;
-
-    ESetSignal();
-    ESetAlarm(EGetTime() + 500);
+    frametime = EGetTime() + 500;
+    framenum = 0;
+    ESetAlarm(frametime);
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -211,7 +237,7 @@ char *argv[];
     bb.srcform = screen;
     bb.srcpoint.x = 0;
     bb.srcpoint.y = 0;
-    bb.destform = screen;			/* dest is screen */
+    bb.destform = screen;
     bb.destrect.x = 0;
     bb.destrect.y = 512;
     bb.destrect.w = 1024;
@@ -237,8 +263,8 @@ char *argv[];
    thesprite.y = INT2FIX(10);
    thesprite.oldx[0] = thesprite.oldx[1] = -1000;
 
-   thesprite.back[0] = FormCreate(64,64);
-   thesprite.back[1] = FormCreate(64,64);
+   thesprite.back[0] = FormCreate(128,64);
+   thesprite.back[1] = FormCreate(128,64);
    thesprite.dx = INT2FIX(3);
    thesprite.dy = INT2FIX(1);
 
@@ -248,8 +274,8 @@ char *argv[];
    thesprite2.y = INT2FIX(40);
    thesprite2.oldx[0] = thesprite2.oldx[1] = -1000;
 
-   thesprite2.back[0] = FormCreate(64,64);
-   thesprite2.back[1] = FormCreate(64,64);
+   thesprite2.back[0] = FormCreate(128,64);
+   thesprite2.back[1] = FormCreate(128,64);
    thesprite2.dx = INT2FIX(-5);
    thesprite2.dy = INT2FIX(1);
 
@@ -268,10 +294,12 @@ char *argv[];
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
+   /* hide cursor */
+   CursorVisible(FALSE);
+
    /* animate it */
    while(1)
    {
-     frametime = EGetTime() + 50;
 
      restoresprite(&thesprite);
      restoresprite(&thesprite2);
@@ -279,17 +307,34 @@ char *argv[];
      movesprite(&thesprite);
      movesprite(&thesprite2);
 
+     savesprite(&thesprite);
+     savesprite(&thesprite2);
+
      drawsprite(&thesprite);
      drawsprite(&thesprite2);
 
-     /* need an accurate way of flipping at 30Hz */
+     bb.srcform = NULL;
+     bb.rule = bbS;
+     r.x = 0;
+     r.y = page.y;
+     r.w = waiting >> 8;
+     r.h = 4;
+     RectDrawX(&r, &bb);
+     bb.rule = bbZero;
+     r.x += r.w;
+     r.w = 128;
+     RectDrawX(&r, &bb);
+     
      flip();
 
-     /* wait for 20Hz */
-     while (frametime > EGetTime());
+     /* wait for frame flip */
+     currpage = framenum;
+     waiting = 0;
+     while (currpage == framenum)
+       waiting++;
+
 
    }
 
-    sleep(4);
-    ClearScreen();
+
 }
