@@ -1,0 +1,60 @@
+4404:\
+        :al=\E[1L:AL=\E[%dL:bl=^G:bs:cd=\E[J:bt=\E[Z:\
+        :ce=\E[K:cl=\E[;H\E[2J:cm=\E[%i%d;%dH:\
+        :co#80:cr=^M:cs=\E[%i%d;%dr:da:db:dc=\E[P:dl=\E[1M:DL=\E[%dM:\
+        :do=\E[B:DO=\E[%dB:\
+        :ei=\E[4l:ho=\E[H:\
+        :im=\E[4h:kd=\E[B:ke=\E[?1h:kl=\E[D:kr=\E[C:ks=\E[?1l:ku=\E[A:\
+        :k0=\E[A:k1=\E[B:k2=\E[D:k3=\E[C:\
+        :li#32:LE=\E[%dD:\
+        :md=\E[1m:me=\E[m:mi:mr=\E[7m:ms:nd=\E[C:nl=^J:pt:\
+        :rc=\E8:RI=\E[%dC:sc=\E7:\
+        :se=\E[27m:sf=\ED:sr=\EM:so=\E[7m:\
+        :ti=\E%\!1\E[1;32r\E[?6l:\
+        :te=\E[1;1H\E[0J\E[?6h\E[?1l:\
+        :ue=\E[m:up=\E[A:UP=\E[%dA:us=\E[4m:
+
+tek4404:\
+	:al=\E[1L:bl=^G:bs:cd=\E[J:ce=\E[K:cl=\E[;H\E[2J:cm=\E[%i%d;%dH:\
+	:co#80:cr=^M:cs=\E[%i%d;%dr:dc=\E[P:dl=\E[1M:do=^J:ei=\E[4l:ho=\E[H:\
+	:im=\E[4h:kd=\E[B:ke=\E[?1h:kl=\E[D:kr=\E[C:ks=\E[?1l:ku=\E[A:li#32:\
+	:mb=\E[5m:md=\E[1m:me=\E[m:nd=\E[C:nl=^J:pt:rc=\E8:sc=\E7:\
+	:se=\E[27m:so=\E[7m:\
+	:ti=\E%\!1\E[1;32r\E[?6l:\
+	:te=\E[1;1H\E[0J\E[?6h\E[?1l:\
+	:ue=\E[m:up=\E[A:us=\E[4m:
+
+
+4405|4405-30|4405-s|4405-smallFont|4405-defaultFont:\
+	:ti=\E%\!1\E[1;30r\E[?6l:\
+	:li#30:co#80:tc=tek4404
+
+4405-26|4405-m|4405-mediumFont:\
+	:ti=\E%\!1\E[1;26r\E[?6l:\
+	:li#26:co#64:tc=tek4404
+
+4405-18|4405-l|4405-largeFont:\
+	:ti=\E%\!1\E[1;18r\E[?6l:\
+	:li#18:co#45:tc=tek4404
+
+4405-16|4405-e|4405-extraLargeFont:\
+	:ti=\E%\!1\E[1;16r\E[?6l:\
+	:li#16:co#40:tc=tek4404
+
+
+4406-s|4406-64|4406-smallFont:\
+	:ti=\E%\!1\E[1;64r\E[?6l:\
+	:li#64:co#160:tc=tek4404
+
+4406|4406-56|4406-m|4406-defaultFont|4406-mediumFont:\
+	:ti=\E%\!1\E[1;56r\E[?6l:\
+	:li#56:co#132:tc=tek4404
+
+4406-l|4406-39|4406-largeFont:\
+	:ti=\E%\!1\E[1;39r\E[?6l:\
+	:li#39:co#96:tc=tek4404
+
+4406-el|4406-34|4406-extraLargeFont:\
+	:ti=\E%\!1\E[1;34r\E[?6l:\
+	:li#34:co#80:tc=tek4404
+
