@@ -481,7 +481,7 @@ char **argv;
     else
     {
       /* use this DHCP server address */
-      strcpy(DHCP_SERVER, argv[1]);
+      strcpy(DHCP_SERVER, argv[i]);
     }
   }
 
