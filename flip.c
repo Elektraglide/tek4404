@@ -55,7 +55,7 @@ void flip()
   page.y ^= 512;
   pindex ^= 1;
 
-#if 0
+#if 1
   /* horizontal scrolling */
   page.x++;
   if (page.x > 384) page.x = 0;
@@ -66,7 +66,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 50;
+  frametime += 33;
   framenum++;
 
   signal(sig, sh_timer);
@@ -144,7 +144,7 @@ struct FORM *makesprite()
      bb.destrect.w = 1024;
      bb.destrect.h = 1024;
      bb.rule = bbSorD;
-     bb.halftoneform = &BlackMask;
+     bb.halftoneform = NULL;
      bb.cliprect.x = 0;
      bb.cliprect.y = 0;
      bb.cliprect.w = form->w;
@@ -186,7 +186,7 @@ sprite *asprite;
     }
 
     /* gravity */
-    asprite->dy += 4000; 
+    asprite->dy += 8000; 
     if (asprite->dy > INT2FIX(50)) asprite->dy = INT2FIX(50);
 
 }
@@ -203,6 +203,7 @@ int sig;
   exit(2);
 }
 
+unsigned int oldwaiting[2];
 main(argc,argv)
 int argc;
 char *argv[];
@@ -251,7 +252,7 @@ char *argv[];
 
     /* copy page0 to page1 */
     bb.srcform = screen;
-    bb.halftoneform = &BlackMask;
+    bb.halftoneform = NULL;
     bb.destrect.h = 480;
  	bb.rule = bbS;
 	BitBlt(&bb);
@@ -313,6 +314,7 @@ char *argv[];
      drawsprite(&thesprite);
      drawsprite(&thesprite2);
 
+     waiting >>= 8;
      bb.srcform = NULL;
      bb.rule = bbS;
      r.x = 0;
@@ -320,19 +322,26 @@ char *argv[];
      r.w = waiting >> 8;
      r.h = 4;
      RectDrawX(&r, &bb);
-     bb.rule = bbZero;
-     r.x += r.w;
-     r.w = 128;
-     RectDrawX(&r, &bb);
-     
-     flip();
+     if (waiting < oldwaiting[pindex])
+     {
+         bb.rule = bbZero;
+         r.x += r.w;
+         r.w = oldwaiting[pindex] - waiting;
+         RectDrawX(&r, &bb);
+     }
+     oldwaiting[pindex] = waiting;
 
      /* wait for frame flip */
      currpage = framenum;
      waiting = 0;
      while (currpage == framenum)
-       waiting++;
+         waiting++;
 
+     flip();
+
+     /* ensure vblank has happened */
+     currpage = framenum;
+     while (currpage == framenum);
 
    }
 
