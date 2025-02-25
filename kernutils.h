@@ -4,6 +4,7 @@ extern int kernbootfile();
 extern char *kernboottime();
 extern char *kernalloc();
 extern int kernfree();
+extern int kernexec();
 
 extern char *getsymbols();
 extern symbolheader * listsymbol();
