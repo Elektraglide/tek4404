@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <signal.h>
 #include <graphics.h>
 
 #ifdef __clang__
@@ -102,14 +101,6 @@ int maxlen;
 }
 
 #ifdef TESTING
-void sh_input(sig)
-int sig;
-{
-  printf("event\n");	
-
-  signal(SIGEVT, sh_input);
-  ESetSignal();
-}
 
 int main(argc,argv)
 int argc;
@@ -121,9 +112,6 @@ char **argv;
 
   EventEnable();
   SetKBCode(0);
-
-  signal(SIGEVT, sh_input);
-  ESetSignal();
   
    while(loop > 0)
    {

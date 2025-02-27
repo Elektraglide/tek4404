@@ -290,11 +290,12 @@ int islogger;
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
-
+#if 1
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
     new_term_settings.sg_prot |= TRANS;
-
+    new_term_settings.sg_prot |= ANY;
+#endif
     stty(fdslave, &new_term_settings);
 
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
@@ -311,10 +312,7 @@ int islogger;
     /* FIXME ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-/*    close(fdslave);    */
-
-    /* Make the current process a new session leader */
-    setsid();
+    close(fdslave);
 
     /* use preferred shell */
     if (getenv("SHELL"))
@@ -589,7 +587,7 @@ void renderstring(line, n, ox, oy)
 register char *line;
 int n,ox,oy;
 {
-  register int j,k,rows,ch;
+  register short j,k,rows,ch;
   register unsigned char *src,*dst;
   
   /* assumes font is fixed 8px and font bitmap stride=1024 and framebuffer stride=1024 */
@@ -840,7 +838,7 @@ int forcedirty;
           if (n > 0)
           {
             line[n] = '\0';
-            if (usecustomblit && !style)
+            if (usecustomblit && !style && n < 64)
             {
               renderstring2(line, n, origin.x, origin.y);
             }
@@ -891,7 +889,7 @@ struct POINT cur;
   SetClip(&win->contentrect);
 
   /* flush any dirty lines before we blit */
-  WindowRender(win, FALSE);
+  WindowRender(win, FALSE); 
   
   bb.srcform = bb.destform = screen;
   bb.destrect.x = win->contentrect.x;
@@ -1142,12 +1140,32 @@ int sig;
   signal(SIGDEAD, cleanup_window);
 }
 
-int sh_input(sig)
+void sh_timer(sig)
 int sig;
 {
-  signal(SIGEVT, sh_input);
+
+  WindowLog("timer signal\012\n");
+  signal(sig, sh_timer);
+  ESetAlarm(EGetTime() + 1000);
+}
+
+void sh_event(sig)
+int sig;
+{
+
+  WindowLog("event signal\012\n");
+  signal(sig, sh_event);
   ESetSignal();
 }
+
+void sh_input(sig)
+int sig;
+{
+
+  WindowLog("input signal\012\n");
+  signal(sig, sh_input);
+}
+
 
 int
 main(argc, argv)
@@ -1217,9 +1235,12 @@ char **argv;
   EventEnable();
   SetKBCode(0);
 
-  ESetSignal();
-  signal(SIGEVT, sh_input);
+/*  ESetSignal();
+  signal(SIGEVT, sh_event); */
 #endif
+
+  /* does SIGINPUT get delivered? */
+/*  signal(SIGINPUT, sh_input);  */
 
   /* window chain */
   wintopmost = NULL;
@@ -1353,12 +1374,21 @@ dummysock = fdtty;
 
               WindowLog("Sent SIGINT to window%d\012\n", wintopmost - allwindows);
           }
+
           if (inputbuffer[0] == 0x04)
           {
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
               kill(wintopmost->pid, SIGHUP);
 
               WindowLog("Sent SIGHUP to window%d\012\n", wintopmost - allwindows);
+          }
+
+          if (inputbuffer[0] == 0x1c)
+          {
+              control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
+              kill(wintopmost->pid, SIGQUIT);
+
+              WindowLog("Sent SIGQUIT to window%d\012\n", wintopmost - allwindows);
           }
 
 /* we dont know whether we are in RAW mode.. */
