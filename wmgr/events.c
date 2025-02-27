@@ -2,7 +2,14 @@
 #include <signal.h>
 #include <graphics.h>
 
-unsigned char shifted[128] = 
+#ifdef __clang__
+
+#include <stdarg.h>
+#include "uniflexshim.h"
+
+#endif
+
+unsigned char shifted[128] =
 {
   '\0','\0','\0','\0','\0','\0','\0','\0',
   '\0','\0','\0','\0','\0','\0','\0','\0',

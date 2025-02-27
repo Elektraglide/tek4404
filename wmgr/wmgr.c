@@ -35,6 +35,7 @@ void setsid() {}
 #endif
 
 #include "vtemu.h"
+#include "events.h"
 #include "win.h"
 
 extern int rand();
@@ -44,6 +45,7 @@ extern int system_control(); /* arg=1 does something, arg=2 makes controlling te
 
 #ifdef __clang__
 #define POLLINGPTYx
+#define USE_EVENTS		
 #define USE_TTYREADERx
 #define POLLINGINPx
 #else
@@ -299,8 +301,10 @@ int islogger;
     dup2(fdslave, 1); /* PTY becomes standard output (1) */
     dup2(fdslave, 2); /* PTY becomes standard error (2) */
 
+#ifndef __clang__
     /* calls pty_make_controlling_terminal */
     system_control(2);
+#endif
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
     /* (Mandatory for programs like the shell to make them manage correctly their outputs) */
@@ -401,9 +405,11 @@ Window *win;
     {
       if (awin == win)
       {
+        /* unlink from current position in list */
         if (prevwin)
           prevwin->next = win->next;
 
+        /* append to list */
         win->next = wintopmost;
         wintopmost = win;
         break;
@@ -1028,11 +1034,6 @@ int wid;
   struct RECT oldrect;
   int i;
 
-  if (wid == 0)
-  {
-      WindowLog("trying to destroy Window 0\012\n");
-      return;
-  }
   /* unlink it */
   prevwin = NULL;
   awin = wintopmost;
@@ -1042,8 +1043,6 @@ int wid;
     {
       if (prevwin)
         prevwin->next = allwindows[wid].next;
-      else
-        wintopmost = allwindows[wid].next;
       
       /* continue walking so we determine last/bottom window */
     }
@@ -1055,6 +1054,10 @@ int wid;
   oldrect = allwindows[wid].windowrect;
   
   /* reclaim a window slot */
+  
+  /* is top window being destroyed? */
+  if (wintopmost == &allwindows[wid])
+    wintopmost = wintopmost->next;
 
   /* update refs TO last element (which is about to be moved) */
   if (prevwin->next == &allwindows[numwindows-1])
@@ -1064,16 +1067,19 @@ int wid;
   if (allwindows[numwindows-1].next == &allwindows[wid])
     allwindows[numwindows-1].next = allwindows[wid].next;
 
-  /* update top window */
+  /* update top window ref to last element (which is about to be moved) */
   if (wintopmost == &allwindows[numwindows-1])
     wintopmost = &allwindows[wid];
 
   /* move last element to fill gap of deleted window */
   memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
   numwindows--;
+  
+  if (!wintopmost || numwindows < wid)
+    wintopmost = &allwindows[numwindows-1];
 
   if (numwindows > 0)
-    WindowTop(&allwindows[numwindows-1]);
+    WindowTop(wintopmost);
 
 	SetClip(&oldrect);
   Paint(wintopmost, &oldrect, FORCEPAINT);
@@ -1149,7 +1155,9 @@ int argc;
 char **argv;
 {
   int n,i,j,k,rc,dummysock;
+#ifdef POLLINGINP
   struct in_sockaddr serv_addr;
+#endif
   fd_set fd_in;
   char ch, *name, inputbuffer[4096];
   struct timeval timeout;
@@ -1257,7 +1265,7 @@ char **argv;
 
 dummysock = fdtty;
 
-#ifndef USE_TTYREADER
+#ifdef POLLINGINP
   /* this is just so we can get a ms timeout! */
   dummysock = socket(AF_INET, SOCK_STREAM, 0);
   serv_addr.sin_family = AF_INET;
@@ -1268,6 +1276,8 @@ dummysock = fdtty;
 
 	/* we want this to be snappy */
 	nice(-32);
+
+  WindowLog("Window Manager started as pid%d\012\n", getpid());
 
   /* mainloop */
   last_read = 0;
@@ -1307,7 +1317,6 @@ dummysock = fdtty;
     else
     {
       /* allow reading events */
-  
     }
   }
   else
@@ -1315,6 +1324,9 @@ dummysock = fdtty;
 	rc = 1;
 #endif
 #ifdef POLLINGINP
+	rc = 1;
+#endif
+#ifdef USE_EVENTS
 	rc = 1;
 #endif
 
