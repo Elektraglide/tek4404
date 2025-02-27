@@ -26,6 +26,9 @@ int eventsenable,keyboardenable;
 int mbuttons,mousex,mousey;
 int pandisc;
 
+
+#define DEBUGCOLORSxx
+
 #pragma pack(push, 1)
 
 struct bmpheader {
@@ -404,6 +407,13 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHea
   cr.y = bbcom->cliprect.y;
   cr.w = bbcom->cliprect.w;
   cr.h = bbcom->cliprect.h;
+
+#if 0
+	cr.x = 0;
+	cr.y = 0;
+	cr.w = 1024;
+	cr.h = 1024;
+#endif
   SDL_RenderSetClipRect(renderer, &cr);
 
   // any !source needs to use inverted fontmap
@@ -416,7 +426,14 @@ int StringDrawX(char *ch, struct POINT *loc, struct BBCOM *bbcom, struct FontHea
   SDL_BlendMode bm = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_SRC_COLOR,SDL_BLENDFACTOR_DST_COLOR, SDL_BLENDOPERATION_MINIMUM,
   SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDFACTOR_ZERO, SDL_BLENDOPERATION_ADD);
   SDL_SetTextureBlendMode(font8x16, bm);
-  
+
+#ifdef DEBUGCOLORS
+{
+static int c = 0;
+static int rgb[][3] = {{255,255,0},{0,255,255},{0,255,0},{255,0,255}};
+SDL_SetSurfaceColorMod( framebuffer, rgb[c][0],rgb[c][1],rgb[c][2]); c++; c %= 4;
+}
+#endif
 
   while((c = *ch++) != '\0')
   {
@@ -457,11 +474,17 @@ int BitBlt(struct BBCOM *bbcom)
   cr.w = bbcom->cliprect.w;
   cr.h = bbcom->cliprect.h;
   SDL_RenderSetClipRect(renderer, &cr);
-//SDL_SetSurfaceColorMod( framebuffer, 255,0,0);
 
+#ifdef DEBUGCOLORS
+{
+static int c = 0;
+static int rgb[][3] = {{255,255,0},{0,255,255}};
+SDL_SetSurfaceColorMod( framebuffer, rgb[c][0],rgb[c][1],rgb[c][2]); c++; c %= 2;
+}
+#endif
   SDL_LowerBlit(framebuffer, &src, framebuffer, &dst);
 
-SDL_SetSurfaceColorMod( framebuffer, 255,255,255);
+//SDL_SetSurfaceColorMod( framebuffer, 255,255,255);
 
   updatewin(&dst);
 
@@ -471,11 +494,6 @@ int SetKBCode(int val)
 {
   keyboardenable = (val == 0);
   return 0;
-}
-
-int EGetCount()
-{
-  return (ewrite - eread + 32) % 32;
 }
 
 int specialkey(SDL_Scancode key, int updown)
@@ -502,22 +520,8 @@ int specialkey(SDL_Scancode key, int updown)
   return 0;
 }
 
-unsigned long EGetNext()
+int EGetCount()
 {
-  unsigned long rc;
-  
-  /* process pandisc control */
-  if (pandisc & 1)
-    if (vport.y >= 4) vport.y -= 16;
-  if (pandisc & 2)
-    if (vport.y < ScrHeight-ViewHeight) vport.y += 16;
-  if (pandisc & 4)
-    if (vport.x >= 4) vport.x -= 16;
-  if (pandisc & 8)
-    if (vport.x < ScrWidth-ViewWidth) vport.x += 16;
-  if (pandisc)
-    updatewin(&vport);
-
   SDL_Event event;
   while (SDL_PollEvent(&event))
   {
@@ -752,6 +756,27 @@ unsigned long EGetNext()
 	  	  break;
 	  }
   }
+
+  return (ewrite - eread + 32) % 32;
+}
+
+unsigned long EGetNext()
+{
+  unsigned long rc;
+  
+  /* process pandisc control */
+  if (pandisc & 1)
+    if (vport.y >= 4) vport.y -= 16;
+  if (pandisc & 2)
+    if (vport.y < ScrHeight-ViewHeight) vport.y += 16;
+  if (pandisc & 4)
+    if (vport.x >= 4) vport.x -= 16;
+  if (pandisc & 8)
+    if (vport.x < ScrWidth-ViewWidth) vport.x += 16;
+  if (pandisc)
+    updatewin(&vport);
+
+
 
   rc = 0;
   if (EGetCount() > 0)
@@ -997,10 +1022,10 @@ int RectBoxDraw(struct RECT *rect, int width)
 {
   SDL_Rect r;
   
-  r.x = rect->x;
-  r.y = rect->y;
-  r.w = rect->w;
-  r.h = rect->h;
+  r.x = rect->x - 1;
+  r.y = rect->y - 1;
+  r.w = rect->w + 2;
+  r.h = rect->h + 2;
   
   SDL_SetRenderDrawColor(renderer, 255,255,255,255);
   for (int i=0; i<width; i++)
@@ -1021,10 +1046,10 @@ int RectBoxDrawX(struct RECT *rect, int width, struct BBCOM *bbcom)
 {
   SDL_Rect r,cr;
   
-  r.x = rect->x;
-  r.y = rect->y;
-  r.w = rect->w;
-  r.h = rect->h;
+  r.x = rect->x - 1;
+  r.y = rect->y - 1;
+  r.w = rect->w + 2;
+  r.h = rect->h + 2;
   
   cr.x = bbcom->cliprect.x;
   cr.y = bbcom->cliprect.y;
@@ -1096,6 +1121,9 @@ int RectDrawX(struct RECT *rect, struct BBCOM *bbcom)
   SDL_RenderSetClipRect(renderer, &cr);
 
   halftone2color(bbcom->halftoneform);
+  
+  SDL_SetRenderDrawBlendMode(renderer, (bbcom->rule == bbSxorD) ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+  
   SDL_RenderFillRect(renderer, &r);
   updatewin(&r);
 
@@ -1153,6 +1181,7 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
     r1.x = rect2->x;
   }
 
+	if (r1.w > 0 && r1.h > 0)
   if (r1.y < rect2->y)
   {
     quadrect->region[i].x = r1.x;
@@ -1165,6 +1194,7 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
     r1.y = rect2->y;
   }
 
+	if (r1.w > 0 && r1.h > 0)
   if (r1.x+r1.w > rect2->x+rect2->w)
   {
     quadrect->region[i].x = max(r1.x, rect2->x+rect2->w);
@@ -1176,6 +1206,7 @@ int RectAreasOutside(struct RECT *rect1,struct RECT *rect2, struct QUADRECT *qua
     r1.w -= (r1.x+r1.w) - (rect2->x+rect2->w);
   }
 
+	if (r1.w > 0 && r1.h > 0)
   if (r1.y+r1.h > rect2->y+rect2->h)
   {
     quadrect->region[i].x = r1.x;
@@ -1226,6 +1257,16 @@ int RectMerge(struct RECT *rect1,struct RECT *rect2,struct RECT *rect3)
   return 0;
 }
 
+struct MENU *MenuCreateX()
+{
+	return NULL;
+}
+
+int MenuSelect()
+{
+	return 0;
+}
+
 void ExitGraphics()
 {
 
@@ -1233,16 +1274,21 @@ void ExitGraphics()
 
 struct FORM *InitGraphics(int mode)
 {
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+  SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "1");
+ 
+
   if (SDL_Init(SDL_INIT_VIDEO) < 0)
   {
 	  printf("Couldn't initialize SDL: %s\n", SDL_GetError());
 	  exit(1);
   }
 
+
   ScrWidth = 1024;
   ScrHeight = 1024;
-  ViewWidth = 640;
-  ViewHeight = 480;
+  ViewWidth = 1024;
+  ViewHeight = 1024;
 
   window = SDL_CreateWindow("Tek4404", 10, 10, ViewWidth, ViewHeight, SDL_WINDOW_SHOWN);
   if (!window)
@@ -1250,7 +1296,7 @@ struct FORM *InitGraphics(int mode)
 	  printf("Failed to open %d x %d window: %s\n", ViewWidth, ViewHeight, SDL_GetError());
 	  exit(2);
   }
- 
+  
   /* CPU pixel buffer */
   framebuffer = SDL_CreateRGBSurfaceWithFormat(0, ScrWidth, ScrHeight, 32, SDL_PIXELFORMAT_BGR888);
 

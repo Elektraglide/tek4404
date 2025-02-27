@@ -1,5 +1,11 @@
+typedef unsigned char u_char;
+typedef unsigned short u_short;
+typedef unsigned int u_int;
+typedef unsigned int caddr_t;
+
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/termios.h>
 #include <netinet/in.h>
@@ -21,8 +27,37 @@ extern void *malloc();
 extern void free();
 extern void exit();
 
+extern int strcmp();
+extern char *strerror(int errnum);
+extern int errno;
+
+#undef gethostname
+static char *nget_str(char *name)
+{
+	static char buffer[64];
+	
+  if (!strcmp(name, "cur_tty"))
+    return ttyname(fileno(stdin));
+		
+  if (!strcmp(name, "console"))
+    return "/dev/console";
+
+  if (!strcmp(name, "my_name"))
+  {
+  	gethostname(buffer, sizeof(buffer));
+    return buffer;
+	}
+
+  return "unknown";
+}
+
+static char *nserror()
+{
+  return strerror(errno);
+}
+
 // implementations of Uniflex calls
-int create_pty(int *ptfd)
+static int create_pty(int *ptfd)
 {
 
   // NB master,slave is reverse of slave,master on Tek
@@ -31,7 +66,7 @@ int create_pty(int *ptfd)
 
 #ifdef sgtty_h
 
-int control_pty(int fd, int code, int cval)
+static int control_pty(int fd, int code, int cval)
 {
   int i;
   
@@ -99,7 +134,7 @@ int control_pty(int fd, int code, int cval)
 }
 #endif
 
-char *phys(int code)
+static char *phys(int code)
 {
   switch(code)
     {
@@ -126,8 +161,8 @@ extern void RestoreDisplayState(struct DISPSTATE *state);
 extern int BbcomDefault(struct BBCOM *bbcom);
 
 extern void ClearScreen();
-extern void CursorVisible(int mode) {};
-extern void CursorTrack(int mode) {};
+static void CursorVisible(int mode) {};
+static void CursorTrack(int mode) {};
 
 extern int ReleaseCursor();
 extern int ProtectCursor(struct RECT *rl,struct RECT *r2);
@@ -207,6 +242,8 @@ extern int RectIntersect(struct RECT *rect1,struct RECT *rect2,struct RECT *rect
 extern int RectIntersects(struct RECT *rect1, struct RECT *rect2);
 
 extern int RectMerge(struct RECT *rect1,struct RECT *rect2,struct RECT *rect3);
+
+extern int MenuSelect();
 
 extern void ExitGraphics();
 
