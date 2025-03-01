@@ -1153,7 +1153,7 @@ void sh_event(sig)
 int sig;
 {
 
-  WindowLog("event signal\012\n");
+  /* solely so select is broken into to give snappier response */
   signal(sig, sh_event);
   ESetSignal();
 }
@@ -1173,9 +1173,7 @@ int argc;
 char **argv;
 {
   int n,i,j,k,rc,dummysock;
-#ifdef POLLINGINP
   struct in_sockaddr serv_addr;
-#endif
   fd_set fd_in;
   char ch, *name, inputbuffer[4096];
   struct timeval timeout;
@@ -1235,8 +1233,8 @@ char **argv;
   EventEnable();
   SetKBCode(0);
 
-/*  ESetSignal();
-  signal(SIGEVT, sh_event); */
+  ESetSignal();
+  signal(SIGEVT, sh_event); 
 #endif
 
   /* does SIGINPUT get delivered? */
@@ -1286,7 +1284,7 @@ char **argv;
 
 dummysock = fdtty;
 
-#ifdef POLLINGINP
+#ifndef USE_TTYREADER
   /* this is just so we can get a ms timeout! */
   dummysock = socket(AF_INET, SOCK_STREAM, 0);
   serv_addr.sin_family = AF_INET;
@@ -1348,7 +1346,7 @@ dummysock = fdtty;
 	rc = 1;
 #endif
 #ifdef USE_EVENTS
-	rc = 1;
+    rc = 1;
 #endif
 
   if (rc > 0)
