@@ -121,6 +121,23 @@ register int count;
 	}
 }
 
+void asmxform(dst, src, mat, count)
+register vec3* dst;
+register vec3* src;
+mat33* mat;
+register int count;
+{
+
+	while (count--)
+	{
+		dst->x.iv = asmfladd(asmfladd(asmflmul(src->x.iv, mat->row0.x.iv), asmflmul(src->y.iv, mat->row1.x.iv)), asmflmul(src->z.iv, mat->row2.x.iv));
+		dst->y.iv = asmfladd(asmfladd(asmflmul(src->x.iv, mat->row0.y.iv), asmflmul(src->y.iv, mat->row1.y.iv)), asmflmul(src->z.iv, mat->row2.y.iv));
+		dst->z.iv = asmfladd(asmfladd(asmflmul(src->x.iv, mat->row0.z.iv), asmflmul(src->y, mat->row1.z.iv)), asmflmul(src->z.iv, mat->row2.z.iv));
+		src++;
+		dst++;
+	}
+}
+
 void setup()
 {
 	int i;
@@ -184,6 +201,12 @@ char **argv;
    printf("Starting 8192 mat33 transforms\n");
    t1 = time(NULL);
    xform(dst, src, &mat, 8192);
+   t2 = time(NULL);
+   printf("FINISHED %d\n", t2 - t1);
+
+   printf("Starting 8192 mat33 asm transforms\n");
+   t1 = time(NULL);
+   asmxform(dst, src, &mat, 8192);
    t2 = time(NULL);
    printf("FINISHED %d\n", t2 - t1);
 
