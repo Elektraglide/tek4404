@@ -110,7 +110,7 @@ int *sockinput;
   }
   else
   {
-	  signal(SIGDEAD, SIG_DFL);
+	signal(SIGDEAD, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     signal(SIGINT, SIG_IGN);
   
@@ -290,7 +290,7 @@ int islogger;
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
-#if 1
+#if 0
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
     new_term_settings.sg_prot |= TRANS;
@@ -1199,7 +1199,7 @@ char **argv;
 
   SaveDisplayState(&ds);
 
-  font = FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed7.font");
+  font = FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed6.font");
   fprintf(stderr, "name: %s: face: %s\n", font->name, font->face);
   fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
   fprintf(stderr, "fixed: %d width:%d height:%d\n", 
@@ -1233,8 +1233,8 @@ char **argv;
   EventEnable();
   SetKBCode(0);
 
-  ESetSignal();
   signal(SIGEVT, sh_event); 
+  ESetSignal();
 #endif
 
   /* does SIGINPUT get delivered? */
@@ -1318,7 +1318,7 @@ dummysock = fdtty;
 
     /* 20Hz updating */
     timeout.tv_sec = 0;
-    timeout.tv_usec = 25000;
+    timeout.tv_usec = 250000;
     if (last_read > 0)
     {
       timeout.tv_usec = 50000;
