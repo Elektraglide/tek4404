@@ -35,7 +35,12 @@ extern char *basename();
 #define TEXTBASE 0x0000
 #define PAGESZ 4096
 
-char rcs[] = "rcat v1.0 " __DATE__;
+/* Xfer entrypoint */
+#define ENTRYPOINT "Start"
+#define ENTRYPOINTLEN 5
+
+/* should be the date the concat was created... */
+char rcs[] = "rcat v1.0 " __DATE__ " " __TIME__ "\n";
 
 /* cmd line options */
 int verbose = 0;
@@ -141,7 +146,7 @@ int finaloffset;
 	
 	if (len > 0)
 	{
-		if (verbose==2) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
+		if (verbose==2) fprintf(stderr, "%.*s: symbol from %s\n", len, name, inputs[unit].srcfile);
 	
 		/* generate a hash for this string */
 		/* Larson hash */
@@ -222,7 +227,7 @@ int len;
 typedef struct
 {
 	int members[MAXINPUTS];
-	int last;
+	int lastentry;
 } set;
 
 
@@ -231,13 +236,13 @@ set *results;
 int unit;
 {
 	int i;
-	for(i=0; i<results->last; i++)
+	for(i=0; i<results->lastentry; i++)
 	{
 		if (results->members[i] == unit)
 			return 0;
 	}
-	results->members[results->last] = unit;
-	results->last++;
+	results->members[results->lastentry] = unit;
+	results->lastentry++;
 	return 1;
 }
 
@@ -259,13 +264,13 @@ int len;
 		}
 
 		/* do we have it? */
-		for(i=0; i<missing->last; i++)
+		for(i=0; i<missing->lastentry; i++)
 		{
 			if (missing->members[i] == hval)
 				return 0;
 		}
-		missing->members[missing->last] = hval;
-		missing->last++;
+		missing->members[missing->lastentry] = hval;
+		missing->lastentry++;
 		return 1;
 }
 
@@ -465,7 +470,7 @@ set missing;
 	if (verbose) fprintf(stderr, "processing %d compile units\n", inputcount);
 
 	/* one off initialization */
-	missing.last = 0;
+	missing.lastentry = 0;
 	buckets[0].symbols = NULL;
 
 	/* gather all symbols so we can see what is actually referenced */
@@ -499,25 +504,25 @@ set missing;
 	symboladd(0, "END", 3, SEGBSS, 0);
 	if (verbose) fprintf(stderr, "found %d unique symbols\n", symbolcount());
 	
-	/* if we are performing full link, then walk dependencies to determine working set */
+	/* if this is a full link, then walk dependencies to determine working set */
 	if (justcat == 0)
 	{
 		/* recursively visit nodes from Start */
-		rootsymbol = symbolfind("Start",5);
+		rootsymbol = symbolfind(ENTRYPOINT,ENTRYPOINTLEN);
 		if (rootsymbol)
 		{
 			set depends;
 			
-			depends.last = 0;
+			depends.lastentry = 0;
 			gatherdependence(&depends, rootsymbol->srcunit, 0);
-			for(i=0; i<depends.last; i++)
+			for(i=0; i<depends.lastentry; i++)
 			{
 				inputs[depends.members[i]].used++;
 			}
 		}
 		else
 		{
-			fprintf(stderr, "can't find Start entrypoint\n");
+			fprintf(stderr, "can't find '%s' entrypoint\n",ENTRYPOINT);
 			return -1;
 		}
 		
@@ -547,11 +552,6 @@ set missing;
 	ph.configuration = htons(4);
 	ph.rcssize = htons(strlen(rcs));
 	ph.namesize = htons(strlen(outputname));
-	if (justcat == 0)
-	{
-		ph.flags = htons(0x8040);
-		ph.xferaddress = htonl(TEXTBASE);
-	}
 	write(out_fd, &ph, sizeof(ph));
 
 	/* concat text sections and assign final layout */
@@ -565,20 +565,19 @@ set missing;
 		PH *header = (PH *)inputs[i].content;
 		int roundedsize = (ntohl(header->textsize) + 15) & -16;		/* round to 16-byte boundary */
 		lseek(out_fd, roundedsize, SEEK_CUR);
-		inputs[i].textaddr = ntohl(ph.textstart) + ntohl(ph.textsize);
+		inputs[i].textaddr = textstart + ntohl(ph.textsize);
 	
 		ph.textsize = htonl(ntohl(ph.textsize) + roundedsize);
 	}
 	
 	/* concat data sections */
-	datastart = (ntohl(ph.textstart) + ntohl(ph.textsize) + (PAGESZ-1)) & -PAGESZ;
+	datastart = ntohl(ph.textsize);
 	ph.datastart = htonl(datastart);
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
 		int roundedsize = (ntohl(header->datasize) + 3) & -4;		/* round to 4-byte boundary */
 		lseek(out_fd, roundedsize, SEEK_CUR);
-
 		inputs[i].dataaddr = datastart + ntohl(ph.datasize);
 	
 		ph.datasize = htonl(ntohl(ph.datasize) + roundedsize);
@@ -590,7 +589,6 @@ set missing;
 	{
 		PH *header = (PH *)inputs[i].content;
 		int roundedsize = (ntohl(header->bsssize) + 3) & -4;		/* round to 4-byte boundary */
-		
 		inputs[i].bssaddr = bssstart + ntohl(ph.bsssize);
 	
 		ph.bsssize = htonl(ntohl(ph.bsssize) + roundedsize);
@@ -599,7 +597,7 @@ set missing;
 	/* if this is a full link, we want addresses, not relative offsets */
 	if (justcat == 0)
 	{
-		if (verbose) fprintf(stderr, "Generating addresses\n");
+		if (verbose) fprintf(stderr, "BROKEN Generating addresses\n");
 		textstart = 0;
 		datastart = 0;
 		bssstart = 0;
@@ -649,6 +647,19 @@ set missing;
 	symboladd(0, "EDATA", 5, SEGDATA, ntohl(ph.datasize));
 	symboladd(0, "END", 3, SEGBSS, ntohl(ph.bsssize));
 	if (verbose) fprintf(stderr, "using %d unique symbols\n", symbolcount());
+
+  /* if this is a full link, we want a xfer address */
+	if (justcat == 0)
+	{
+		ph.flags = htons(0x8040);
+		ph.xferaddress = htonl(TEXTBASE);
+		rootsymbol = symbolfind(ENTRYPOINT,ENTRYPOINTLEN);
+		if (rootsymbol)
+		{
+			ph.xferaddress = htonl(rootsymbol->finaloffset);
+		}
+
+	}
 
 	/* rebase reloc records and resolve external symbols */
 	n = 0;
@@ -734,13 +745,15 @@ set missing;
 				while (*rd)
 					rd++;
 			}
+
+   			n++;
+   
 		}
 
 		if (justcat)
 		{
 			write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize) + ntohl(header->datasize), ntohl(header->relocsize));
 			ph.relocsize = htonl(ntohl(ph.relocsize) + ntohl(header->relocsize));
-			n++;
 		}
 	}
 	if (verbose) fprintf(stderr, "%d relocation records\n", n);
@@ -749,13 +762,16 @@ set missing;
 	n = 0;
 	len = 0;
 
-#if 0
-	/* emit standard symbols */
-	len += symbolemit(out_fd, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
-	len += symbolemit(out_fd, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
-	len += symbolemit(out_fd, "EDATA", 5, SEGDATA, ntohl(ph.datasize));
-	len += symbolemit(out_fd, "END", 3, SEGBSS, ntohl(ph.bsssize));
-#endif
+  /* if this is a full link, we want standard symbols */
+	if (justcat == 0)
+	if (stripsymbols == 0)
+  {
+    /* emit standard symbols */
+    len += symbolemit(out_fd, "$$syscall", 9, SEGABS, 0x00004e4f);		/* this is an ABS symbol in system.boot,  available elsewhere (systat)? */
+    len += symbolemit(out_fd, "ETEXT", 5, SEGTEXT, ntohl(ph.textsize));
+    len += symbolemit(out_fd, "EDATA", 5, SEGDATA, ntohl(ph.datasize));
+    len += symbolemit(out_fd, "END", 3, SEGBSS, ntohl(ph.bsssize));
+  }
 
 	symbolclear();
 	if (stripsymbols == 0)
@@ -800,10 +816,12 @@ set missing;
 		}
 	}
 	ph.symbolsize = htonl(len);
-	if (verbose) fprintf(stderr, "%d symbols\n", n);
-	if (missing.last)
-		fprintf(stderr, "**** %d missing (unresolved) symbols ****\n", missing.last);
-
+	fprintf(stderr, "%d symbols ", n);
+	if (missing.lastentry)
+		fprintf(stderr, "*** %d missing symbols (unresolved)\n", missing.lastentry);
+  else
+    fprintf(stderr,"\n");
+    
 	/* RCS section */
 	write(out_fd, rcs, strlen(rcs));
 	
@@ -814,12 +832,14 @@ set missing;
 	lseek(out_fd, 0, SEEK_SET);
 	write(out_fd, &ph, sizeof(ph));
 
+  fprintf(stderr,"\nRelocated compile units\n");
+
 	/* write edited text (accounting for rounding) */
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
 		int roundedsize = (ntohl(header->textsize) + 15) & -16;		/* round to 16-byte boundary */
-		fprintf(stderr,"t%d: offset=%8.8x %8.8x %8.8x\n", i, lseek(out_fd,0,SEEK_CUR), ntohl(header->textsize), roundedsize );
+		fprintf(stderr,"text%3.3d: %16s offset=%8.8x %8.8x (%8.8x)\n", i, inputs[i].srcfile, lseek(out_fd,0,SEEK_CUR), ntohl(header->textsize), roundedsize );
 		write(out_fd, inputs[i].content + sizeof(PH), roundedsize);
 	}
 	/* write edited datas (accounting for rounding) */
@@ -827,7 +847,7 @@ set missing;
 	{
 		PH *header = (PH *)inputs[i].content;
 		int roundedsize = (ntohl(header->datasize) + 3) & -4;		/* round to 4-byte boundary */
-		fprintf(stderr,"d%d: offset=%8.8x %8.8x %8.8x\n", i, lseek(out_fd,0,SEEK_CUR), ntohl(header->datasize), roundedsize );
+		fprintf(stderr,"data%3.3d: %16s offset=%8.8x %8.8x (%8.8x)\n", i, inputs[i].srcfile, lseek(out_fd,0,SEEK_CUR), ntohl(header->datasize), roundedsize );
 
 		write(out_fd, inputs[i].content + sizeof(PH) + ntohl(header->textsize), roundedsize);
 	}
@@ -841,12 +861,12 @@ set missing;
 		fprintf(stderr, "datastart = %8.8x\n", ntohl(ph.datastart));
 		fprintf(stderr, "datasize  = %8.8x\n", ntohl(ph.datasize));
 		fprintf(stderr, "bsssize   = %8.8x\n", ntohl(ph.bsssize));
+		fprintf(stderr, "xferaddr  = %8.8x\n", ntohl(ph.xferaddress));
 		fprintf(stderr, "relocsize = %8.8x\n", ntohl(ph.relocsize));
 		fprintf(stderr, "symbolsize= %8.8x\n", ntohl(ph.symbolsize));
-		fprintf(stderr, "rcssize  = %8.8x\n", ntohs(ph.rcssize));
+		fprintf(stderr, "rcssize   = %8.8x\n", ntohs(ph.rcssize));
 		fprintf(stderr, "namesize  = %8.8x\n", ntohs(ph.namesize));
 	}
 
   return 0;
 }
-
