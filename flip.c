@@ -28,6 +28,7 @@ struct FontHeader *font;
 struct FORM *screen;
 struct BBCOM bb;
 int pindex;
+int scrolldir = 1;
 struct POINT page;
 unsigned long frametime;
 unsigned int framenum;
@@ -57,10 +58,10 @@ void flip()
   page.y ^= 512;
   pindex ^= 1;
 
-#if 0
+#if 1
   /* horizontal scrolling */
-  page.x++;
-  if (page.x > 384) page.x = 0;
+  page.x += scrolldir;
+  if (page.x < 1 || page.x > 384) scrolldir = -scrolldir;
 #endif
 }
 
@@ -193,7 +194,8 @@ struct FORM *makeform()
   struct POINT origin,p1,p2;
   struct RECT r;
   struct FORM *form;
-   
+  int i;
+     
    form = FormCreate(256,128);
    
    if (font && form)
@@ -202,7 +204,7 @@ struct FORM *makeform()
      bb.destform = form;
      bb.destrect.x = 0;
      bb.destrect.y = 0;
-     bb.destrect.w = 256;
+     bb.destrect.w = 1024;
      bb.destrect.h = 1024;
      bb.rule = bbSorD;
      bb.halftoneform = NULL;
@@ -211,16 +213,24 @@ struct FORM *makeform()
      bb.cliprect.w = form->w;
      bb.cliprect.h = form->h;
 
-     origin.x = 0;
-     origin.y = font->maps->line;
-     StringDrawX("Tektronix\n  4404", &origin, &bb, font);
+     i = 16;
+     while(--i >= 0)
+     {
+       if (i == 0) bb.rule = bbSnandD;
+       
+       origin.x = 0 + i;
+       origin.y = font->maps->line + i;
+       StringDrawX("Tektronix\n  4404", &origin, &bb, font);
+     }
 
+
+     bb.rule = bbSorD;
      bb.halftoneform = &GrayMask;
      bb.srcform = NULL;
      r.x = r.y = 4;
-     r.w = 120;
-     r.h = 4;
-     RectDrawX(&r,&bb);
+     r.w = 252-8;
+     r.h = 124-8;
+     RectBoxDrawX(&r,4, &bb);
    }
 
    return form;
@@ -372,7 +382,7 @@ char *argv[];
 /*     drawsprite(&thesprite2);   */
 
      /* show draw time */
-     waiting >>= 8;
+     waiting >>= 4;
      bb.srcform = NULL;
      bb.rule = bbS;
      r.x = page.x;
@@ -384,7 +394,7 @@ char *argv[];
      {
          bb.rule = bbZero;
          r.x += r.w;
-         r.w = oldwaiting[pindex] - waiting;
+         r.w = 2 + oldwaiting[pindex] - waiting;
          RectDrawX(&r, &bb);
      }
      oldwaiting[pindex] = waiting;
@@ -394,11 +404,11 @@ char *argv[];
      currpage = framenum;
      while (currpage == framenum)
          waiting++;
+     currpage = framenum;
 
      flip();
 
      /* ensure 1 vblank has happened */
-     currpage = framenum;
      while (currpage == framenum);
 
    }
