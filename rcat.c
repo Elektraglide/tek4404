@@ -146,7 +146,7 @@ int finaloffset;
 	
 	if (len > 0)
 	{
-		if (verbose) fprintf(stderr, "%.*s: symbol for %s\n", len, name, inputs[unit].srcfile);
+		if (verbose==2) fprintf(stderr, "%.*s: symbol from %s\n", len, name, inputs[unit].srcfile);
 	
 		/* generate a hash for this string */
 		/* Larson hash */
@@ -420,7 +420,7 @@ set missing;
 				while(1)
 				{
 					n = read(fd, &header, sizeof(header));
-					/* no more units..*/
+					/* no more units.. */
 					if (n != sizeof(header))
 						break;
 
@@ -544,7 +544,7 @@ set missing;
 	if (verbose) fprintf(stderr, "linking %d compile units\n", inputcount);
 #endif
 
-	// setup header type
+	/* setup header type based on if this a simple concat or a full link */
 	memset(&ph, 0, sizeof(ph));
 	ph.magic[0] = justcat ? 0x05 : 0x04;
 	ph.source = htons(2);
@@ -662,7 +662,7 @@ set missing;
 	{
 		PH *header = (PH *)inputs[i].content;
 
-		// update every reloc record
+		/* update every reloc record */
 		char *rd = inputs[i].relocs;
 		char *endrd = rd + ntohl(header->relocsize);
 		while(rd < endrd)
