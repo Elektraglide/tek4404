@@ -3,9 +3,11 @@
 #include <graphics.h>
 #include <signal.h>
 
+#ifndef unix
 #info flipdemo
 #info Version 1.0
 #tstmp
+#endif
 
 #define INT2FIX(A)  ((A)<<16)
 #define FIX2INT(A)  ((A)>>16)
@@ -55,7 +57,7 @@ void flip()
   page.y ^= 512;
   pindex ^= 1;
 
-#if 1
+#if 0
   /* horizontal scrolling */
   page.x++;
   if (page.x > 384) page.x = 0;
@@ -77,8 +79,38 @@ int sig;
 void restoresprite(asprite)
 sprite *asprite;
 {
+#if 1
+    register unsigned long* dst = ((char *)screen->addr) + 
+    (asprite->oldy[pindex] << 7) + 
+    ((asprite->oldx[pindex] & 0xffe0) >> 3);
+    
+    register unsigned long* src = asprite->back[pindex]->addr;
+    register unsigned short i;
+
+  if (asprite->oldx[pindex] < 0)
+    return;
 
     /* restore previous */
+
+    i = 128;
+    while (i--)
+    {
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        dst[3] = src[3];
+        dst[4] = src[4];
+        dst[5] = src[5];
+        dst[6] = src[6];
+        dst[7] = src[7];
+        dst[8] = src[8];
+
+        dst += 32;
+        src += 9;
+    }
+#endif
+
+#if 0
     bb.srcform = asprite->back[pindex];
     bb.srcpoint.x = 0;
     bb.srcpoint.y = 0;
@@ -89,16 +121,44 @@ sprite *asprite;
     bb.destrect.h = asprite->form->h;
  	bb.rule = bbS;
 	BitBlt(&bb);
+#endif
 }
 
 void savesprite(asprite)
 sprite *asprite;
 {
-
     /* save under */
+    int sx = FIX2INT(asprite->x);
+    int sy = FIX2INT(asprite->y) + (page.y);
+
+#if 1
+    register unsigned long* dst = asprite->back[pindex]->addr;
+    register unsigned long* src = ((char *)screen->addr) + 
+    (sy << 7) + 
+    ((sx & 0xffe0) >> 3);
+    register unsigned short i;
+
+    i = 128;
+    while (i--)
+    {
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        dst[3] = src[3];
+        dst[4] = src[4];
+        dst[5] = src[5];
+        dst[6] = src[6];
+        dst[7] = src[7];
+        dst[8] = src[8];
+        dst += 9;
+        src += 32;
+    }
+#endif
+
+#if 0
     bb.srcform = screen;
-    bb.srcpoint.x = FIX2INT(asprite->x);
-    bb.srcpoint.y = FIX2INT(asprite->y) + (page.y);
+    bb.srcpoint.x = sx;
+    bb.srcpoint.y = sy;
     bb.destform = asprite->back[pindex];
 	bb.destrect.x = 0;
     bb.destrect.y = 0;
@@ -106,8 +166,9 @@ sprite *asprite;
     bb.destrect.h = asprite->form->h;
  	bb.rule = bbS;
 	BitBlt(&bb);
-    asprite->oldx[pindex] = bb.srcpoint.x;
-    asprite->oldy[pindex] = bb.srcpoint.y;
+#endif
+    asprite->oldx[pindex] = sx;
+    asprite->oldy[pindex] = sy;
 }
 
 void drawsprite(asprite)
@@ -127,13 +188,13 @@ sprite *asprite;
 
 }
 
-struct FORM *makesprite()
+struct FORM *makeform()
 {
   struct POINT origin,p1,p2;
   struct RECT r;
   struct FORM *form;
    
-   form = FormCreate(128,64);
+   form = FormCreate(256,128);
    
    if (font && form)
    {
@@ -141,7 +202,7 @@ struct FORM *makesprite()
      bb.destform = form;
      bb.destrect.x = 0;
      bb.destrect.y = 0;
-     bb.destrect.w = 1024;
+     bb.destrect.w = 256;
      bb.destrect.h = 1024;
      bb.rule = bbSorD;
      bb.halftoneform = NULL;
@@ -152,7 +213,7 @@ struct FORM *makesprite()
 
      origin.x = 0;
      origin.y = font->maps->line;
-     StringDrawX("Tektronix", &origin, &bb, font);
+     StringDrawX("Tektronix\n  4404", &origin, &bb, font);
 
      bb.halftoneform = &GrayMask;
      bb.srcform = NULL;
@@ -173,15 +234,15 @@ sprite *asprite;
     {
       asprite->x = INT2FIX(page.x); asprite->dx = -asprite->dx;
     }
-    if (asprite->x > INT2FIX(page.x+640-64)) 
+    if (asprite->x > INT2FIX(page.x+640-256)) 
     {
-      asprite->x = INT2FIX(page.x+640-64); asprite->dx = -asprite->dx;
+      asprite->x = INT2FIX(page.x+640-256); asprite->dx = -asprite->dx;
     }
 
     asprite->y += asprite->dy;
-    if (asprite->y > INT2FIX(480-64)) 
+    if (asprite->y > INT2FIX(480-128)) 
     {
-      asprite->y = INT2FIX(480-64);
+      asprite->y = INT2FIX(480-128);
       asprite->dy = -asprite->dy;
     }
 
@@ -189,6 +250,21 @@ sprite *asprite;
     asprite->dy += 8000; 
     if (asprite->dy > INT2FIX(50)) asprite->dy = INT2FIX(50);
 
+}
+
+void makesprite(asprite, dx, dy)
+sprite* asprite;
+fixed dx, dy;
+{
+    asprite->form = makeform();
+    asprite->x = INT2FIX(20);
+    asprite->y = INT2FIX(10);
+    asprite->oldx[0] = asprite->oldx[1] = -1000;
+
+    asprite->back[0] = FormCreate(256+32, 128);
+    asprite->back[1] = FormCreate(256+32, 128);
+    asprite->dx = dx;
+    asprite->dy = dy;
 }
 
 void sh_int(sig)
@@ -218,7 +294,7 @@ char *argv[];
     signal(SIGMILLI, sh_timer);
 
     screen = InitGraphics(FALSE);
-    font = FontOpen("/fonts/PellucidaSans-Serif24.font");
+    font = FontOpen("/fonts/PellucidaSans-Serif36.font");
    fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
@@ -259,27 +335,8 @@ char *argv[];
 
 
    /* make a sprite to use */
-   thesprite.form = makesprite();
-   thesprite.x = INT2FIX(20);
-   thesprite.y = INT2FIX(10);
-   thesprite.oldx[0] = thesprite.oldx[1] = -1000;
-
-   thesprite.back[0] = FormCreate(128,64);
-   thesprite.back[1] = FormCreate(128,64);
-   thesprite.dx = INT2FIX(3);
-   thesprite.dy = INT2FIX(1);
-
-   /* make a sprite2 to use */
-   thesprite2.form = makesprite();
-   thesprite2.x = INT2FIX(200);
-   thesprite2.y = INT2FIX(40);
-   thesprite2.oldx[0] = thesprite2.oldx[1] = -1000;
-
-   thesprite2.back[0] = FormCreate(128,64);
-   thesprite2.back[1] = FormCreate(128,64);
-   thesprite2.dx = INT2FIX(-5);
-   thesprite2.dy = INT2FIX(1);
-
+    makesprite(&thesprite, INT2FIX(3), INT2FIX(1));
+    makesprite(&thesprite2, INT2FIX(-5), INT2FIX(2));
 
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
@@ -303,23 +360,24 @@ char *argv[];
    {
 
      restoresprite(&thesprite);
-     restoresprite(&thesprite2);
+/*     restoresprite(&thesprite2);  */
 
      movesprite(&thesprite);
-     movesprite(&thesprite2);
+/*     movesprite(&thesprite2);  */
 
      savesprite(&thesprite);
-     savesprite(&thesprite2);
+/*     savesprite(&thesprite2);   */
 
      drawsprite(&thesprite);
-     drawsprite(&thesprite2);
+/*     drawsprite(&thesprite2);   */
 
+     /* show draw time */
      waiting >>= 8;
      bb.srcform = NULL;
      bb.rule = bbS;
-     r.x = 0;
+     r.x = page.x;
      r.y = page.y;
-     r.w = waiting >> 8;
+     r.w = waiting ;
      r.h = 4;
      RectDrawX(&r, &bb);
      if (waiting < oldwaiting[pindex])
@@ -332,14 +390,14 @@ char *argv[];
      oldwaiting[pindex] = waiting;
 
      /* wait for frame flip */
-     currpage = framenum;
      waiting = 0;
+     currpage = framenum;
      while (currpage == framenum)
          waiting++;
 
      flip();
 
-     /* ensure vblank has happened */
+     /* ensure 1 vblank has happened */
      currpage = framenum;
      while (currpage == framenum);
 
