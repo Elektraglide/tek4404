@@ -39,13 +39,27 @@ extern char *basename();
 #define ENTRYPOINT "Start"
 #define ENTRYPOINTLEN 5
 
-/* should be the date the concat was created... */
-char rcs[] = "rcat v1.0 " __DATE__ " " __TIME__ "\n";
-
 /* cmd line options */
 int verbose = 0;
 int stripsymbols = 0;
 int justcat = 0;
+
+/* should be the date the concat was created... */
+char rcs[64];
+
+int rcslog()
+{
+  time_t timestamp;
+  struct tm *ts;
+
+    timestamp = time(NULL);
+    ts = localtime(&timestamp);
+    sprintf(rcs, "rcat %2.2d-%2.2d-%4.4d %2.2d:%2.2d",
+        ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,
+        ts->tm_hour, ts->tm_min);
+
+  return strlen(rcs);
+}
 
 
 void datacpy(dst, src, len)
@@ -549,7 +563,7 @@ set missing;
 	ph.magic[0] = justcat ? 0x05 : 0x04;
 	ph.source = htons(2);
 	ph.configuration = htons(4);
-	ph.rcssize = htons(strlen(rcs));
+	ph.rcssize = htons(rcslog());
 	ph.namesize = htons(strlen(outputname));
 	if (justcat == 0)
 	{
@@ -570,7 +584,7 @@ set missing;
 		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize));
 	}
 	
-	// concat data sections (and bss)
+	/* concat data sections (and bss) */
 	ph.datastart = htonl(ntohl(ph.textsize));
 	for(i=0; i<inputcount; i++)
 	{
@@ -611,26 +625,29 @@ set missing;
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
-			symbolheader *sym = (symbolheader *)sdata;
+			symbolheader sym;
+			int finaloffset;
+			
+			/* aligned for m68k */
+			memcpy(&sym, sdata, sizeof(sym));
 
 			/* NB finaloffset relative to section starts */
 			int finaloffset = 0;
-			switch(ntohs(sym->segment))
+			switch(ntohs(sym.segment))
 			{
 				case SEGTEXT:
-					finaloffset = (ntohl(sym->offset) + inputs[i].textoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].textoff);
 					break;
 				case SEGDATA:
-					finaloffset = (ntohl(sym->offset) + inputs[i].dataoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].dataoff);
 					break;
 				case SEGBSS:
-					finaloffset = (ntohl(sym->offset) + inputs[i].bssoff);
+					finaloffset = (ntohl(sym.offset) + inputs[i].bssoff);
 					break;
 			}
 			
-			symboladd(i, (char *)(sym+1),ntohs(sym->len), ntohs(sym->segment), finaloffset);
-			
-			sdata = (char *)(sym+1) + ntohs(sym->len);
+			symboladd(i, (char *)(sdata+sizeof(sym)), ntohs(sym.len), ntohs(sym.segment), finaloffset);
+			sdata = (char *)(sdata+sizeof(sym)) + ntohs(sym.len);
 			
 			/* NB need to handle broken len? */
 		}
@@ -670,6 +687,7 @@ set missing;
 			relocheader *rr = (relocheader *)rd;
 
 			int kind = ntohs(rr->kind);
+			int *addend;
 
 			int addendoffset = 0;
 			switch(kind & 0xf0)
@@ -708,7 +726,7 @@ set missing;
 #endif
 
 			/* relocation for which segment; NB addend is relative to in-file sections not in-memory address */
-			int *addend = NULL;
+			addend = NULL;
 			switch(kind & 0xf)
 			{
 				/* TEXT */
@@ -764,33 +782,35 @@ set missing;
 		char *endsd = sdata + ntohl(header->symbolsize);
 		while(sdata < endsd)
 		{
-			symbolheader *sym = (symbolheader *)sdata;
+			symbolheader sym;
 			
-			// only if we have not seen it before
-			if (!symboladd(i, (char *)(sym+1),ntohs(sym->len), ntohs(sym->segment), 0))
+			/* aligned for m68k */
+			memcpy(&sym, sdata, sizeof(sym));
+			
+			/* only if we have not seen it before */
+			if (!symboladd(i, (char *)(sdata+sizeof(sym)),ntohs(sym.len), ntohs(sym.segment), 0))
 			{
 				n++;
-				switch(ntohs(sym->segment))
+				switch(ntohs(sym.segment))
 				{
 					case SEGTEXT:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].textoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].textoff);
 						break;
 					case SEGDATA:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].dataoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].dataoff);
 						break;
 					case SEGBSS:
-						sym->offset = htonl(ntohl(sym->offset) + inputs[i].bssoff);
+						sym.offset = htonl(ntohl(sym.offset) + inputs[i].bssoff);
 						break;
 				}
 
-				write(out_fd, sym, sizeof(symbolheader));
-				if (sym->len)
-					write(out_fd, sym+1, ntohs(sym->len));
-				len += sizeof(symbolheader);
-				len += ntohs(sym->len);
+				write(out_fd, &sym, sizeof(symbolheader));
+				if (sym.len)
+					write(out_fd, sdata+sizeof(sym), ntohs(sym.len));
+				len += ntohs(sym.len);
 			}
 			
-			sdata = (char *)(sym+1) + ntohs(sym->len);
+			sdata = (sdata+sizeof(sym)) + ntohs(sym.len);
 		}
 	}
 	ph.symbolsize = htonl(len);
@@ -805,7 +825,7 @@ set missing;
 	/* name section */
 	write(out_fd, outputname, strlen(outputname));
 	
-	// update header with final values
+	/* update header with final values */
 	lseek(out_fd, 0, SEEK_SET);
 	write(out_fd, &ph, sizeof(ph));
 
