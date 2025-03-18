@@ -4,8 +4,41 @@
 #include <sys/dir.h>
 #include <signal.h>
 
+#ifndef DIRSIZ
 typedef	long		daddr_t;
 #define	DIRSIZ	14
+#define ST_GID(A)	(A st_uid)	/* does not have group id */
+#define CHOWN(A,B,C) chown(A,B) /* does not have group id */
+
+#define	SUID	0x40	/* has quirky perm bits */
+#define	SGID	02000
+#define	ROWN	0x01
+#define	WOWN	0x02
+#define	XOWN	0x04
+#define	RGRP	04000 /* does not have group */
+#define	WGRP	02000 /* does not have group */
+#define	XGRP	01000 /* does not have group */
+#define	ROTH	0x08
+#define	WOTH	0x10
+#define	XOTH	0x20
+
+#else
+#define ST_GID(A)	(A st_gid)
+#define CHOWN(A,B,C) chown(A,B,C)
+
+#define	SUID	04000
+#define	SGID	02000
+#define	ROWN	0400
+#define	WOWN	0200
+#define	XOWN	0100
+#define	RGRP	040
+#define	WGRP	020
+#define	XGRP	010
+#define	ROTH	04
+#define	WOTH	02
+#define	XOTH	01
+#endif
+
 
 char	*sprintf();
 char	*strcat();
@@ -159,7 +192,7 @@ noupdate:
 			nblock = 1;
 		}
 		else if ((mt = open(usefile, 2)) < 0) {
-			if (cflag == 0 || (mt =  creat(usefile, 0666)) < 0) {
+			if (cflag == 0 || (mt =  creat(usefile, ROWN | WOWN | ROTH | WOTH )) < 0) {
 				fprintf(stderr, "tar: cannot open %s\n", usefile);
 				done(1);
 			}
@@ -277,10 +310,11 @@ getdir()
 	sp = &stbuf;
 	sscanf(dblock.dbuf.mode, "%o", &i);
 	sp->st_mode = i;
+	sp->st_perm = i>>8;
 	sscanf(dblock.dbuf.uid, "%o", &i);
 	sp->st_uid = i;
 	sscanf(dblock.dbuf.gid, "%o", &i);
-/*	sp->st_gid = i; */
+	ST_GID(sp->) = i;
 	sscanf(dblock.dbuf.size, "%lo", &sp->st_size);
 	sscanf(dblock.dbuf.mtime, "%lo", &sp->st_mtime);
 	sscanf(dblock.dbuf.chksum, "%o", &chksum);
@@ -482,13 +516,13 @@ gotit:
 				fprintf(stderr, "%s linked to %s\n", dblock.dbuf.name, dblock.dbuf.linkname);
 			continue;
 		}
-		if ((ofile = creat(dblock.dbuf.name, stbuf.st_mode & 07777)) < 0) {
+		if ((ofile = creat(dblock.dbuf.name, stbuf.st_perm & 07777)) < 0) {
 			fprintf(stderr, "tar: %s - cannot create\n", dblock.dbuf.name);
 			passtape();
 			continue;
 		}
 
-		chown(dblock.dbuf.name, stbuf.st_uid); /* , stbuf.st_gid); */
+		CHOWN(dblock.dbuf.name, stbuf.st_uid, stbuf.st_gid);
 
 		blocks = ((bytes = stbuf.st_size) + TBLOCK-1)/TBLOCK;
 		if (vflag)
@@ -551,23 +585,12 @@ register struct stat *st;
 	char *ctime();
 
 	pmode(st);
-	printf("%3d/%1d", st->st_uid, 0); /* st->st_gid); */
-	printf("%7D", st->st_size);
+	printf("%3d/%1d", st->st_uid, ST_GID(st->));
+	printf("%7d", st->st_size);
 	cp = ctime(&st->st_mtime);
 	printf(" %-12.12s %-4.4s ", cp+4, cp+20);
 }
 
-#define	SUID	04000
-#define	SGID	02000
-#define	ROWN	0400
-#define	WOWN	0200
-#define	XOWN	0100
-#define	RGRP	040
-#define	WGRP	020
-#define	XGRP	010
-#define	ROTH	04
-#define	WOTH	02
-#define	XOTH	01
 #define	STXT	01000
 int	m1[] = { 1, ROWN, 'r', '-' };
 int	m2[] = { 1, WOWN, 'w', '-' };
@@ -598,7 +621,7 @@ struct stat *st;
 
 	ap = pairp;
 	n = *ap++;
-	while (--n>=0 && (st->st_mode&*ap++)==0)
+	while (--n>=0 && (st->st_perm&*ap++)==0)
 		ap++;
 	printf("%c", *ap);
 }
@@ -613,13 +636,14 @@ register char *name;
 			*cp = '\0';
 			if (access(name, 01) < 0) {
 				if (fork() == 0) {
+					execl("/bin/crdir", "crdir", name, 0);
 					execl("/bin/mkdir", "mkdir", name, 0);
 					execl("/usr/bin/mkdir", "mkdir", name, 0);
 					fprintf(stderr, "tar: cannot find mkdir!\n");
 					done(0);
 				}
 				while (wait(&i) >= 0);
-				chown(name, stbuf.st_uid); /* , stbuf.st_gid); */
+				CHOWN(name, stbuf.st_uid, stbuf.st_gid);
 			}
 			*cp = '/';
 		}
@@ -657,9 +681,9 @@ register struct stat *sp;
 
 	for (cp = dblock.dummy; cp < &dblock.dummy[TBLOCK]; cp++)
 		*cp = '\0';
-	sprintf(dblock.dbuf.mode, "%6o ", sp->st_mode & 07777);
+	sprintf(dblock.dbuf.mode, "%6o ", (sp->st_perm<<8) + sp->st_mode);
 	sprintf(dblock.dbuf.uid, "%6o ", sp->st_uid);
-	sprintf(dblock.dbuf.gid, "%6o ", 0); /* sp->st_gid); */
+	sprintf(dblock.dbuf.gid, "%6o ", ST_GID(sp->));
 	sprintf(dblock.dbuf.size, "%11lo ", sp->st_size);
 	sprintf(dblock.dbuf.mtime, "%11lo ", sp->st_mtime);
 }
