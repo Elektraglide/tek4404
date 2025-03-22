@@ -32,27 +32,6 @@ typedef	long		daddr_t;
 #define CHOWN(A,B,C) chown(A,B) /* does not have group id */
 #define MAXPATHLEN 60
 
-int mkdir(path, perms)
-char *path;
-int perms;
-{
- return mknod(path, perms, 0);	
-}
-
-int utimes(path, ptime)
-char *path;
-struct timeval *ptime;
-{
-  /* just modification time */
-  return utime(path, ptime + 1);	
-}
-
-char *getwd(path)
-char *path;
-{
-  return getcwd(path, MAXPATHLEN);	
-}
-
 #define	SUID	0x40	/* has quirky perm bits */
 #define	SGID	02000
 #define	ROWN	0x01
@@ -159,7 +138,39 @@ char	*sprintf();
 char	*strcat();
 char	*rindex();
 char	*getcwd();
-/* char	*getwd();  */
+char	*getwd();
+char 	*tar_getcwd();
+
+/* missing or differing functionality in Uniflex */
+
+int mkdir(path, perms)
+char *path;
+int perms;
+{
+ return mknod(path, perms, 0);	
+}
+
+int utimes(path, ptime)
+char *path;
+struct timeval *ptime;
+{
+  /* just modification time */
+  return utime(path, ptime + 1);	
+}
+
+char *getwd(path)
+char *path;
+{
+  char *result = getcwd(path, MAXPATHLEN);
+
+  /* Uniflex adds a carriage return! */
+  char *cr = strrchr(result, '\n');
+  if (cr)
+    *cr = 0;
+    
+  return result;
+}
+
 
 main(argc, argv)
 int	argc;
@@ -758,7 +769,7 @@ gotit:
 				    dblock.dbuf.name, dblock.dbuf.linkname);
 			continue;
 		}
-		if ((ofile = creat(dblock.dbuf.name,stbuf.st_mode&0xfff)) < 0) {
+		if ((ofile = creat(dblock.dbuf.name,stbuf.st_perm&0xfff)) < 0) {
 			fprintf(stderr, "tar: %s - cannot create\n",
 			    dblock.dbuf.name);
 			passtape();
