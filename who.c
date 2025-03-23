@@ -15,7 +15,7 @@ char **argv;
   if (fd > 0)
   {
   	setutent();
-    while((record = getutent()) > 0)
+    while((record = getutent()) != NULL)
     {
       strcpy(buffer, ctime(&record->ut_time));
       /* no CR */
