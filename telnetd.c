@@ -31,6 +31,7 @@ void setsid() {}
 
 socketopt opt;
 char *telnetprocess[] = {"/etc/login", NULL};
+char *shellprocess[] = {"/tek/bin/ash", NULL};
 
 #else
 
@@ -56,6 +57,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 
 */
 
+#define USE_PACKETMODE
 #define DEBUGxx
 #define DEBUGCONSOLExx
 /***********************************/
@@ -88,7 +90,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 char hexascii[] = "0123456789ABCDEF";
 
 /* Uniflex maps \n to \r..  so we have to insert at runtime */
-char copyright[] = "Telnet Server Version 1.1 Copyright (C) 2024 By Adam Billyard\n";
+char copyright[] = "Telnet Server Version 1.2 Copyright (C) 2024 By Adam Billyard\n";
 char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
 char linefeed[] = "\012";
 int sock = -1;
@@ -96,11 +98,14 @@ int state = STOPPED;
 int sessionsock;
 int sessionpty;
 
+
 int off = 0;
 int on = 1;
 
 FILE  *console;
 
+int istelnet = 1;
+char ruser[32],rhost[32];
 char sessionname[64];
 char *sessionargv[2];
 
@@ -298,6 +303,9 @@ int sig;
 #endif
   close(sessionsock);
   close(sessionpty);
+
+  /* rmut */
+
 }
 
 void
@@ -354,7 +362,8 @@ char *from;
   int n,rc,sessionpid;
   int last_was_cr;
   int last_read;
-    
+  int ptystatus;
+
   fd_set fd_in;
 
   struct sgttyb slave_orig_term_settings; 
@@ -371,12 +380,15 @@ char *from;
   ts.term.cols = 80;
   ts.term.lines = 30;
 
-  /* Send initial options */
-  sendopt(&ts, WILL, T_ECHO);
-  sendopt(&ts, WILL, T_SGA);
-  sendopt(&ts, WONT, TELOPT_LINEMODE);
-  sendopt(&ts, DO, TELOPT_NAWS);
-
+  if (istelnet != 0)
+  {
+    /* Send initial options */
+    sendopt(&ts, WILL, T_ECHO);
+    sendopt(&ts, WILL, T_SGA);
+    sendopt(&ts, WONT, TELOPT_LINEMODE);
+    sendopt(&ts, DO, TELOPT_NAWS);
+  }
+  
   /* no buffering */
   setbuf(stdin, NULL);
   setbuf(stdout, NULL);
@@ -411,11 +423,18 @@ char *from;
     console = fopen("/dev/console", "a");
     
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
-    n |= PTY_READ_WAIT; 
+    n &= ~(PTY_REMOTE_MODE | PTY_READ_WAIT);
+/*    n |= PTY_READ_WAIT;  */
+/*    n |= PTY_REMOTE_MODE; */
+#ifdef USE_PACKETMODE
+    n |= PTY_PACKET_MODE;
+#endif
     control_pty(fdmaster, PTY_SET_MODE, n );
 
-    /* motd; Uniflex maps \n to \r so force it in */
-    writewithlf(dout, copyright, sizeof(copyright)-1);
+   /* quiet if in r-cmd mode */
+   if (istelnet != 0)
+      /* motd; Uniflex maps \n to \r so force it in */
+      writewithlf(dout, copyright, sizeof(copyright)-1);
 
 #ifdef SHOW_MOTD
     fd = open("/etc/log/motd", O_RDONLY);
@@ -434,17 +453,17 @@ char *from;
       close(fd);
     }
 #endif
-
+    
     /* Close the slave side of the PTY */
     close(fdslave);
-
+    
     last_was_cr = 0;
     last_read = 0;
     while(state != STOPPED)
     {
         /* Uniflex select appears to only expect actual socket fds */
         /* having stdin in the FD_SET wreaks havoc */
-        timeout.tv_sec = 0;
+        timeout.tv_sec = 1;
         timeout.tv_usec = 500000;
         FD_ZERO(&fd_in);
         n = 0;
@@ -461,27 +480,24 @@ char *from;
         if(last_read > 0)
         {
           /* if there is input, for a few loops use a short timeout */
-          timeout.tv_usec = 5000;
+          timeout.tv_sec = 0;
+          timeout.tv_usec = 50000;
           last_read--;
         }
 #endif
 
-/*
-        fprintf(stderr,"select(%d, %x,0,0,%d)\012\n",n+1,fd_in.fdmask[0],timeout.tv_usec);
-        fflush(stderr);
-
-*/
-#ifdef DEBUGCONSOLE
-fprintf(console, "**Select n(%d) timeout(%d)\012\n", n, timeout.tv_usec);
-#endif
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+
+#ifdef DEBUGCONSOLE
+fprintf(console, "** select n(%d) timeout(%d) => %d\012\n", n+1, timeout.tv_usec, rc);
+#endif
 
         if (rc < 0 && errno != EINTR)
         {
             fprintf(console, "select(): error %d\n", errno);
             break;
         }
-
+        else
 
         if (rc == 0)
         {
@@ -524,9 +540,10 @@ fprintf(console, "**Read din\012\n");
           }
 
           /* Parse user input for telnet options */
-          parse(&ts);
+          if (istelnet != 0)
+             parse(&ts);
 
-          /* Application ready to receive */
+          /* send any socket input to slave (fdmaster) */
           if (ts.bi.start != ts.bi.end)
           {
 #ifdef DEBUGCONSOLE
@@ -575,16 +592,15 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
           }
         }
 
-        /* read any slave output and send to socket */
-        /* select says bytes to read but read busy waits forever */
+        /* read any slave output (fdmaster) and send to socket */
+        /* select says bytes to read but read busy waits forever.. */
         /* select just doesn't work with pty descriptors */
         
 #ifdef __clang__
         if (FD_ISSET(fdmaster, &fd_in))
 #else
-        n = control_pty(fdmaster, PTY_INQUIRY, 0);
-        last_read = (n & PTY_OUTPUT_QUEUED) ? 20 : last_read;
-        while (n & PTY_OUTPUT_QUEUED)
+        ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+        if (ptystatus & PTY_OUTPUT_QUEUED)
 #endif
         {
           /* Data arrived from application */
@@ -615,8 +631,25 @@ fprintf(console, "**Read master\012\n");
               fprintf(console,"read chocked\n");
             }
 
+#ifdef USE_PACKETMODE
+            /* is there data available? */
+            if (ts.bo.data[0] == 0 && ts.bo.data[1] == 0)
+            {
+                ts.bo.start = ts.bo.data + 2;
+                ts.bo.end = ts.bo.start + n - 2;
+
+                last_read = 20;
+            }
+            else
+            {
+                ptystatus = (ts.bo.data[0]);
+                fprintf(console, "packetmode: %4.4x\n", ptystatus);
+            }
+#else
             ts.bo.start = ts.bo.data;
-            ts.bo.end = ts.bo.data + n;
+            ts.bo.end = ts.bo.start + n;
+            last_read = 20;
+#endif
           }
         
           if (ts.bo.start != ts.bo.end)
@@ -636,13 +669,16 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
             ts.bo.start += n;
           }
 
+#ifndef USE_PACKETMODE
 #ifndef __clang__
           /* check again if any output */
-          n = control_pty(fdmaster, PTY_INQUIRY, 0);
-          if (n & PTY_OUTPUT_QUEUED)
+          ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+          ptystatus = 0;
+          if (ptystatus & PTY_OUTPUT_QUEUED)
           {
-            /* fprintf(console, "MORE slave output is waiting\012\n"); */
+            fprintf(console, "MORE slave output is waiting\012\n"); 
           }
+#endif
 #endif
         }
 
@@ -658,15 +694,35 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
     signal(SIGHUP, SIG_DFL);
     signal(SIGQUIT, SIG_DFL);
 
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTERM, SIG_IGN);
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
 
     /* Close the master side of the PTY */
     close(fdmaster);
 
+#if 1
+    rc = gtty(fdslave, &slave_orig_term_settings);
+    new_term_settings = slave_orig_term_settings;
+    new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_prot |= ESC;
+    new_term_settings.sg_prot |= OXON;
+    new_term_settings.sg_prot |= TRANS;
+    new_term_settings.sg_prot |= ANY;
+    stty(fdslave, &new_term_settings);
+#endif
+
     /* make a friendly name */
-    strcpy(sessionname, "telnet_");
-    strcat(sessionname, from);
+    if (istelnet)
+    {
+      strcpy(sessionname, "telnet_");
+      strcat(sessionname, from);
+    }
+    else
+    {
+      strcpy(sessionname, "rlogin_");
+      strcat(sessionname, ruser);
+    }
+
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
       
@@ -696,7 +752,7 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
     /* Execution of the program */
     {
       /* launch cmd */
-      rc = execvp(telnetprocess[0], sessionargv);
+      rc = execvp(istelnet ? telnetprocess[0] : shellprocess[0], sessionargv);
       if (rc < 0)
       {
         fprintf(console, "Error %d on exec\n", errno);
@@ -764,7 +820,9 @@ char **argv;
   socketopt opt;
 #endif
   int reuse = 1;
-
+  char buffer[64];
+  char *rparams;
+    
   console = fopen(nget_str("console"), "a");
 
   state = RUNNING;
@@ -869,6 +927,42 @@ char **argv;
     fstat(0, &s);
     if (s.st_mode & S_IFPIPE)
     {
+      /* is it a Berkeley r-command */
+      alarm(30);
+      rc = read(0, buffer, sizeof(buffer));
+      alarm(0);
+      if (rc > 0 && buffer[0] == 0)
+      {
+      	rparams = buffer + 1;
+     	strcpy(ruser, rparams);
+        fprintf(stderr, "rlogin user: %s\012\n", ruser);
+        rparams += strlen(ruser) + 1;
+     	rc -= strlen(ruser) + 1;
+     	if (rc > 0)
+     	{
+          strcpy(rhost, rparams);
+          fprintf(stderr, "rlogin host: %s\012\n", rhost);
+          rparams += strlen(rhost) + 1;
+          rc -= strlen(rhost) + 1;
+        }
+
+        if (rc > 0)
+        {
+          fprintf(stderr, "rlogin term: %s\012\n", rparams);
+        }
+             
+        /* r-cmd handshake */
+        write(1,"",1);
+
+        istelnet = 0;
+        
+        /* rlogin_session(0,1,"local"); */       
+     }
+     else
+     {
+        istelnet = 1;
+     }
+
       /* use socketpair */
       rc = telnet_session(0, 1, "local");
     }
