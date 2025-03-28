@@ -57,7 +57,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 
 */
 
-#define USE_PACKETMODE
+#define USE_PACKETMODExx
 #define DEBUGxx
 #define DEBUGCONSOLExx
 /***********************************/
@@ -185,7 +185,7 @@ int len;
 {
   int cols,lines;
 
-  /* fprintf(stderr, "parseoptdat: OPTION %d data (%d bytes)\n", option, len); */
+  fprintf(console, "parseoptdat: OPTION %d data (%d bytes)\012\n", option, len);
 
   switch (option) {
     case TELOPT_NAWS:
@@ -277,6 +277,7 @@ struct termstate *ts;
         break;
     } 
   }
+  fprintf(console, "parse: consumed %d bytes\n", p - q);
 
   ts->bi.end = q;
 }
@@ -374,7 +375,7 @@ char *from;
 
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
-  ts.sock = din;
+  ts.sock = dout;
   ts.state = STATE_NORMAL;
   ts.term.type = TERM_VT100;
   ts.term.cols = 80;
@@ -420,8 +421,6 @@ char *from;
   if (sessionpid)
   {
     /* PARENT */
-    console = fopen("/dev/console", "a");
-    
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     n &= ~(PTY_REMOTE_MODE | PTY_READ_WAIT);
 /*    n |= PTY_READ_WAIT;  */
@@ -456,6 +455,8 @@ char *from;
     
     /* Close the slave side of the PTY */
     close(fdslave);
+
+nonblocking(din);
     
     last_was_cr = 0;
     last_read = 0;
@@ -463,8 +464,8 @@ char *from;
     {
         /* Uniflex select appears to only expect actual socket fds */
         /* having stdin in the FD_SET wreaks havoc */
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 500000;
+        timeout.tv_sec = 3;
+        timeout.tv_usec = 0;
         FD_ZERO(&fd_in);
         n = 0;
         
@@ -479,15 +480,19 @@ char *from;
 #else
         if(last_read > 0)
         {
-          /* if there is input, for a few loops use a short timeout */
+          /* if there is slave output, for a few loops use a short timeout */
           timeout.tv_sec = 0;
-          timeout.tv_usec = 50000;
+          timeout.tv_usec = 10000;
           last_read--;
         }
 #endif
 
-        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+#ifdef DEBUGCONSOLE
+fprintf(console, "About to select n(%d) \012\n", n+1);
+#endif
 
+        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+        
 #ifdef DEBUGCONSOLE
 fprintf(console, "** select n(%d) timeout(%d) => %d\012\n", n+1, timeout.tv_usec, rc);
 #endif
@@ -539,9 +544,12 @@ fprintf(console, "**Read din\012\n");
               ts.bi.end = ts.bi.data + n;
           }
 
+#if 1
+
           /* Parse user input for telnet options */
           if (istelnet != 0)
              parse(&ts);
+#endif
 
           /* send any socket input to slave (fdmaster) */
           if (ts.bi.start != ts.bi.end)
@@ -600,7 +608,7 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
         if (FD_ISSET(fdmaster, &fd_in))
 #else
         ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
-        if (ptystatus & PTY_OUTPUT_QUEUED)
+        while (ptystatus & PTY_OUTPUT_QUEUED)
 #endif
         {
           /* Data arrived from application */
@@ -638,7 +646,7 @@ fprintf(console, "**Read master\012\n");
                 ts.bo.start = ts.bo.data + 2;
                 ts.bo.end = ts.bo.start + n - 2;
 
-                last_read = 20;
+                last_read = 5;
             }
             else
             {
@@ -648,7 +656,7 @@ fprintf(console, "**Read master\012\n");
 #else
             ts.bo.start = ts.bo.data;
             ts.bo.end = ts.bo.start + n;
-            last_read = 20;
+            last_read = 5;
 #endif
           }
         
@@ -672,11 +680,13 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
 #ifndef USE_PACKETMODE
 #ifndef __clang__
           /* check again if any output */
+          
+         /* problem is this precludes ^S / ^Q flow control */
+         
           ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
-          ptystatus = 0;
           if (ptystatus & PTY_OUTPUT_QUEUED)
           {
-            fprintf(console, "MORE slave output is waiting\012\n"); 
+            fprintf(console, "MORE slave output is waiting\012\n"); 
           }
 #endif
 #endif
@@ -693,6 +703,7 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
     /* CHILD */
     signal(SIGHUP, SIG_DFL);
     signal(SIGQUIT, SIG_DFL);
+    signal(SIGALRM, SIG_DFL);
 
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
@@ -726,11 +737,6 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
       
-    /* does opening the  ptty make it controlling? */
-    /*
-      https://stackoverflow.com/questions/19157202/how-do-terminal-size-changes-get-sent-to-command-line-applications-though-ssh-or/19157360
-    */
-    
     /* calls pty_make_controlling_terminal */
     system_control(2);
     
@@ -745,9 +751,6 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
 
     /* Now the original file descriptor is useless */
     /* close(fdslave); */
-
-    /* Make the current process a new session leader */
-    setsid();
 
     /* Execution of the program */
     {
@@ -824,6 +827,10 @@ char **argv;
   char *rparams;
     
   console = fopen(nget_str("console"), "a");
+console = fopen("/dev/console", "a");
+
+  /* used this to break into select because timeout sometimes fails to work */
+  signal(SIGALRM, SIG_IGN);
 
   state = RUNNING;
 
@@ -924,31 +931,35 @@ char **argv;
   {
     struct stat s;
     
+    /* Uniflex accept() doesn't fill this in.. */
+    cli_addr_len = sizeof(cli_addr);
+    rc = getpeername(fileno(stdin), (struct sockaddr *) &cli_addr, &cli_addr_len);
+
     fstat(0, &s);
     if (s.st_mode & S_IFPIPE)
     {
       /* is it a Berkeley r-command */
-      alarm(30);
-      rc = read(0, buffer, sizeof(buffer));
+      alarm(3);
+      rc = read(fileno(stdin), buffer, sizeof(buffer));
       alarm(0);
       if (rc > 0 && buffer[0] == 0)
       {
       	rparams = buffer + 1;
      	strcpy(ruser, rparams);
-        fprintf(stderr, "rlogin user: %s\012\n", ruser);
+        fprintf(console, "rlogin user: %s\012\n", ruser);
         rparams += strlen(ruser) + 1;
      	rc -= strlen(ruser) + 1;
      	if (rc > 0)
      	{
           strcpy(rhost, rparams);
-          fprintf(stderr, "rlogin host: %s\012\n", rhost);
+          fprintf(console, "rlogin host: %s\012\n", rhost);
           rparams += strlen(rhost) + 1;
           rc -= strlen(rhost) + 1;
         }
 
         if (rc > 0)
         {
-          fprintf(stderr, "rlogin term: %s\012\n", rparams);
+          fprintf(console, "rlogin term: %s\012\n", rparams);
         }
              
         /* r-cmd handshake */
@@ -964,7 +975,7 @@ char **argv;
      }
 
       /* use socketpair */
-      rc = telnet_session(0, 1, "local");
+      rc = telnet_session(fileno(stdin), fileno(stdout), inet_ntoa(cli_addr.sin_addr.s_addr));
     }
     else
     {
