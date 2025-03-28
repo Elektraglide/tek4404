@@ -1,5 +1,25 @@
 	lib sysdef
 
+	global _pagemonitor
+	
+; this is just missing Vendor call
+	text
+_pagemonitor	link a6,#0
+	movem.l d2-d7/a2-a5,-(sp)
+	move.l 8(a6),ibuffer+2
+	move.l 12(a6),ibuffer+6
+	move.l 16(a6),ibuffer+10
+	sys ind,pbuffer
+	movem.l (sp)+,d2-d7/a2-a5
+	unlk a6
+	rts
+
+	data
+pbuffer	dc.w $100
+		dc.l 0
+		dc.l 0
+		dc.l 0
+
 	global _systat
 	
 ; this is just missing from clibs
