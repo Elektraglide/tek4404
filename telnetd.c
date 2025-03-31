@@ -103,6 +103,7 @@ int off = 0;
 int on = 1;
 
 FILE  *console;
+FILE  *logger;
 
 int istelnet = 1;
 char ruser[32],rhost[32];
@@ -146,9 +147,9 @@ int option;
   buf[1] = (unsigned char) code;
   buf[2] = (unsigned char) option;
   write(ts->sock, buf, 3);
-  
-  /* fprintf(stderr, "sendopt: OPTION %d code %d\n", option, code); */
-
+#ifdef LOG  
+  fprintf(console, "sendopt: OPTION %d code %d\n", option, code);
+#endif
 }
 
 void parseopt(ts, code, option)
@@ -157,18 +158,27 @@ int code;
 int option;
 {
 
+#ifdef LOG  
+  fprintf(logger, "parseopt: %d OPTION %d\n", code, option);
+#endif
   switch (option) {
     case T_ECHO:
     case T_SGA:
     case TELOPT_NAWS:
       break;
 
+    case TELOPT_LINEMODE:	/* Windows telnet spams this, so dont respond */
+	  break;
+	  
     case TELOPT_TERMINAL_TYPE:
     case TELOPT_TERMINAL_SPEED:
       sendopt(ts, DO, option);
       break;
 
     default:
+#ifdef LOG
+      fprintf(logger, "Unsupported\n");
+#endif
       if (code == WILL || code == WONT) {
         sendopt(ts, DONT, option);
       } else {
@@ -185,8 +195,9 @@ int len;
 {
   int cols,lines;
 
-  fprintf(console, "parseoptdat: OPTION %d data (%d bytes)\012\n", option, len);
-
+#ifdef LOG  
+  fprintf(logger, "parseoptdat: OPTION %d data (%d bytes)\n", option, len);
+#endif
   switch (option) {
     case TELOPT_NAWS:
       if (len == 4) {
@@ -194,8 +205,9 @@ int len;
         lines = ntohs(*(unsigned short *) (data + 2));
         if (cols != 0) ts->term.cols = cols;
         if (lines != 0) ts->term.lines = lines;
-        fprintf(console, "parseoptdat: term(%d,%d)\012\n",ts->term.cols,ts->term.lines);
-
+#ifdef LOG  
+        fprintf(logger, "parseoptdat: term(%d,%d)\n",ts->term.cols,ts->term.lines);
+#endif
         /* TODO: send child new window size; we dont have SIGWINCH */
 
       }
@@ -277,7 +289,6 @@ struct termstate *ts;
         break;
     } 
   }
-  fprintf(console, "parse: consumed %d bytes\n", p - q);
 
   ts->bi.end = q;
 }
@@ -300,7 +311,7 @@ int sig;
   int result;
   
 #ifdef DEBUGCONSOLE
-  fprintf(console,"cleanup telnet session on %d\012\n",sig);
+  fprintf(console,"cleanup telnet session on %d\n",sig);
 #endif
   close(sessionsock);
   close(sessionpty);
@@ -386,7 +397,7 @@ char *from;
     /* Send initial options */
     sendopt(&ts, WILL, T_ECHO);
     sendopt(&ts, WILL, T_SGA);
-    sendopt(&ts, WONT, TELOPT_LINEMODE);
+    sendopt(&ts, WONT, TELOPT_LINEMODE); /* Windows ignores this */
     sendopt(&ts, DO, TELOPT_NAWS);
   }
   
@@ -826,8 +837,8 @@ char **argv;
   char buffer[64];
   char *rparams;
     
-  console = fopen(nget_str("console"), "a");
-console = fopen("/dev/console", "a");
+  logger = fopen(nget_str("console"), "a");
+  console = fopen("/dev/console", "a");
 
   /* used this to break into select because timeout sometimes fails to work */
   signal(SIGALRM, SIG_IGN);
