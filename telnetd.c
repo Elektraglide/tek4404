@@ -949,10 +949,14 @@ char **argv;
     fstat(0, &s);
     if (s.st_mode & S_IFPIPE)
     {
+      /* give a chance to receive something */
+ 	  sleep(1);
+
       /* is it a Berkeley r-command */
-      alarm(3);
+      nonblocking(fileno(stdin));
       rc = read(fileno(stdin), buffer, sizeof(buffer));
-      alarm(0);
+      blocking(fileno(stdin));
+
       if (rc > 0 && buffer[0] == 0)
       {
       	rparams = buffer + 1;
