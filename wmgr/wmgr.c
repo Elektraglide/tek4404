@@ -1248,11 +1248,9 @@ char **argv;
   welcome[sizeof(welcome)-1] = 0x0a;
  
   /* create a logger of /var/log/system.log OR run a shell */
-#if 0 
-  WindowCreate("SysLog", 50, 50, TRUE);
-#else
   WindowCreate("Console", 64-WINBORDER, 50, TRUE);
-#endif
+
+  WindowCreate("Window", 128, 128, FALSE);
 
 #ifdef USE_TTYREADER
 
