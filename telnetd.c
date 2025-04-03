@@ -697,7 +697,7 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
           ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
           if (ptystatus & PTY_OUTPUT_QUEUED)
           {
-            fprintf(console, "MORE slave output is waiting\012\n"); 
+          /*  fprintf(console, "MORE slave output is waiting\012\n");  */
           }
 #endif
 #endif
@@ -917,7 +917,7 @@ char **argv;
       if (fork())
       {
         logtime();
-        fprintf(console, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(logger, ": connect from %s\012\n", inet_ntoa(cli_addr.sin_addr.s_addr));
       
         sleep(5);
         close(newsock);
@@ -929,7 +929,7 @@ char **argv;
         rc = telnet_session(newsock, newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
       
         logtime();
-        fprintf(console, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(logger, ": disconnect from %s\012\n",  inet_ntoa(cli_addr.sin_addr.s_addr));
 
         break;
       }
@@ -961,20 +961,20 @@ char **argv;
       {
       	rparams = buffer + 1;
      	strcpy(ruser, rparams);
-        fprintf(console, "rlogin user: %s\012\n", ruser);
+        fprintf(logger, "rlogin user: %s\012\n", ruser);
         rparams += strlen(ruser) + 1;
      	rc -= strlen(ruser) + 1;
      	if (rc > 0)
      	{
           strcpy(rhost, rparams);
-          fprintf(console, "rlogin host: %s\012\n", rhost);
+          fprintf(logger, "rlogin host: %s\012\n", rhost);
           rparams += strlen(rhost) + 1;
           rc -= strlen(rhost) + 1;
         }
 
         if (rc > 0)
         {
-          fprintf(console, "rlogin term: %s\012\n", rparams);
+          fprintf(logger, "rlogin term: %s\012\n", rparams);
         }
              
         /* r-cmd handshake */
