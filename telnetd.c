@@ -97,7 +97,7 @@ int sock = -1;
 int state = STOPPED;
 int sessionsock;
 int sessionpty;
-
+int sessionpid;
 
 int off = 0;
 int on = 1;
@@ -308,16 +308,16 @@ void
 cleanup_child(sig)
 int sig;
 {
-  int result;
-  
+
 #ifdef DEBUGCONSOLE
-  fprintf(console,"cleanup telnet session on %d\n",sig);
+    fprintf(console,"cleanup telnet session on %d => %d\n",sig);
 #endif
-  close(sessionsock);
-  close(sessionpty);
+    close(sessionsock);
+    close(sessionpty);
 
-  /* rmut */
-
+    /* rmut */
+    
+    signal(sig, cleanup_child);
 }
 
 void
@@ -371,7 +371,7 @@ char *from;
   struct termstate ts;
   int ptfd[2];
   int fdmaster,fdslave;
-  int n,rc,sessionpid;
+  int n,rc;
   int last_was_cr;
   int last_read;
   int ptystatus;
@@ -419,9 +419,9 @@ char *from;
   sessionsock = din;
   sessionpty = fdslave;
   
-  signal(SIGPIPE, cleanup_child);
   signal(SIGDEAD, cleanup_child);
 
+  signal(SIGPIPE, testsig);
   signal(SIGHUP, testsig);
   signal(SIGINT, testsig);
   signal(SIGQUIT, testsig);
@@ -679,7 +679,8 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
             if (n < 0)
             {
-              break;
+              if (errno != EINTR)
+                break;
             }
             if (n < ts.bo.end - ts.bo.start)
             {
@@ -702,12 +703,12 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
 #endif
 #endif
         }
-
       }
     
       /* collect child process */
       kill(sessionpid, SIGQUIT);
-      wait(&rc);
+      n = wait(&rc);
+
   }
   else
   {
