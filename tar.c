@@ -32,21 +32,11 @@ typedef	long		daddr_t;
 #define CHOWN(A,B,C) chown(A,B) /* does not have group id */
 #define MAXPATHLEN 60
 
-#define	SUID	0x40	/* has quirky perm bits */
-#define	SGID	02000
-#define	ROWN	0x01
-#define	WOWN	0x02
-#define	XOWN	0x04
-#define	RGRP	04000 /* does not have group */
-#define	WGRP	02000 /* does not have group */
-#define	XGRP	01000 /* does not have group */
-#define	ROTH	0x08
-#define	WOTH	0x10
-#define	XOTH	0x20
-
 #else
 
 #define CHOWN(A,B,C) chown(A,B,C)
+
+#endif
 
 #define	SUID	04000
 #define	SGID	02000
@@ -59,7 +49,6 @@ typedef	long		daddr_t;
 #define	ROTH	04
 #define	WOTH	02
 #define	XOTH	01
-#endif
 
 #ifndef USE_LINKS
 #define lstat stat
@@ -329,7 +318,7 @@ char	*argv[];
 			mt = dup(1);
 			nblock = 1;
 		} else if ((mt = open(usefile, 2)) < 0) {
-			if (cflag == 0 || (mt =  creat(usefile, ROWN | WOWN)) < 0) {
+			if (cflag == 0 || (mt =  creat(usefile, S_IREAD | S_IWRITE)) < 0) {
 				fprintf(stderr,
 					"tar: cannot open %s\n", usefile);
 				done(1);
@@ -441,7 +430,8 @@ getdir()
 {
 	register struct stat *sp;
 	int i;
-
+    int tarperm;
+    
 top:
 	readtape((char *)&dblock);
 	if (dblock.dbuf.name[0] == '\0')
@@ -449,7 +439,16 @@ top:
 	sp = &stbuf;
 	sscanf(dblock.dbuf.mode, "%o", &i);
 	sp->st_mode = i;
-	sp->st_perm = i>>8;
+	i >>= 8;
+    tarperm = 0;
+    if (i & ROWN) tarperm |= S_IREAD;
+    if (i & WOWN) tarperm |= S_IWRITE;
+    if (i & XOWN) tarperm |= S_IEXEC;
+    if (i & ROTH) tarperm |= S_IOREAD;
+    if (i & WOTH) tarperm |= S_IOWRITE;
+    if (i & XOTH) tarperm |= S_IOEXEC;
+    if (i & SUID) tarperm |= S_ISUID;
+	sp->st_perm = tarperm;
 	sscanf(dblock.dbuf.uid, "%o", &i);
 	sp->st_uid = i;
 #ifdef USE_GROUPS
@@ -883,9 +882,12 @@ select(pairp, st)
 	struct stat *st;
 {
 	register int n, *ap;
-
+    int tarperm;
+    
 	ap = pairp;
 	n = *ap++;
+
+
 	while (--n>=0 && (st->st_perm&*ap++)==0)
 		ap++;
 	printf("%c", *ap);
@@ -958,10 +960,20 @@ tomodes(sp)
 register struct stat *sp;
 {
 	register char *cp;
-
+    int tarperm;
+    
 	for (cp = dblock.dummy; cp < &dblock.dummy[TBLOCK]; cp++)
 		*cp = '\0';
-	sprintf(dblock.dbuf.mode, "%6o ", (sp->st_perm<<8) + sp->st_mode);
+    tarperm = 0;
+    if (sp->st_perm & S_IREAD) tarperm |= ROWN;
+    if (sp->st_perm & S_IWRITE) tarperm |= WOWN;
+    if (sp->st_perm & S_IEXEC) tarperm |= XOWN;
+    if (sp->st_perm & S_IOREAD) tarperm |= ROTH;
+    if (sp->st_perm & S_IOWRITE) tarperm |= WOTH;
+    if (sp->st_perm & S_IOEXEC) tarperm |= XOTH;
+    if (sp->st_perm & S_ISUID) tarperm |= SUID;
+
+	sprintf(dblock.dbuf.mode, "%6o ", (tarperm<<8) + sp->st_mode);
 	sprintf(dblock.dbuf.uid, "%6o ", sp->st_uid);
 #ifdef USE_GROUPS
 	sprintf(dblock.dbuf.gid, "%6o ", sp->st_gid);
