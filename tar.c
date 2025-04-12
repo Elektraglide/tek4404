@@ -887,8 +887,16 @@ select(pairp, st)
 	ap = pairp;
 	n = *ap++;
 
+    tarperm = 0;
+    if (st->st_perm & S_IREAD) tarperm |= ROWN;
+    if (st->st_perm & S_IWRITE) tarperm |= WOWN;
+    if (st->st_perm & S_IEXEC) tarperm |= XOWN;
+    if (st->st_perm & S_IOREAD) tarperm |= ROTH;
+    if (st->st_perm & S_IOWRITE) tarperm |= WOTH;
+    if (st->st_perm & S_IOEXEC) tarperm |= XOTH;
+    if (st->st_perm & S_ISUID) tarperm |= SUID;
 
-	while (--n>=0 && (st->st_perm&*ap++)==0)
+	while (--n>=0 && (tarperm & *ap++)==0)
 		ap++;
 	printf("%c", *ap);
 }
