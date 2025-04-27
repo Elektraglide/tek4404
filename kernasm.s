@@ -6,9 +6,9 @@
 	text
 _pagemonitor	link a6,#0
 	movem.l d2-d7/a2-a5,-(sp)
-	move.l 8(a6),ibuffer+2
-	move.l 12(a6),ibuffer+6
-	move.l 16(a6),ibuffer+10
+	move.l 8(a6),pbuffer+2
+	move.l 12(a6),pbuffer+6
+	move.l 16(a6),pbuffer+10
 	sys ind,pbuffer
 	movem.l (sp)+,d2-d7/a2-a5
 	unlk a6
