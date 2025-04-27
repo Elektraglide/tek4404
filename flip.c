@@ -1,13 +1,28 @@
 #include <stdio.h>
+#include <math.h>
 #include <font.h>
 #include <graphics.h>
 #include <signal.h>
+
+#include "mathf.h"
 
 #ifndef unix
 #info flipdemo
 #info Version 1.0
 #tstmp
 #endif
+
+
+typedef struct
+{
+    vec3 wc;
+    vec3 cc;
+    short vpx, vpy;
+} Vertex3d;
+
+real zero,fov,one,two,camdist;
+vec3 spinaxis;
+
 
 #define INT2FIX(A)  ((A)<<16)
 #define FIX2INT(A)  ((A)>>16)
@@ -55,10 +70,12 @@ void flip()
 {
 
   SetViewport(&page);
+
   page.y ^= 512;
   pindex ^= 1;
 
-#if 1
+
+#if 0
   /* horizontal scrolling */
   page.x += scrolldir;
   if (page.x < 1 || page.x > 384) scrolldir = -scrolldir;
@@ -77,7 +94,7 @@ int sig;
 }
 
 
-void restoresprite(asprite)
+void restoreunder(asprite)
 sprite *asprite;
 {
 #if 1
@@ -125,7 +142,7 @@ sprite *asprite;
 #endif
 }
 
-void savesprite(asprite)
+void saveunder(asprite)
 sprite *asprite;
 {
     /* save under */
@@ -289,6 +306,199 @@ int sig;
   exit(2);
 }
 
+
+short vcount;
+Vertex3d vertices[500];
+
+short lcount;
+unsigned short lines[500][2];
+
+mat33 ltm;
+
+int addvertex(x, y, z)
+int x, y, z;
+{
+    vertices[vcount].wc.x.fv = x * 1.0;
+    vertices[vcount].wc.y.fv = y * 1.0;
+    vertices[vcount].wc.z.fv = z * 1.0;
+    
+    return vcount++;
+}
+
+void addline(a, b)
+int a, b;
+{
+    lines[lcount][0] = a;
+    lines[lcount][1] = b;
+    lcount++;
+}
+
+void init3d()
+{
+    zero.fv = 0.0;
+    fov.fv = 2.0;
+    one.fv = 1.0;
+    two.fv = 2.0;
+    camdist.fv = 5.0;
+
+    spinaxis.x.fv = 0.666;
+    spinaxis.y.fv = 0.666;
+    spinaxis.z.fv = 0.333;
+
+    vcount = 0;
+
+    addvertex(-1, -1, -1);
+    addvertex( 1, -1, -1);
+    addvertex( 1,  1, -1);
+    addvertex(-1,  1, -1);
+
+    addvertex(-1, -1,  1);
+    addvertex( 1, -1,  1);
+    addvertex( 1,  1,  1);
+    addvertex(-1,  1,  1);
+
+    lcount = 0;
+
+    addline(0, 1);
+    addline(1, 2);
+    addline(2, 3);
+    addline(3, 0);
+
+    addline(4, 5);
+    addline(5, 6);
+    addline(6, 7);
+    addline(7, 4);
+
+    addline(0, 4);
+    addline(1, 5);
+    addline(2, 6);
+    addline(3, 7);
+    
+    printf("model has %d vertices %d edges\n", vcount, lcount);
+}
+
+void scalev(s, v)
+int s;
+vec3* v;
+{
+    v->x.iv = mulf(v->x.iv, s);
+    v->y.iv = mulf(v->y.iv, s);
+    v->z.iv = mulf(v->z.iv, s);
+}
+
+void rotatem(mat, radians, v)
+mat33* mat;
+double radians;
+vec3* v;
+{
+    vec3 leading,crossed,scaled;
+    real a, cosf, sinf;
+
+    a.fv = cos(radians);
+    cosf.iv = subf(one.iv, a.iv);
+    sinf.fv = sin(radians);
+
+    leading.x.iv = subf(one.iv, mulf(v->x.iv, v->x.iv));
+    leading.y.iv = subf(one.iv, mulf(v->y.iv, v->y.iv));
+    leading.z.iv = subf(one.iv, mulf(v->z.iv, v->z.iv));
+    scalev(cosf.iv, &leading);
+
+    crossed.x.iv = mulf(v->y.iv, v->z.iv);
+    crossed.y.iv = mulf(v->z.iv, v->x.iv);
+    crossed.z.iv = mulf(v->x.iv, v->y.iv);
+    scalev(cosf.iv, &crossed);
+
+    scaled.x.iv = v->x.iv;
+    scaled.y.iv = v->y.iv;
+    scaled.z.iv = v->z.iv;
+    scalev(sinf.iv, &scaled);
+
+    mat->row0.x.iv = subf(one.iv, leading.x.iv);
+    mat->row0.y.iv = addf(crossed.z.iv, scaled.z.iv);
+    mat->row0.z.iv = subf(crossed.y.iv, scaled.y.iv);
+    mat->row1.x.iv = subf(crossed.z.iv, scaled.z.iv);
+    mat->row1.y.iv = subf(one.iv, leading.y.iv);
+    mat->row1.z.iv = addf(crossed.x.iv, scaled.x.iv);
+    mat->row2.x.iv = addf(crossed.y.iv, scaled.y.iv);
+    mat->row2.y.iv = subf(crossed.x.iv, scaled.x.iv);
+    mat->row2.z.iv = subf(one.iv, leading.z.iv);
+}
+
+void rotateY(mat, radians)
+mat33* mat;
+double radians;
+{
+    float cf = cos(radians);
+    float sf = sin(radians);
+
+    mat->row0.x.fv = cf;
+    mat->row0.y.iv = zero.iv;
+    mat->row0.z.fv = -sf;
+    mat->row1.x.iv = zero.iv;
+    mat->row1.y.iv = one.iv;
+    mat->row1.z.iv = zero.iv;
+    mat->row2.x.fv = sf;
+    mat->row2.y.iv = zero.iv;
+    mat->row2.z.fv = cf;
+}
+
+
+
+void transform3d(mat, radians)
+mat33* mat;
+double radians;
+{
+    Vertex3d* src = vertices;
+    int count = vcount;
+    real vpw, vph;
+
+    rotatem(mat, radians, &spinaxis);
+
+    vpw.fv = 240.0;
+    vph.fv = 240.0;
+    while (count--)
+    {
+    	real ooz;
+    	
+        /* view space */
+        src->cc.x.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.x.iv), vmmulf(src->wc.y.iv, mat->row1.x.iv)), vmmulf(src->wc.z.iv, mat->row2.x.iv));
+        src->cc.y.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.y.iv), vmmulf(src->wc.y.iv, mat->row1.y.iv)), vmmulf(src->wc.z.iv, mat->row2.y.iv));
+        src->cc.z.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.z.iv), vmmulf(src->wc.y.iv, mat->row1.z.iv)), vmmulf(src->wc.z.iv, mat->row2.z.iv));
+
+        /* parallel projection + viewport transform */
+        ooz.iv = divf(fov.iv, vmaddf(camdist.iv, src->cc.z.iv)); 
+       
+        src->vpx = ftoi(vmmulf(vmmulf(src->cc.x.iv, ooz.iv), vpw.iv)) + 320;
+        src->vpy = ftoi(vmmulf(vmmulf(src->cc.y.iv, ooz.iv), vph.iv)) + 240 + (page.y);
+
+        src++;
+    }
+}
+
+void draw3d()
+{
+    struct POINT p2;
+    int i;
+
+      bb.srcform = NULL;
+      bb.rule = bbSxorD;
+      bb.halftoneform = NULL;
+      bb.destrect.w = 1;
+      bb.destrect.h = 1;
+      
+    for (i = 0; i < lcount; i++)
+    {
+        bb.destrect.x = vertices[lines[i][0]].vpx;
+        bb.destrect.y = vertices[lines[i][0]].vpy;
+
+        p2.x = vertices[lines[i][1]].vpx;
+        p2.y = vertices[lines[i][1]].vpy;
+
+        PaintLine(&bb, &p2);
+    }
+}
+
+int *mapped_fpu;
 unsigned int oldwaiting[2];
 main(argc,argv)
 int argc;
@@ -299,6 +509,12 @@ char *argv[];
     struct POINT origin,p2;
     struct RECT r;
     unsigned int currpage,waiting;
+    float angle;
+
+    /* map FPU into our memory space */
+	mapped_fpu = phys(2);
+	if (mapped_fpu == NULL)
+		exit(2);
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -309,17 +525,18 @@ char *argv[];
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
 
-    printf("starting alarm\n");
     ESetSignal();
     page.x = page.y = 0;
     pindex = 0;
     frametime = EGetTime() + 500;
     framenum = 0;
+#ifdef PAGE_FLIP
+    printf("starting alarm\n");
     ESetAlarm(frametime);
+#endif
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
-
 
     bb.srcform = screen;
     bb.srcpoint.x = 0;
@@ -365,22 +582,34 @@ char *argv[];
    /* hide cursor */
    CursorVisible(FALSE);
 
+   init3d();
+
    /* animate it */
+   angle = 0.5;
+   transform3d(&ltm, angle);
+   draw3d();  
    while(1)
    {
-
-     restoresprite(&thesprite);
-/*     restoresprite(&thesprite2);  */
+#if 0
+     restoreunder(&thesprite);
+/*     restoreunder(&thesprite2);  */
 
      movesprite(&thesprite);
 /*     movesprite(&thesprite2);  */
 
-     savesprite(&thesprite);
-/*     savesprite(&thesprite2);   */
+     saveunder(&thesprite);
+/*     saveunder(&thesprite2);   */
 
      drawsprite(&thesprite);
 /*     drawsprite(&thesprite2);   */
+#endif
 
+     draw3d();  
+     angle += 0.05;
+     transform3d(&ltm, angle); 
+     draw3d();  
+
+#ifdef PAGE_FLIP
      /* show draw time */
      waiting >>= 4;
      bb.srcform = NULL;
@@ -410,6 +639,7 @@ char *argv[];
 
      /* ensure 1 vblank has happened */
      while (currpage == framenum);
+#endif
 
    }
 
