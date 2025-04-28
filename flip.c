@@ -6,9 +6,11 @@
 
 #include "mathf.h"
 
+#define PAGE_FLIP
+
 #ifndef unix
 #info flipdemo
-#info Version 1.0
+#info Version 1.1
 #tstmp
 #endif
 
@@ -86,7 +88,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 33;
+  frametime += 17;
   framenum++;
 
   signal(sig, sh_timer);
@@ -306,17 +308,18 @@ int sig;
   exit(2);
 }
 
+real costable[128],sintable[128];
 
 short vcount;
-Vertex3d vertices[500];
+Vertex3d vertices[2048];
 
 short lcount;
-unsigned short lines[500][2];
+unsigned short lines[2048][2];
 
 mat33 ltm;
 
 int addvertex(x, y, z)
-int x, y, z;
+double x, y, z;
 {
     vertices[vcount].wc.x.fv = x * 1.0;
     vertices[vcount].wc.y.fv = y * 1.0;
@@ -328,6 +331,15 @@ int x, y, z;
 void addline(a, b)
 int a, b;
 {
+    int i;
+
+    /* unique edges only */  
+    for(i=0; i<lcount; i++)
+    {
+      if (lines[i][0] == b && lines[i][1] == a)
+        return;	
+    }
+
     lines[lcount][0] = a;
     lines[lcount][1] = b;
     lcount++;
@@ -335,6 +347,14 @@ int a, b;
 
 void init3d()
 {
+  int i;
+  
+ for(i=0; i<128; i++)
+ {
+   costable[i].fv = cos((i/128.0) * 2.0 * 3.1415926);	
+   sintable[i].fv = sin((i/128.0) * 2.0 * 3.1415926);	
+ }
+
     zero.fv = 0.0;
     fov.fv = 2.0;
     one.fv = 1.0;
@@ -345,17 +365,21 @@ void init3d()
     spinaxis.y.fv = 0.666;
     spinaxis.z.fv = 0.333;
 
+  
+
+
+
     vcount = 0;
 
-    addvertex(-1, -1, -1);
-    addvertex( 1, -1, -1);
-    addvertex( 1,  1, -1);
-    addvertex(-1,  1, -1);
+    addvertex(-1.0, -1.0, -1.0);
+    addvertex( 1.0, -1.0, -1.0);
+    addvertex( 1.0,  1.0, -1.0);
+    addvertex(-1.0,  1.0, -1.0);
 
-    addvertex(-1, -1,  1);
-    addvertex( 1, -1,  1);
-    addvertex( 1,  1,  1);
-    addvertex(-1,  1,  1);
+    addvertex(-1.0, -1.0,  1.0);
+    addvertex( 1.0, -1.0,  1.0);
+    addvertex( 1.0,  1.0,  1.0);
+    addvertex(-1.0,  1.0,  1.0);
 
     lcount = 0;
 
@@ -388,15 +412,14 @@ vec3* v;
 
 void rotatem(mat, radians, v)
 mat33* mat;
-double radians;
+int radians;
 vec3* v;
 {
     vec3 leading,crossed,scaled;
-    real a, cosf, sinf;
+    real cosf, sinf;
 
-    a.fv = cos(radians);
-    cosf.iv = subf(one.iv, a.iv);
-    sinf.fv = sin(radians);
+    cosf.iv = subf(one.iv, costable[radians & 127].iv);
+    sinf.iv = sintable[radians & 127].iv;
 
     leading.x.iv = subf(one.iv, mulf(v->x.iv, v->x.iv));
     leading.y.iv = subf(one.iv, mulf(v->y.iv, v->y.iv));
@@ -426,27 +449,29 @@ vec3* v;
 
 void rotateY(mat, radians)
 mat33* mat;
-double radians;
+int radians;
 {
-    float cf = cos(radians);
-    float sf = sin(radians);
+    real cf,sf;
+    
+   cf.iv = costable[radians & 127].iv;
+   sf.iv = sintable[radians & 127].iv;
 
-    mat->row0.x.fv = cf;
+    mat->row0.x.iv = cf.iv;
     mat->row0.y.iv = zero.iv;
-    mat->row0.z.fv = -sf;
+    mat->row0.z.fv = -sf.fv;
     mat->row1.x.iv = zero.iv;
     mat->row1.y.iv = one.iv;
     mat->row1.z.iv = zero.iv;
-    mat->row2.x.fv = sf;
+    mat->row2.x.fv = sf.fv;
     mat->row2.y.iv = zero.iv;
-    mat->row2.z.fv = cf;
+    mat->row2.z.iv = cf.iv;
 }
 
 
 
 void transform3d(mat, radians)
 mat33* mat;
-double radians;
+int radians;
 {
     Vertex3d* src = vertices;
     int count = vcount;
@@ -481,8 +506,19 @@ void draw3d()
     int i;
 
       bb.srcform = NULL;
-      bb.rule = bbSxorD;
+      bb.rule = bbZero;
       bb.halftoneform = NULL;
+
+      bb.destrect.x = 0;
+      bb.destrect.y = page.y;
+      bb.destrect.w = 640;
+      bb.destrect.h = 480;
+
+      /* clear page 1 to gray */
+      RectDrawX(&bb.destrect, &bb);
+
+
+      bb.rule = bbS;
       bb.destrect.w = 1;
       bb.destrect.h = 1;
       
@@ -498,6 +534,55 @@ void draw3d()
     }
 }
 
+int loadmodel(filename)
+char *filename;
+{
+  char aline[128];
+  float x,y,z;
+  int p0,p1,p2,p3;
+  
+   FILE *fp = fopen(filename, "r");
+   if (fp)
+   {
+   	 vcount = 0;
+   	 lcount = 0;
+   	 
+     /* RWX is 1-based... */
+     addvertex(0.0, 0.0, 0.0);	
+   
+     while (fgets(aline, sizeof(aline), fp))
+     {
+printf(aline);
+     	
+       if (sscanf(aline, " Vertex %f %f %f", &x,&y,&z) == 3)
+       {
+         addvertex(x,y,z);	
+       }
+       else
+       if (sscanf(aline, " Triangle %d %d %d", &p0,&p1,&p2) == 3)
+       {
+         addline(p0,p1);
+         addline(p1,p2);
+         addline(p2,p0);
+       }
+       else
+       if (sscanf(aline, " Quad %d %d %d %d", &p0,&p1,&p2,&p3) == 4)
+       {
+         addline(p0,p1);
+         addline(p1,p2);
+         addline(p2,p3);
+         addline(p3,p0);
+       }
+     }
+
+     printf("model has %d vertices %d edges\n", vcount, lcount);
+     fclose(fp);
+   }
+
+   return 1;
+}
+
+
 int *mapped_fpu;
 unsigned int oldwaiting[2];
 main(argc,argv)
@@ -509,12 +594,15 @@ char *argv[];
     struct POINT origin,p2;
     struct RECT r;
     unsigned int currpage,waiting;
-    float angle;
-
+    int angle;
+    
     /* map FPU into our memory space */
 	mapped_fpu = phys(2);
 	if (mapped_fpu == NULL)
+	{
+		fprintf(stderr, "no FPU mapped\n");
 		exit(2);
+	}
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -583,9 +671,13 @@ char *argv[];
    CursorVisible(FALSE);
 
    init3d();
+   if (argc > 1)
+   {
+   	 loadmodel(argv[1]);
+   }
 
    /* animate it */
-   angle = 0.5;
+   angle = 5;
    transform3d(&ltm, angle);
    draw3d();  
    while(1)
@@ -604,8 +696,7 @@ char *argv[];
 /*     drawsprite(&thesprite2);   */
 #endif
 
-     draw3d();  
-     angle += 0.05;
+     angle++;
      transform3d(&ltm, angle); 
      draw3d();  
 
