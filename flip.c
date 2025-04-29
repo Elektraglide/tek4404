@@ -22,7 +22,7 @@ typedef struct
     short vpx, vpy;
 } Vertex3d;
 
-real zero,fov,one,two,camdist;
+real zero,half,one,two, fov,camdist;
 vec3 spinaxis;
 
 
@@ -348,7 +348,8 @@ int a, b;
 void init3d()
 {
   int i;
-  
+
+ printf("build table\n");  
  for(i=0; i<128; i++)
  {
    costable[i].fv = cos((i/128.0) * 2.0 * 3.1415926);	
@@ -356,19 +357,17 @@ void init3d()
  }
 
     zero.fv = 0.0;
-    fov.fv = 2.0;
+    half.fv = 0.5;
     one.fv = 1.0;
     two.fv = 2.0;
-    camdist.fv = 5.0;
 
+    fov.fv = 2.0;
+    camdist.fv = 5.0;
     spinaxis.x.fv = 0.666;
     spinaxis.y.fv = 0.666;
     spinaxis.z.fv = 0.333;
 
   
-
-
-
     vcount = 0;
 
     addvertex(-1.0, -1.0, -1.0);
@@ -491,7 +490,11 @@ int radians;
         src->cc.z.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.z.iv), vmmulf(src->wc.y.iv, mat->row1.z.iv)), vmmulf(src->wc.z.iv, mat->row2.z.iv));
 
         /* parallel projection + viewport transform */
+#ifdef PERSP
         ooz.iv = divf(fov.iv, vmaddf(camdist.iv, src->cc.z.iv)); 
+#else
+        ooz.iv = half.iv;
+#endif
        
         src->vpx = ftoi(vmmulf(vmmulf(src->cc.x.iv, ooz.iv), vpw.iv)) + 320;
         src->vpy = ftoi(vmmulf(vmmulf(src->cc.y.iv, ooz.iv), vph.iv)) + 240 + (page.y);
@@ -509,12 +512,11 @@ void draw3d()
       bb.rule = bbZero;
       bb.halftoneform = NULL;
 
-      bb.destrect.x = 0;
+      /* clear viewport */
+      bb.destrect.x = 80;
       bb.destrect.y = page.y;
-      bb.destrect.w = 640;
+      bb.destrect.w = 480;
       bb.destrect.h = 480;
-
-      /* clear page 1 to gray */
       RectDrawX(&bb.destrect, &bb);
 
 
@@ -552,7 +554,6 @@ char *filename;
    
      while (fgets(aline, sizeof(aline), fp))
      {
-printf(aline);
      	
        if (sscanf(aline, " Vertex %f %f %f", &x,&y,&z) == 3)
        {
@@ -573,6 +574,10 @@ printf(aline);
          addline(p2,p3);
          addline(p3,p0);
        }
+       
+      if (lcount > 400)
+        break;
+
      }
 
      printf("model has %d vertices %d edges\n", vcount, lcount);
@@ -612,16 +617,6 @@ char *argv[];
    fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
-
-    ESetSignal();
-    page.x = page.y = 0;
-    pindex = 0;
-    frametime = EGetTime() + 500;
-    framenum = 0;
-#ifdef PAGE_FLIP
-    printf("starting alarm\n");
-    ESetAlarm(frametime);
-#endif
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -669,6 +664,16 @@ char *argv[];
 
    /* hide cursor */
    CursorVisible(FALSE);
+
+    /* ESetSignal(); */
+    page.x = page.y = 0;
+    pindex = 0;
+    frametime = EGetTime() + 500;
+    framenum = 0;
+#ifdef PAGE_FLIP
+    printf("starting alarm\n");
+    ESetAlarm(frametime);
+#endif
 
    init3d();
    if (argc > 1)
