@@ -7,6 +7,7 @@
 	global _vmmulf
 	global _vmdivf
 	global _vmaddf
+	global _vmsubf
 
 *
 * single precision traps
@@ -137,6 +138,28 @@ _vmaddf
 L4
     move.w (a0),d0
     dbpl d1,L4
+    move.l -(a0),d0
+	swap d0
+
+	unlk a6
+	rts
+
+_vmsubf
+	link a6,#0
+	move.l #$7de004,a0
+	move.l 8(a6),d0
+	move.l 12(a6),d1
+    swap d0
+	swap d1
+
+    move.w #$be,8(a0)
+    move.w #$1142,(a0)
+    move.l d0,(a0)
+    move.l d1,(a0)+
+    move #32,d1
+L6
+    move.w (a0),d0
+    dbpl d1,L6
     move.l -(a0),d0
 	swap d0
 
