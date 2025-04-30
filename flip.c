@@ -466,20 +466,37 @@ int radians;
     mat->row2.z.iv = cf.iv;
 }
 
+scalem(mat, sx,sy,sz)
+mat33* mat;
+int sx,sy,sz;
+{
+   mat->row0.x.iv = mulf(mat->row0.x.iv, sx);
+   mat->row0.y.iv = mulf(mat->row0.y.iv, sy);
+   mat->row0.z.iv = mulf(mat->row0.z.iv, sz);
+   mat->row1.x.iv = mulf(mat->row1.x.iv, sx);
+   mat->row1.y.iv = mulf(mat->row1.y.iv, sy);
+   mat->row1.z.iv = mulf(mat->row1.z.iv, sz);
+   mat->row2.x.iv = mulf(mat->row2.x.iv, sx);
+   mat->row2.y.iv = mulf(mat->row2.y.iv, sy);
+   mat->row2.z.iv = mulf(mat->row2.z.iv, sz);
+}
 
-
+#define PERSP
 void transform3d(mat, radians)
 mat33* mat;
 int radians;
 {
     Vertex3d* src = vertices;
-    int count = vcount;
+    short count = vcount;
     real vpw, vph;
 
     rotatem(mat, radians, &spinaxis);
 
+    /* viewport scaling */
     vpw.fv = 240.0;
     vph.fv = 240.0;
+    scalem(mat, vpw.iv, vph.iv, one.iv); 
+
     while (count--)
     {
     	real ooz;
@@ -489,15 +506,16 @@ int radians;
         src->cc.y.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.y.iv), vmmulf(src->wc.y.iv, mat->row1.y.iv)), vmmulf(src->wc.z.iv, mat->row2.y.iv));
         src->cc.z.iv = vmaddf(vmaddf(vmmulf(src->wc.x.iv, mat->row0.z.iv), vmmulf(src->wc.y.iv, mat->row1.z.iv)), vmmulf(src->wc.z.iv, mat->row2.z.iv));
 
-        /* parallel projection + viewport transform */
 #ifdef PERSP
+        /* perspective projection */
         ooz.iv = divf(fov.iv, vmaddf(camdist.iv, src->cc.z.iv)); 
 #else
+        /* parallel projection */
         ooz.iv = half.iv;
 #endif
        
-        src->vpx = ftoi(vmmulf(vmmulf(src->cc.x.iv, ooz.iv), vpw.iv)) + 320;
-        src->vpy = ftoi(vmmulf(vmmulf(src->cc.y.iv, ooz.iv), vph.iv)) + 240 + (page.y);
+        src->vpx = ftoi(vmmulf(src->cc.x.iv, ooz.iv)) + 320;
+        src->vpy = ftoi(vmmulf(src->cc.y.iv, ooz.iv)) + 240 + (page.y);
 
         src++;
     }
@@ -506,7 +524,7 @@ int radians;
 void draw3d()
 {
     struct POINT p2;
-    int i;
+    short i;
 
       bb.srcform = NULL;
       bb.rule = bbZero;

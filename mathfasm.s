@@ -86,7 +86,7 @@ _vmmulf
 	move.l 12(a6),d1
     swap d0
 	swap d1
-    move.w #190,8(a0)
+    move.w #$be,8(a0)
     move.w #12610,(a0)
     move.l d0,(a0)
     move.l d1,(a0)+
@@ -130,7 +130,7 @@ _vmaddf
     swap d0
 	swap d1
 
-    move.w #190,8(a0)
+    move.w #$be,8(a0)
     move.w #322,(a0)
     move.l d0,(a0)
     move.l d1,(a0)+
