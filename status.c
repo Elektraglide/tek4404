@@ -78,8 +78,7 @@ int main(argc, argv)
 int argc;
 char **argv;
 {
-	int i, len, rc, boot, pmem;
-	PH header;
+	int i, len, rc, pmem;
 	char bootfile[256];
 	char *needle;
 	char *symbols;
@@ -91,7 +90,6 @@ char **argv;
 	struct passwd *pentry;
 	int lastuid;
 	time_t bootstamp,timestamp,beginstamp,nowstamp;
-	struct tm *ts;
 	int cpu_pers,dsk_pers,tty_pers,pip_pers;
 
   char mode[64];
@@ -100,6 +98,11 @@ char **argv;
   int tname,swapsize;
   unsigned int personality;
   
+	int pcount;
+	int prunning;
+	int putime;
+	int pstime;
+  int totalcpu;
   
 #ifdef __clang__
 	strcpy(buffer, "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/system.boot");
@@ -162,9 +165,15 @@ bootstamp = getkint32(symbols, symbolsize, "sbttim", pmem);
 printf("sizeof(atask) = %d  TSKSIZ=%d\n", (int)sizeof(atask), getkconstant(symbols, symbolsize, "TSKSIZ", pmem));
 printf("CLOCKS_PER_SECOND %d\n", getkconstant(symbols, symbolsize, "CLOCKS_PER_SECOND", pmem));
 printf("swap device %d\n", getkint16(symbols, symbolsize, "swapdv", pmem));
+printf("swploc %8.8x\n", getkint32(symbols, symbolsize, "swploc", pmem));
+printf("swap_stats %8.8x\n", getkint32(symbols, symbolsize, "swap_stats", pmem));
+
+
 printf("slplst %8.8x\n", getkint32(symbols, symbolsize, "slplst", pmem));
 printf("runlst %8.8x\n", getkint32(symbols, symbolsize, "runlst", pmem));
 printf("usrtop %8.8x\n\n", getkint32(symbols, symbolsize, "usrtop", pmem));
+
+
 
 /* these are task scheduling profiles depending on current work */
 len = getkconstant(symbols, symbolsize, "PERSONALITY_SIZE", pmem);
@@ -173,7 +182,14 @@ dsk_pers = getkconstant(symbols, symbolsize, "DISK_personality", pmem);
 tty_pers = getkconstant(symbols, symbolsize, "TTY_personality", pmem);
 pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 
+//printf("\033[2J");
+while(1)
+{
   nowstamp = time(NULL);
+#ifdef __clang__
+	/* we want time from kernel image */
+	nowstamp = bootstamp + (getkint32(symbols, symbolsize, "stimh", pmem) / 100 );
+#endif
 
 #ifdef STATIC_LOOKUP
 	tsktab = 0x0001EEF0;
@@ -182,14 +198,22 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 	/* get to task table */
 	tsktab = getkint32(symbols, symbolsize, "tsktab", pmem);
 	tskend = getkint32(symbols, symbolsize, "tskend", pmem);
-	printf("tsktab 0x%8.8x 0x%8.8x\n", tsktab, tskend);
 #endif
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
 		fprintf(stderr, "failed to seek\n");
- 
+
+	/* gather stats over all processes */
 	lastuid = -1;
+	pcount = 0;
+	prunning = 0;
+	putime = 0;
+	pstime = 0;
+
+	//printf("\033[5;1H");
+	printf("\nPID PPID STATUS    OWNER TTY  PRI SIZE TIME    %CPU  IO  QUANTUM PERSON\n");
+	sleep(1);
 	while(tsktab < tskend)
 	{
 		rc = read(pmem, &atask, sizeof(atask));
@@ -197,8 +221,8 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 			fprintf(stderr, "failed to read\n");
 
 		/* not sure how to identify a non-task */
-        if (atask.tsprir == 0)
-          break;
+		if (atask.tsprir == 0)
+			break;
 
 		/* status name */
 		if (atask.tsstat == TRUN)  status = "run";
@@ -208,7 +232,7 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 		if (atask.tsstat == TTRACE) status = "trace";
 
 		
-		sprintf(numbers, "pri%-3d", atask.tsprir);
+		sprintf(numbers, "%-3d", atask.tsprir);
 		priority = numbers;
 		/* catch unknown magic values */
 		if (atask.tsprir == 251) priority = "pipe";
@@ -246,59 +270,59 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 		read(pmem, &userbl, sizeof(userbl));
 		lseek(pmem, rc, SEEK_SET);
 
-        /* pages are 4k */
-        swapsize = 4 * (ntohs(userbl.usizet)+ntohs(userbl.usized)+ntohs(userbl.usizes));
-        printf("swap size = %d (%d)\n", swapsize * 1024, ntohs(atask.tssize));
+		/* pages are 4k */
+		swapsize = 4 * (ntohs(userbl.usizet)+ntohs(userbl.usized)+ntohs(userbl.usizes));
+#if 0
+		printf("swap size = %d (%d)\n", swapsize * 1024, ntohs(atask.tssize));
 
-        /* read swap image */
-        printf("swap offset = %d %d %d %d\n",
-        atask.tsswap[0],atask.tsswap[1],atask.tsswap[2],atask.tsswap[3]);
+		/* read swap image */
+		printf("swap offset = %d %d %d %d\n",
+		atask.tsswap[0],atask.tsswap[1],atask.tsswap[2],atask.tsswap[3]);
+#endif
 
 		/* running stats */
-		beginstamp = ntohl(userbl.ustart);
-		if (beginstamp == 0)
-  		  beginstamp = bootstamp;
-
-		timestamp = nowstamp - beginstamp;		
-		printf("%d => task running for: %2.2d:%2.2d:%2.2d\n", timestamp,
-  		(timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60); 
 /*
 		ts = localtime(&beginstamp);
 		printf("task start: %2.2d-%2.2d-%4.4d %2.2d:%2.2d\n", ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900,ts->tm_hour, ts->tm_min);
 */
-		printf("pid(%d) ppid(%d) %6s %8s %3s %5s %3dK ",ntohs(atask.tstid), ntohs(atask.tstidp), 
-		   status, pentry->pw_name, ntohs(atask.tstty) > 1 ? tty : "xxx", priority, swapsize);
+		printf("%3d  %3d %6s %8s %3s %4s %3dK ",ntohs(atask.tstid), ntohs(atask.tstidp),
+		   status, pentry->pw_name, ntohs(atask.tstty) > 1 ? tty : "  xxx", priority, swapsize);
 
+		beginstamp = ntohl(userbl.ustart) / 1;		/* this is initialized from stimh which 100Hz clock.. */
+		if (beginstamp == 0)
+  		  beginstamp = bootstamp;
+
+		timestamp = nowstamp - beginstamp;		
+		printf("%2.2d:%2.2d:%2.2d ", (timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60);
+	
 		i = (atask.tsact);
 /*		printf("%d:%2.2d:%2.2d ", ((i/60/60) % 60), ((i/60) % 60), i % 60); */
 /*		printf("%d [%s] ", i,	mode); */
 
 		/* unknowns... */
-		printf("cpu%d tsmode%d tsact%d swap%d\n", ntohs(atask.tscpu), atask.tsmode2, (atask.tsact), ntohl(atask.tsswap) );
+		//printf("cpu%d tsmode%d tsact%d swap%d\n", ntohs(atask.tscpu), atask.tsmode2, (atask.tsact), ntohl(*(int *)atask.tsswap) );
 
 		/* if its core.. */
 		if (atask.tsmode & TCORE)
 		{
 			struct mt *arun;
 			
-			printf("task time user: %d  task time system: %d ", ntohl(userbl.utimu) ,ntohl(userbl.utims));
-			printf("total user: %d  total system: %d\n", ntohl(userbl.utimuc) ,ntohl(userbl.utimsc));
-			
-			printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm);
+			printf("%f ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) * 100.0f) / totalcpu);
 			printf("IO count:%d  limits[time:%d io:%d mem:%d] ", ntohl(userbl.uicnt), ntohl(userbl.utimlmt), ntohl(userbl.uiotlmt), ntohl(userbl.umemlmt));
+			/* printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm); */
 
 			/* scheduling */
-			printf("cpu:%d usys:%d uquantum:%d ", ntohs(userbl.ucpu), ntohs(userbl.usys_ratio), ntohs(userbl.uquantum));
 			personality = ntohl(userbl.upersonality);
 			status = "??? ";
 			if (personality == cpu_pers)  status = "CPU ";
 			if (personality == dsk_pers)  status = "DISK";
 			if (personality == tty_pers)  status = "TTY ";
 			if (personality == pip_pers)  status = "PIPE";
-			printf("person:%s\n",status );
+			printf("uquantum:%d person:%s\n",ntohs(userbl.uquantum), status );
 			
+#if 0
 			/* memory map */
-			printf("tchunk:%d dchunk:%d schunk:%d uerror:%d\n", ntohs(userbl.utchunk), ntohs(userbl.udchunk), ntohs(userbl.uschunk), userbl.uerror);
+			//printf("tchunk:%d dchunk:%d schunk:%d uerror:%d\n", ntohs(userbl.utchunk), ntohs(userbl.udchunk), ntohs(userbl.uschunk), userbl.uerror);
 			printf("tpages:%d dpages:%d spages:%d\n", ntohs(userbl.usizet), ntohs(userbl.usized), ntohs(userbl.usizes));
 			if (userbl.usizet)
 			{
@@ -325,7 +349,7 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 			lseek(pmem, ntohl(userbl.ustklim)-4096, SEEK_SET);
 			read(pmem, userstack, sizeof(userstack));
 			lseek(pmem, rc, SEEK_SET);
-			printbuffer(userstack+4096-128, 128);
+			//printbuffer(userstack+4096-128, 128);
 			
 			printf("size=%d slot=%d fdn=%s ", ntohs(userbl.udname_size),ntohs(userbl.udname_slot),userbl.ufdn+2);
 
@@ -336,13 +360,34 @@ pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
 				readkstring(buffer, 14, tname, pmem);
 				printf("ucname=%s umem=%d  utask=%d \n", buffer, ntohs(userbl.umxmem), (int)userbl.utask_ord);
 			}
-
-            printf("\n");
+#endif
 		}
 
-
+		pcount++;
+		putime += ntohl(userbl.utimu);
+		pstime += ntohl(userbl.utims);
+		if (atask.tsstat == TRUN) prunning++;
+		
 		tsktab += sizeof(atask);
+		
+		sleep(1);
 	}
+
+	//printf("\033[1;1H");
+	printf("processes: %d total, %d running utime:%d/%d   ", pcount,prunning, putime, pstime);
+	printf("boot time:%s\n", kernboottime(symbols, symbolsize, pmem));
+	printf("system_calls: %d ", getkint32(symbols, symbolsize, "system_calls", pmem));
+	printf("usedmem: %dk ", getkint32(symbols, symbolsize, "usedmem", pmem) / 1024);
+	printf("physmem: %dk\n", getkint32(symbols, symbolsize, "memsize", pmem) / 1024);
+	printf("disk ops:%d ", getkint32(symbols, symbolsize, "stadsk", pmem));
+	printf("block ops:%d\n", getkint32(symbols, symbolsize, "stablk", pmem));
+
+	sleep(1);
+	
+	/* used for CPU % */
+	totalcpu = putime + pstime;
+	
+}
 
 	close(pmem);
 
