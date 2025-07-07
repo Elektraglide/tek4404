@@ -72,6 +72,8 @@ int len;
 
 unsigned char userstack[4096];
 
+#define offsetof(st, m) ((int)&(((st *)0)->m))
+
 /* tweaking OS settings */
 int main(argc, argv)
 int argc;
@@ -233,8 +235,19 @@ while(1)
 
 		/* read userblock */
 		rc = lseek(pmem, 0, SEEK_CUR);
-		lseek(pmem, ntohl(atask.tsutop), 0);
-		read(pmem, &userbl, sizeof(userbl));
+		i = offsetof(struct userbl, utimu);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.utimu, 8);
+		i = offsetof(struct userbl, usizet);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.usizet, 6);
+		i = offsetof(struct userbl, ustart);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.ustart, 4);
+		i = offsetof(struct userbl, uquantum);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.uquantum, 10);
+
 		lseek(pmem, rc, SEEK_SET);
 
 		/* pages are 4k */
