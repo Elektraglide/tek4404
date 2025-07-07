@@ -22,15 +22,20 @@ extern int kill();
 extern int wait();
 extern char *getenv();
 
-
+#undef SIGTERM
+#define SIGTERM 15
+#undef SIGDEAD
+#define SIGDEAD 20	//#define SIGCHLD 20
 #else
 
 #include <varargs.h>
-#include <net/in.h>
 #include <net/socket.h>
+#include <net/in.h>
 #include "../fdset.h"
 
 void setsid() {}
+
+#define sockaddr_in in_sockaddr
 
 #endif
 
@@ -50,8 +55,8 @@ extern int system_control(); /* arg=1 does something, arg=2 makes controlling te
 #define POLLINGINPx
 #else
 #define POLLINGPTY			/* cannot select() pty; only way to check for pty input is to poll using control_pty() */
-#define USE_EVENTS			/* use Event system to get input */
-#define USE_TTYREADERx		/* cannot select() stdin; use a socketpair + child process */
+#define USE_EVENTSx			/* use Event system to get input */
+#define USE_TTYREADER		/* cannot select() stdin; use a socketpair + child process */
 #define POLLINGINPx			/* PLAN Z;  Poll stdin by checking (sg_speed & INCHR) */
 #endif
 
@@ -332,6 +337,20 @@ int islogger;
   return pid;
 }
 
+int validwin(win)
+Window *win;
+{
+  if (win < allwindows || win >= allwindows+numwindows)
+  {
+    fprintf(stderr, "invalid win pointer %d\012\n", win-allwindows);
+	return 0;
+  }
+  else
+  {  
+    return 1;
+  }
+}
+
 void addcursor(win)
 Window *win;
 {
@@ -391,6 +410,9 @@ Window *win;
 {
   Window *awin,*prevwin;
 
+  if (!validwin(win))
+  	return -1;
+
   if (win != wintopmost)
   {
     if (wintopmost)
@@ -437,6 +459,8 @@ char *msg;
 int n;
 {
   Window *win = allwindows + wid;
+  if (!validwin(win))
+  	return -1;
 
   if (win == wintopmost)
    removecursor(win);
@@ -536,11 +560,11 @@ int islogger;
     /* link it */
     win->next = wintopmost;
     wintopmost = win;
+    numwindows++;
 
     if (!islogger)
-	  	WindowOutput(numwindows, welcome, sizeof(welcome));
+	  	WindowOutput(numwindows-1, welcome, sizeof(welcome));
 
-    numwindows++;
     WindowTop(win);
 
     return numwindows;
@@ -678,6 +702,9 @@ int forcedirty;
   int i,n,style,numlines,ch,rows;
   char line[160];
   unsigned char *src,*dst;
+
+  if (!validwin(win))
+  	return -1;
 
   /* size of single glyph */
   RCToRect(&glyph, 0, 0);
@@ -968,6 +995,9 @@ int forcedirty;
   }
   else
   {
+    if (!validwin(win))
+    	return;
+
     /* recurse for parts outside this window */
     quadrect.next = 0;
     RectAreasOutside(r, &win->windowrect, &quadrect);
@@ -980,7 +1010,7 @@ int forcedirty;
     RectIntersect(r, &win->windowrect, &overlap);
     if (overlap.w > 0 && overlap.h > 0)
     {
-    	struct RECT oldclip;
+      struct RECT oldclip;
      
       oldclip.x  = bb.cliprect.x;
       oldclip.y  = bb.cliprect.y;
@@ -1032,11 +1062,14 @@ int wid;
   struct RECT oldrect;
   int i;
 
+  fprintf(stderr, "WindowDestroy: %d\012\n", wid);
+
   /* unlink it */
   prevwin = NULL;
   awin = wintopmost;
   for(i=0; i<numwindows; i++)
   {
+  	fprintf(stderr, "WindowDestroy: checking %d\012\n", awin - allwindows);
     if (awin == &allwindows[wid])
     {
       if (prevwin)
@@ -1044,15 +1077,17 @@ int wid;
       
       /* continue walking so we determine last/bottom window */
     }
-    
     prevwin = awin;
     awin = awin->next;
   }
 
+
+
   oldrect = allwindows[wid].windowrect;
   
-  /* reclaim a window slot */
-  
+  /* reclaim a window slot by swapping with last entry */
+
+
   /* is top window being destroyed? */
   if (wintopmost == &allwindows[wid])
     wintopmost = wintopmost->next;
@@ -1072,14 +1107,14 @@ int wid;
   /* move last element to fill gap of deleted window */
   memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
   numwindows--;
-  
-  if (!wintopmost || numwindows < wid)
-    wintopmost = &allwindows[numwindows-1];
 
   if (numwindows > 0)
+  {
+    fprintf(stderr, "WindowDestroy: wintopmost %d\012\n", wintopmost - allwindows);
     WindowTop(wintopmost);
-
-	SetClip(&oldrect);
+  }
+  
+  SetClip(&oldrect);
   Paint(wintopmost, &oldrect, FORCEPAINT);
 }
 
@@ -1090,7 +1125,7 @@ int sig;
   struct POINT p;
   int i;
 	
-  fprintf(stderr, "cleanup on %d\n", sig);
+  fprintf(stderr, "cleanup on %d\012\n", sig);
 
 #ifdef USE_TTYREADER
   ttycleanup(sig);
@@ -1099,9 +1134,12 @@ int sig;
 #endif
 
   /* kill all windows */
-  for(i=0; i<numwindows; i++)
+  signal(SIGDEAD, SIG_IGN);
+  while(numwindows > 0)
   {
-    kill(allwindows[i].pid, SIGTERM);
+    kill(allwindows[0].pid, SIGTERM);
+  	/* NB we explicitly destroy because SIGDEAD has been disabled */
+ 	  WindowDestroy(0);
   }
   sleep(1);
   
@@ -1115,9 +1153,10 @@ int sig;
   FontClose(font);
   RestoreDisplayState(&ds);
 
-  fprintf(stderr, "Sic transit gloria Tektronix 4404\n");
+  fprintf(stderr, "Sic transit gloria Tektronix 4404\012\n");
   exit(2);
 }
+
 
 void
 cleanup_window(sig)
@@ -1128,11 +1167,14 @@ int sig;
   pid = wait(&i);
   WindowLog("child proc(%d) died with exit code %d\012\n", pid, i);
 
+  fprintf(stderr," cleanup_window: kill win with pid %d\012\n", pid);
   for(i=0; i<numwindows; i++)
   {
     if (allwindows[i].pid == pid)
     {
-      WindowDestroy(i);
+      fprintf(stderr, "cleanup_window: destroy %d\012\n", i);
+   	  WindowDestroy(i);
+
       break;
     }
   }
@@ -1173,7 +1215,7 @@ int argc;
 char **argv;
 {
   int n,i,j,k,rc,dummysock;
-  struct in_sockaddr serv_addr;
+  struct sockaddr_in serv_addr;
   fd_set fd_in;
   char ch, *name, inputbuffer[4096];
   struct timeval timeout;
@@ -1328,7 +1370,7 @@ dummysock = fdtty;
   {
     if (errno != EINTR)
     {
-      fprintf(stderr, "select(%d) error %s\n", n, strerror(errno));
+      fprintf(stderr, "select(%d) error %s\012\n", n, strerror(errno));
       exit(23);
     }
     else
@@ -1425,7 +1467,7 @@ dummysock = fdtty;
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
           WindowOutput(wintopmost - allwindows, "SIGINT\012\n", 8);
           kill(wintopmost->pid, SIGINT);
-      }
+        }
       
         if (n < 0)
         {
@@ -1459,6 +1501,7 @@ dummysock = fdtty;
         {
           rc = 0;
           wait(&rc);
+
           WindowDestroy(i);
           WindowLog("window%d destroyed with exit code 0x%04x\012\n", i, rc);
           break;
@@ -1606,7 +1649,7 @@ dummysock = fdtty;
   {
     if (win->dirty )
     {
-    	SetClip(&win->windowrect);
+      SetClip(&win->windowrect);
       Paint(wintopmost, &win->windowrect, FALSE);
       win->dirty = 0;
       win->vt.dirtylines = 0;
@@ -1614,7 +1657,7 @@ dummysock = fdtty;
     else
     if (win->vt.dirtylines)
     {
-    	SetClip(&win->contentrect);
+      SetClip(&win->contentrect);
       Paint(wintopmost, &win->contentrect, FALSE);
       win->vt.dirtylines = 0;
     }
