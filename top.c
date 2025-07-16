@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/fcntl.h>
+#include <net/netdev.h>
 #include <pwd.h>
 #include "ph.h"
 #include "kernutils.h"
@@ -350,7 +351,7 @@ while(1)
 			}
 		}
 	}
-	
+    printf("\033[2K");	
 	printf("\033[1K\033[>31l");
 	printf("\033[1;1H");
 	printf("processes: %d total, %d running utime:%d/%d   ", pcount,prunning, putime, pstime);
@@ -367,7 +368,28 @@ while(1)
 	printf("disk ops:%d ", readkint32(stadsk, pmem));
 	printf("block ops:%d\n", readkint32(stablk, pmem));
 
-	sleep(2);
+{
+unsigned char dbuffer[2048];
+int dbufferlen,nde_size,ncount;
+netdev *ptr;
+
+  dbufferlen = ldiddle("ndevsw"); 			/* buffer len */
+  rdiddle("nde_size", &nde_size, sizeof(nde_size));	/* ndev struct size */
+  ncount  = dbufferlen / nde_size;
+  ptr = rdiddle("ndevsw", dbuffer, dbufferlen);		/* buffer data */
+
+  ptr = dbuffer;
+  while (ncount-- > 0)
+  {
+  	if (ptr->nd_flags & F_N_ONLINE)
+  	{
+    	printf("network %s: recv: %d xmit: %d\n", 
+		  ptr->nd_name, ptr->nd_stat.sb_rcnt, ptr->nd_stat.sb_xcnt);
+	}
+    ptr++;
+  }
+}
+	sleep(5);
 	
 	/* used for %CPU */
 	totalcpu = putime + pstime;
