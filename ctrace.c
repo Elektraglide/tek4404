@@ -17,7 +17,8 @@ typedef enum {
 	VALUE,
 	POINTER,
 	STRINGPTR,
-	D0
+	D0,
+	A0
 } paramtype;
 
 char *defaultprocess[] = {"/tek/forever", NULL};	/* somthing that sits there doing stuff */
@@ -71,7 +72,7 @@ int pcount;
 	fd = open(exename,0);
 	read(fd, &ph, sizeof(ph));
 	close(fd);
-	printf("start = %8.8x  length = %8.8x\n", ph.textstart,ph.textsize);
+	printf(".text start = %8.8x  length = %8.8x\n", ph.textstart,ph.textsize);
 
 	pcount = 0;	
 	i = 0;
@@ -86,7 +87,7 @@ int pcount;
 		if (i + len > ph.textsize)
 			len = ph.textsize - i;	
 		get_controlled_task_memory(task, start, dottext, len);
-		printf("fetched %d bytes\n", len);
+		if (verbose) printf("fetched %d bytes\n", len);
 		
 		instr = (unsigned char *)dottext;
 		icount = len >> 1;	/* 16-bit words */
@@ -106,7 +107,7 @@ int pcount;
 			{
 				instr[j] = ILLEGAL;
 	        	update_controlled_task_memory(task, start+j*2, dottext+j*2,2);
-	        	printf("patched %8.8x\n", start+j*2); 
+	        	if (verbose) printf("patched %8.8x\n", start+j*2); 
 	        	pcount++;
 			}
 
@@ -147,7 +148,8 @@ paramtype *arglist;
 				arglist[0] = VALUE;
 				break;
 			case 7:
-				name = "stack";		/* FIXME: uses A0 */
+				name = "stack";
+				arglist[0] = A0;
 				break;
 			case 8:
 				name = "cpint";
@@ -191,6 +193,14 @@ paramtype *arglist;
 				name = "close";
 				arglist[0] = D0;
 				break;
+			case 16:
+				name = "dup";
+				arglist[0] = D0;
+				break;
+			case 17:
+				name = "dup2";
+				arglist[0] = D0;
+				break;
 			case 19:
 				name = "unlink";
 				arglist[0] = STRINGPTR;
@@ -199,6 +209,10 @@ paramtype *arglist;
 				name = "chdir";
 				arglist[0] = STRINGPTR;
 				arglist[1] = VALUE;
+				break;
+			case 22:
+				name = "lock";
+				arglist[0] = D0;
 				break;
 			case 23:
 				name = "chown";
@@ -214,6 +228,10 @@ paramtype *arglist;
 				name = "chacc";
 				arglist[0] = STRINGPTR;
 				arglist[1] = VALUE;
+				break;
+			case 26:
+				name = "defacc";
+				arglist[0] = D0;
 				break;
 			case 27:
 				name = "ofstat";
@@ -232,6 +250,10 @@ paramtype *arglist;
 				break;
 			case 34:
 				name = "suid";
+				arglist[0] = D0;
+				break;
+			case 35:
+				name = "setpr";
 				arglist[0] = D0;
 				break;
 			case 39:
@@ -266,6 +288,10 @@ paramtype *arglist;
 				arglist[0] = D0;
 				arglist[1] = POINTER;
 				break;
+			case 49:
+				name = "systat";
+				arglist[0] = POINTER;
+				break;
 			case 51:
 				name = "ttynum";
 				break;
@@ -277,6 +303,14 @@ paramtype *arglist;
 				name = "phys";
 				arglist[0] = VALUE;
 				break;
+			case 64:
+				name = "make_realtime (unimplemented)";
+				break;
+			case 65:
+				name = "control_pty";
+				arglist[0] = VALUE;
+				arglist[1] = VALUE;
+				break;
 			default:
 				sprintf(buffer,"trap%d", code);
 				name = buffer;
@@ -286,11 +320,12 @@ paramtype *arglist;
 	return name;	
 }
 
-void printargs(task, name, arglist, params)
+void printargs(task, name, arglist, params, epilog)
 struct ctask *task;
 char *name;
 paramtype *arglist;
 unsigned short *params;
+char *epilog;
 {
 	unsigned int arg0;
 	unsigned int *argptr;
@@ -323,10 +358,12 @@ unsigned short *params;
 			case D0:
 				printf("%d", task->task_REGS[0]);
 				break;
+			case A0:
+				printf("%8.8x", task->task_REGS[8]);
+				break;
 		}
 	}
-
-	printf(")\n");		
+	printf(epilog);
 }
 
 void executetrap(task)
@@ -360,7 +397,7 @@ char *name;
 		argptr = *(unsigned int *)(mem + 2);
 		get_controlled_task_memory(task, argptr, params, sizeof(params));
 		name = gettrapname(params[0],arglist);
-		printargs(task, name, arglist, params);
+		printargs(task, name, arglist, params, ") ind");
 	}
 	else
 	if (mem[1] == 1)	/* use A0 for args */
@@ -369,30 +406,36 @@ char *name;
 												
 		get_controlled_task_memory(task, task->task_REGS[8], params, sizeof(params));
 		name = gettrapname(params[0],arglist);
-		printargs(task, name, arglist, params);
+        printargs(task, name, arglist, params, ") indx");
 	}
 	else				/* use inline mem for args */
 	{
 		name = gettrapname(mem[1], arglist);
-		printargs(task, name, arglist, mem);
+		printargs(task, name, arglist, mem + 1, ")");
 	}	
 
-if(done)
-	exit(0);
+    /* terminating tasks and ctask do not mix! */
+    if(!done)
+    {
+	  /* install trap instr */
+	  faultPC = task->task_PC;
+	  mem[0] = TRAP15;
+   	  update_controlled_task_memory(task, faultPC,mem, sizeof(mem));
 
-	/* install trap instr */
-	faultPC = task->task_PC;
-	mem[0] = TRAP15;
-   	update_controlled_task_memory(task, faultPC,mem, sizeof(mem));
+	  /* execute trap */
+	  task->task_PC -= 2;	/* FIXME: how much to backstep? */
+	  update_controlled_task_registers(task);
+      step_controlled_task(task); 
 
-	/* execute trap */
-	task->task_PC -= 2;	/* FIXME: how much to backstep? */
-	update_controlled_task_registers(task);
-    step_controlled_task(task); 
+      /* get returned result */
+	  get_controlled_task_registers(task);
+    
+	  /* re-install break instr */
+  	  mem[0] = ILLEGAL;
+   	  update_controlled_task_memory(task, faultPC,mem, sizeof(mem));
+   	}
 
-	/* re-install break instr */
-	mem[0] = ILLEGAL;
-   	update_controlled_task_memory(task, faultPC,mem, sizeof(mem));
+    printf(" => %d\n", task->task_REGS[0]);
 }
 
 int main(argc, argv)
@@ -435,13 +478,8 @@ char **argv;
 		/* allow child to start */
 		sleep(3);
 
-		/* this makes this process show up in status as "trce"  Why? */
-		signal(SIGTRACE, childstop);
-
 		/* allow child to start */
 	    step_controlled_task(task);  
-/*		execute_controlled_task(task);		*/
-		ctask(task, 6);
 		get_controlled_task_registers(task);
 		
 		/* patch trap instr with ILLEGAL */
@@ -476,25 +514,8 @@ char **argv;
 		}
 	}
 	else
-	{
-	
-#if 0			
-			signal(SIGTRACE, childstop);
-			signal(SIGTRAPV, childstop);
-			signal(SIGTRAP1, childstop);
-			signal(SIGTRAP2, childstop);
-			signal(SIGTRAP3, childstop);
-			signal(SIGTRAP4, childstop);
-			signal(SIGTRAP5, childstop);
-			signal(SIGTRAP6, childstop);
-
-			signal(SIGUSR1, childstop);
-			signal(SIGUSR2, childstop);
-			signal(SIGUSR3, childstop);
-
-			kill(getpid(), SIGTRACE);		/* this arrives at PARENT! */
-#endif			
-			printf("child doing execvp(%s)\n",tracee[0]);
+	{	
+			printf("tracing child: execvp(%s)\n",tracee[0]);
 
 			/* launch cmd */
 			rc = execvp(tracee[0], tracee);
