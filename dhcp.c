@@ -192,6 +192,15 @@ char *name;
   return addr;
 }
 
+/* undocumented pioctl() params */
+#define ENIOCONLINE	(ENIOCBASE+4)
+#define ENIOCOFFLINE	(ENIOCBASE+5)
+#define ENIOCGETADDR	(ENIOCBASE+6)
+#define	ENIOCSETADDR	(ENIOCBASE+7)
+#define	ENIOCPROBE	(ENIOCBASE+8)
+#define	ENIOCWRITEADDR	(ENIOCBASE+9)
+
+
 /*
  * Get MAC address of given link(dev_name)
  */
@@ -203,6 +212,7 @@ unsigned char *mac;
 #ifndef __clang__
 int n, nde_size;
 netdev *ifbuffer;
+int fd;
 
     /* behold this crazy magic NRC voodoo */
 
@@ -213,6 +223,17 @@ netdev *ifbuffer;
     /* NB assumes second entry is our NIC */
     memcpy((void *)mac, ifbuffer[1].nd_lladdr.a_ena.a6, ETHER_ADDR_LEN);
     free(ifbuffer);
+
+
+   /* alternatively, undocumented pioctl() call */
+
+   fd = socket(AF_ETHER, SOCK_RAW, 0);
+   if (fd > 0)
+   {
+      bind(fd, "", 0);
+      pioctl(fd, ENIOCGETADDR, mac, 6,6);  /* why second 6 needed? */
+      close(fd);
+   }
 
 #else
     struct ifaddrs *ifap, *p;
