@@ -136,8 +136,12 @@ paramtype *arglist;
 
 		switch(code)
 		{
+			case 3:
+				name = "fork";
+				break;
 			case 4:
 				name = "wait";
+				arglist[0] = POINTER;
 				break;
 			case 5:
 				done = 1;			/* terminate parent */
@@ -375,7 +379,6 @@ paramtype arglist[4];
 char *name;
 				
 	/* NB undocumented parameters */
-	get_controlled_task_registers(task);
 	get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
 	if (mem[0] != ILLEGAL)
 	{
@@ -414,6 +417,8 @@ char *name;
 		printargs(task, name, arglist, mem + 1, ")");
 	}	
 
+    printf("\n");
+
     /* terminating tasks and ctask do not mix! */
     if(!done)
     {
@@ -434,8 +439,11 @@ char *name;
   	  mem[0] = ILLEGAL;
    	  update_controlled_task_memory(task, faultPC,mem, sizeof(mem));
    	}
+/* we need to execute trap in order to get the return value, but that makes
+   our logging of the call appears after the effect of the call..
 
     printf(" => %d\n", task->task_REGS[0]);
+*/
 }
 
 int main(argc, argv)
@@ -492,6 +500,7 @@ char **argv;
 			/* execute until breakpoint */
 			execute_controlled_task(task); 
 
+			get_controlled_task_registers(task);
 			i = (task->task_state >> 24);
 			if (i)
 			{
@@ -509,13 +518,16 @@ char **argv;
 				break;
 
 			resume_controlled_task(task);  
-			clear_controlled_task(task);
+/*			clear_controlled_task(task);  */
 
 		}
 	}
 	else
 	{	
 			printf("tracing child: execvp(%s)\n",tracee[0]);
+
+            /* ensure in memory */
+            lock(1);
 
 			/* launch cmd */
 			rc = execvp(tracee[0], tracee);
