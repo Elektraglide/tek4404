@@ -1,0 +1,5 @@
+These files were recovered from a deleted floppy disk.
+They have been verified as correctly representing the kernel 
+structures (unlike the /lib/include/sys files which are entirely fiction).
+The uniflex.a.out appears stale since my reverse engineered version (ph.h) has more fields used
+
