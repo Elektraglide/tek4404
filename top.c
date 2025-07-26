@@ -3,16 +3,16 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/fcntl.h>
-#include <net/netdev.h>
 #include <pwd.h>
 #include "ph.h"
 #include "kernutils.h"
 
 /* recovered headers */
-#include "task.h"
-#include "userbl.h"
+#include "uniflex/task.h"
+#include "uniflex/userbl.h"
 
 #ifndef __clang__
+#include <net/netdev.h>
 #define ntohl(A) (A)
 #define ntohs(A) (A)
 #define htonl(A) (A)
@@ -70,9 +70,6 @@ int len;
 	printf("\n");
 }
 
-
-unsigned char userstack[4096];
-
 #define offsetof(st, m) ((int)&(((st *)0)->m))
 
 /* tweaking OS settings */
@@ -106,6 +103,8 @@ char **argv;
 	int putime;
 	int pstime;
   int totalcpu;
+  int openfd;
+  int framenum = 0;
   
 #ifdef __clang__
 	strcpy(buffer, "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/system.boot");
@@ -169,7 +168,9 @@ while(1)
 	prunning = 0;
 	putime = 0;
 	pstime = 0;
-    
+	openfd = 0;
+	framenum++;
+	
 	printf("\033[5;1H\033[>32l");
 	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.IO...QUANTUM.PERSON\033[0m\n");
 
@@ -238,16 +239,22 @@ while(1)
 		rc = lseek(pmem, 0, SEEK_CUR);
 		i = offsetof(struct userbl, utimu);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.utimu, 8);
+		read(pmem, &userbl.utimu, 8);						/* NB reads utimu,utims */
+		i = offsetof(struct userbl, ufiles);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.ufiles, sizeof(userbl.ufiles));
 		i = offsetof(struct userbl, usizet);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.usizet, 6);
+		read(pmem, &userbl.usizet, 6);				/* NB reads usizet,usized,usizes */
 		i = offsetof(struct userbl, ustart);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, &userbl.ustart, 4);
 		i = offsetof(struct userbl, uquantum);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, &userbl.uquantum, 10);
+		i = offsetof(struct userbl, umem[2]);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.umem[2], sizeof(struct mt));
 
 		lseek(pmem, rc, SEEK_SET);
 
@@ -283,20 +290,57 @@ while(1)
 			if (atask.tsmode & TCORE)
 			{
 				struct mt *arun;
+				unsigned int page,page_addr;
+				int argcee;
+				unsigned int argvee[4];
+				char cmdline[32];
 				
 				printf("%-4d %-5d ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) *100)/totalcpu,ntohl(userbl.uicnt) );
 
 				/* printf("IO count:%d  limits[time:%d io:%d mem:%d] ", ntohl(userbl.uicnt), ntohl(userbl.utimlmt), ntohl(userbl.uiotlmt), ntohl(userbl.umemlmt)); */
 				/* printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm); */
 
-				/* scheduling */
-				personality = ntohl(userbl.upersonality);
-				status = "??? ";
-				if (personality == cpu_pers)  status = "CPU ";
-				if (personality == dsk_pers)  status = "DISK";
-				if (personality == tty_pers)  status = "TTY ";
-				if (personality == pip_pers)  status = "PIPE";
-				printf("%-7d %s  \n",ntohs(userbl.uquantum), status );
+				/* alternate  between displaying different task info */
+				if (framenum & 1)
+				{
+					/* scheduling */
+					personality = ntohl(userbl.upersonality);
+					status = "??? ";
+					if (personality == cpu_pers)  status = "CPU ";
+					if (personality == dsk_pers)  status = "DISK";
+					if (personality == tty_pers)  status = "TTY ";
+					if (personality == pip_pers)  status = "PIPE";
+					printf("%-7d %s  \n",ntohs(userbl.uquantum), status );
+				}
+				else
+				{
+					/* find cmdline */
+					if (userbl.usizes)
+					{
+						/* read user stack page entry for oldest page in chunk */
+						lseek(pmem, ntohl(userbl.umem[2].paddr) + 4 * (ntohs(userbl.umem[2].numpages)-1), 0);
+						read(pmem, &page, 4);
+	#if 0
+						printf("%8.8x => %8.8x  ", ntohl(page), ntohl(page) * 4096 );
+	#endif
+						/* remove permissions bits */
+						page_addr = (ntohl(page) & 0xfffff) * 4096;
+								
+						/* read argc, read argv pointer */
+						lseek(pmem, page_addr, 0);
+						read(pmem, &argcee, 4);
+						read(pmem, argvee, 4 * ntohl(argc));
+						
+						for (i=0; i<ntohl(argcee); i++)
+						{
+							lseek(pmem, page_addr + (ntohl(argvee[i]) & 0xfff), 0);
+							read(pmem, cmdline, sizeof(cmdline));
+							printf("%s ", cmdline);
+						}
+						lseek(pmem, rc, SEEK_SET);
+					}
+					printf("\n");
+				}
 				
 #if 0
 				/* memory map */
@@ -321,15 +365,6 @@ while(1)
 						arun++;
 					}
 				}
-				
-				/* read last page of userstack to find command line */
-				rc = lseek(pmem, 0, SEEK_CUR);
-				lseek(pmem, ntohl(userbl.ustklim)-4096, SEEK_SET);
-				read(pmem, userstack, sizeof(userstack));
-				lseek(pmem, rc, SEEK_SET);
-				printbuffer(userstack+4096-128, 128);
-				
-				printf("size=%d slot=%d fdn=%s ", ntohs(userbl.udname_size),ntohs(userbl.udname_slot),userbl.ufdn+2);
 
 				tname = ntohl(userbl.ucname);
 				if (tname)
@@ -349,12 +384,15 @@ while(1)
 				putime += ntohl(userbl.utimu);
 				pstime += ntohl(userbl.utims);
 			}
+			for(i=0;i<UNFILS; i++)
+				if (userbl.ufiles[i])
+					openfd++;
 		}
 	}
     printf("\033[2K");	
 	printf("\033[1K\033[>31l");
 	printf("\033[1;1H");
-	printf("processes: %d total, %d running utime:%d/%d   ", pcount,prunning, putime, pstime);
+	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
 
 	timestamp = nowstamp - bootstamp;
 	printf("uptime: %2.2d:%2.2d:%2.2d \n", (timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60);
@@ -362,12 +400,13 @@ while(1)
 	printf("system_calls: %d ", readkint32(system_calls, pmem));
 	printf("freemem: %dk ", readkint16(corcnt, pmem) * 4);
 	printf("physmem: %dk\n", readkint32(memsize, pmem) / 1024);
-
+	
 	printf("mempages: %d ", readkint32(mempages, pmem));
 	printf("lbolt %d ", readkint16(lbolt, pmem));
 	printf("disk ops:%d ", readkint32(stadsk, pmem));
 	printf("block ops:%d\n", readkint32(stablk, pmem));
 
+#ifndef __clang__
 {
 unsigned char dbuffer[2048];
 int dbufferlen,nde_size,ncount;
@@ -389,6 +428,8 @@ netdev *ptr;
     ptr++;
   }
 }
+#endif
+
 	sleep(5);
 	
 	/* used for %CPU */
