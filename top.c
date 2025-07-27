@@ -169,10 +169,9 @@ while(1)
 	putime = 0;
 	pstime = 0;
 	openfd = 0;
-	framenum++;
 	
 	printf("\033[5;1H\033[>32l");
-	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.IO...QUANTUM.PERSON\033[0m\n");
+	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.IO...\033[K%s\033[0m\n", framenum & 1 ? "QUANTUM.PERSON" : "CMDLINE");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
@@ -185,18 +184,18 @@ while(1)
 		if (rc != sizeof(atask))
 			fprintf(stderr, "failed to read\n");
 
-		/* not sure how to identify a non-task */
-		if (atask.tsprir == 0)
-			break;
-
 		/* status name */
+		status = NULL;
 		if (atask.tsstat == TRUN)  status = "run";
 		if (atask.tsstat == TSLEEP) status = "sleep";
 		if (atask.tsstat == TWAIT) status = "wait";
 		if (atask.tsstat == TTERM) status = "term";
 		if (atask.tsstat == TTRACE) status = "trace";
-
 		
+		/* is it alive? */
+		if (status != NULL)
+		{
+
 		priority = NULL;
 		/* catch unknown magic values */
 		if (atask.tsprir == 251) priority = "pipe";
@@ -252,9 +251,10 @@ while(1)
 		i = offsetof(struct userbl, uquantum);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, &userbl.uquantum, 10);
-		i = offsetof(struct userbl, umem[2]);
+
+		i = offsetof(struct userbl, umem) + 2 * MTSIZE;
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.umem[2], sizeof(struct mt));
+		read(pmem, userbl.umem + 2 * MTSIZE, 10);
 
 		lseek(pmem, rc, SEEK_SET);
 
@@ -268,9 +268,13 @@ while(1)
 		atask.tsswap[0],atask.tsswap[1],atask.tsswap[2],atask.tsswap[3]);
 #endif
 
-		/* is it alive? */
-		if ((atask.tsstat && swapsize) || (atask.tstid == 0))
+		/* not sure how to identify a non-task */
+		if (atask.tstid != 0 && swapsize == 0)
 		{
+
+		}
+
+
 			/* running stats */
 			printf("%-3d  %-3d %-6s %-8s %-5s %-4s %3dK ",ntohs(atask.tstid), ntohs(atask.tstidp),
 				 status, pentry->pw_name, ntohs(atask.tstty) > 1 ? tty : "xxx  ", priority, swapsize);
@@ -318,13 +322,21 @@ while(1)
 					if (userbl.usizes)
 					{
 						/* read user stack page entry for oldest page in chunk */
-						lseek(pmem, ntohl(userbl.umem[2].paddr) + 4 * (ntohs(userbl.umem[2].numpages)-1), 0);
-						read(pmem, &page, 4);
-	#if 0
-						printf("%8.8x => %8.8x  ", ntohl(page), ntohl(page) * 4096 );
-	#endif
+						arun = (struct mt *)(userbl.umem);
+		
+						i = ntohl(arun[2].paddr) + (ntohs(arun[2].numpages) - 1) * 4;
+						lseek(pmem, i, 0);
+						len = read(pmem, &page, 4);
+#if 0
+    printf("\n len=%d seek = %6.6x\n", len, i);
+	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[0].vaddr), ntohl(arun[0].paddr), ntohs(arun[0].numpages));
+	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[1].vaddr), ntohl(arun[1].paddr), ntohs(arun[1].numpages));
+	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[2].vaddr), ntohl(arun[2].paddr), ntohs(arun[2].numpages));
+
+	printf("%8.8x => %8.8x \n", ntohl(page), ntohl(page) << 12 );
+#endif
 						/* remove permissions bits */
-						page_addr = (ntohl(page) & 0xfffff) * 4096;
+						page_addr = (ntohl(page) & 0xfffff) << 12;
 								
 						/* read argc, read argv pointer */
 						lseek(pmem, page_addr, 0);
@@ -335,8 +347,9 @@ while(1)
 						{
 							lseek(pmem, page_addr + (ntohl(argvee[i]) & 0xfff), 0);
 							read(pmem, cmdline, sizeof(cmdline));
-							printf("%s ", cmdline);
+							printf("[%d] ", argvee[i], cmdline);
 						}
+
 						lseek(pmem, rc, SEEK_SET);
 					}
 					printf("\n");
@@ -434,6 +447,7 @@ netdev *ptr;
 	
 	/* used for %CPU */
 	totalcpu = putime + pstime;
+	framenum++;
 	
 }
 
