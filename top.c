@@ -171,11 +171,14 @@ while(1)
 	openfd = 0;
 	
 	printf("\033[5;1H\033[>32l");
-	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.IO...\033[K%s\033[0m\n", framenum & 1 ? "QUANTUM.PERSON" : "CMDLINE");
+	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.\033[K%s\033[0m\n", framenum & 1 ? "QUANTUM.PERSON" : "CMDLINE");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
 		fprintf(stderr, "failed to seek\n");
+
+	/* skip pid0 as it is not a Uniflex task */
+	rc = read(pmem, &atask, sizeof(atask));
 
 	tskcount = (tskend - tsktab + 1) / sizeof(atask);
 	while(tskcount--)
