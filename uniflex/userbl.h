@@ -17,28 +17,27 @@
 #define MAX_CHUNKS 64		/* fixed for all versions */
 #define MAX_MDEP_SEGS 8		/* # of machine dependent mappable segments */
 
+/* compiling with 64-bit means we need to keep pointers as 32-bit */
+#define ptr32 char *
+#define ulongptr32 ulong *
+
 #ifdef __clang__
 #pragma pack(push, 1)
-#endif
-
-/* compiling with 64-bit means we need to keep pointers as 32-bit */
-#ifdef __clang__
 #undef ulong
 #define ulong unsigned int
+#undef ptr32
+#define ptr32 unsigned int
+#undef ulongptr32
+#define ulongptr32 unsigned int
 #define long int
-typedef unsigned int ptr32;
-typedef unsigned int ulongptr32;
-#else
-typedef char *ptr32;
-typedef ulong *ulongptr32;
 #endif
 
 /* used to play fast and loose with signed */
-#define char unsigned char
+/* #define char unsigned char  */
 
 struct mt {
-	ulong paddr;
 	ulong vaddr;
+	ulong paddr;
 	uword numpages;
 };
 
@@ -145,3 +144,4 @@ struct userbl {
 #define USTSIZ sizeof(userbl)  /* user structure size */
 
 #define upostb urglst[7]       /*  system call post byte  */
+

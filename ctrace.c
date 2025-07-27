@@ -141,7 +141,6 @@ paramtype *arglist;
 				break;
 			case 4:
 				name = "wait";
-				arglist[0] = POINTER;
 				break;
 			case 5:
 				done = 1;			/* terminate parent */
