@@ -298,11 +298,12 @@ while(1)
 			{
 				struct mt *arun;
 				unsigned int page,page_addr;
-				int argcee;
+				unsigned int argcee;
 				unsigned int argvee[4];
 				char cmdline[32];
+				int remain;
 				
-				printf("%-4d %-5d ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) *100)/totalcpu,ntohl(userbl.uicnt) );
+				printf("%-4d ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) *100)/totalcpu );
 
 				/* printf("IO count:%d  limits[time:%d io:%d mem:%d] ", ntohl(userbl.uicnt), ntohl(userbl.utimlmt), ntohl(userbl.uiotlmt), ntohl(userbl.umemlmt)); */
 				/* printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm); */
@@ -317,7 +318,7 @@ while(1)
 					if (personality == dsk_pers)  status = "DISK";
 					if (personality == tty_pers)  status = "TTY ";
 					if (personality == pip_pers)  status = "PIPE";
-					printf("%-7d %s  \n",ntohs(userbl.uquantum), status );
+					printf("%-7d %s  \033[K\n",ntohs(userbl.uquantum), status );
 				}
 				else
 				{
@@ -351,18 +352,25 @@ while(1)
 						/* read argc, read argv pointer */
 						lseek(pmem, page_addr, 0);
 						read(pmem, &argcee, 4);
-						read(pmem, argvee, 4 * ntohl(argc));
-						
+						if (ntohl(argcee) < 1) argcee = htonl(1);
+						read(pmem, argvee, 4 * ntohl(argcee));
+			
+						remain = 20;
 						for (i=0; i<ntohl(argcee); i++)
 						{
 							lseek(pmem, page_addr + (ntohl(argvee[i]) & 0xfff), 0);
-							read(pmem, cmdline, sizeof(cmdline));
-							printf("[%d] ", argvee[i], cmdline);
+							read(pmem, cmdline, remain);
+							cmdline[remain] = 0;
+							printf("%s ", cmdline);
+							remain -= strlen(cmdline);
+							if (remain <= 0)
+								break;
 						}
 
 						lseek(pmem, rc, SEEK_SET);
 					}
-					printf("\n");
+					/* delete rest of line */
+					printf("\033[K\n");
 				}
 				
 #if 0
