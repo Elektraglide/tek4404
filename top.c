@@ -322,6 +322,13 @@ while(1)
 				else
 				{
 					/* find cmdline */
+					if (ntohs(atask.tstid) == 1)
+					{
+						/* pid1 is launched differently so fake its argvee */
+						/* fwiw, it shows as being called tty_wait */
+						printf("/etc/init");						
+					}
+					else
 					if (userbl.usizes)
 					{
 						/* read user stack page entry for oldest page in chunk */
