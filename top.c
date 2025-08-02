@@ -117,7 +117,7 @@ char **argv;
 
 
 #ifdef __clang__
-	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem/allmem.bin", O_RDWR);
+	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem2/allmem.bin", O_RDWR);
 #else
 	pmem = open("/dev/pmem", O_RDWR);
 #endif
@@ -233,7 +233,14 @@ while(1)
 		}
 
 		/* controlling tty */
-		i = (ntohs(atask.tstty) - 2);
+		if (atask.tstty)
+		{
+			rc = lseek(pmem, 0, SEEK_CUR);
+			/* struct it TTYSIZ (0x2a) */
+			lseek(pmem, ntohl(atask.tstty) + 0x1e, 0);
+			read(pmem, &i, 2);
+			lseek(pmem, rc, SEEK_SET);
+		}
 		tty[3] = '0' + (i / 10);
 		tty[4] = '0' + (i % 10);
 

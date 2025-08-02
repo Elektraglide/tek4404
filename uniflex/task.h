@@ -40,8 +40,7 @@ struct task {
   uword		tsuid;		/*  user id field  */
   uword		tstid;		/*  unique task id */
   uword		tstidp;		/*  parent's task id  */
-  uword		tstty;		/*  control terminal id  */
-  uword   unknown0;
+  ptr32		tstty;		/*  control terminal id  */
   int		tsevnt;		/*  event task is waiting on */
   ptr32		tstext;	/*  task text table pointer  */
   char		tsswap[4];	/*  disk offset of swap image  */
