@@ -77,7 +77,7 @@ int main(argc, argv)
 int argc;
 char **argv;
 {
-	int i, len, rc, pmem;
+	int i, j, len, rc, pmem;
 	char bootfile[256];
 	char *needle;
 	char *symbols;
@@ -232,17 +232,20 @@ while(1)
 			pentry = getpwuid(lastuid);
 		}
 
-		/* controlling tty */
+		/* controlling tty (struct not fully known) */
 		if (atask.tstty)
 		{
 			rc = lseek(pmem, 0, SEEK_CUR);
-			/* struct it TTYSIZ (0x2a) */
-			lseek(pmem, ntohl(atask.tstty) + 0x1e, 0);
-			read(pmem, &i, 2);
+			/* struct is TTYSIZ (0x2a) */
+			lseek(pmem, ntohl(atask.tstty) + 0x1c, 0);
+			read(pmem, buffer, 4);
 			lseek(pmem, rc, SEEK_SET);
+			i = buffer[1];
+			tty[0] = ((i & 0x6) == 0x06) ? 'p' : 't';
+			i = buffer[2];
+			tty[3] = '0' + (i / 10);
+			tty[4] = '0' + (i % 10);
 		}
-		tty[3] = '0' + (i / 10);
-		tty[4] = '0' + (i % 10);
 
 		/* read userblock */
 		rc = lseek(pmem, 0, SEEK_CUR);
@@ -266,6 +269,11 @@ while(1)
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, userbl.umem + 2 * MTSIZE, 10);
 
+#ifdef __clang__
+		lseek(pmem, ntohl(atask.tsutop), 0);
+		read(pmem, &userbl, sizeof(userbl));
+#endif
+
 		lseek(pmem, rc, SEEK_SET);
 
 		/* pages are 4k */
@@ -287,7 +295,7 @@ while(1)
 
 			/* running stats */
 			printf("%-3d  %-3d %-6s %-8s %-5s %-4s %3dK ",ntohs(atask.tstid), ntohs(atask.tstidp),
-				 status, pentry->pw_name, ntohs(atask.tstty) > 1 ? tty : "xxx  ", priority, swapsize);
+				 status, pentry->pw_name, (atask.tstty) ? tty : "xxx  ", priority, swapsize);
 
 			/* cpu time */
 			timestamp = (ntohl(userbl.utimu) + ntohl(userbl.utims)) / 100;
