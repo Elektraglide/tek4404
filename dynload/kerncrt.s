@@ -1,9 +1,9 @@
 	lib sysdef
 
-	extern Pdata,Phex4,Phex6,Phex
+	extern Pdata,Phex1,Phex2,Phex4,Phex,cpass,passc
 
-	global _save_reg_params,_get_userblk,_get_majmin,_get_task
-	global _kprint,_kprinthex
+	global _save_reg_params,_get_userblk,_get_task,_get_fd,_get_majmin
+	global _kcpass,_kprint,_kprinthex
 
 	text
 * innvokes init(chrtab, blktab) to setup devices
@@ -18,6 +18,7 @@ Start
 _save_reg_params
 	move.l a3,(userblk)
 	move.l a4,(task)
+	move.l a5,(fd)
 	move.l d7,(majmin)
 	rts
 
@@ -29,6 +30,10 @@ _get_task
 	move.l (task),d0
 	rts
 
+_get_fd
+	move.l (fd),d0
+	rts
+
 _get_majmin
 	move.l (majmin),d0
 	rts
@@ -36,10 +41,29 @@ _get_majmin
 	data
 userblk fqb 0
 task fqb 0
+fd fqb 0
 majmin fqb 0
 
 	text
 
+_kcpass
+	link a6,#0
+	movem.l d2-d7/a2-a5,-(sp)
+	move.l 8(a6),a1
+fillbuf
+	jsr cpass
+	bmi.w eofwrite
+	move.b d6,(a1)+
+	move.l 12(a6),d2
+	sub.l #1,d2
+	move.l d2,12(a6)
+	bpl fillbuf
+eofwrite
+	move.l a1,d0
+	sub.l 8(a6),d0
+	movem.l (sp)+,d2-d7/a2-a5
+	unlk a6
+	rts
 
 * kprint(char *str)
 _kprint	

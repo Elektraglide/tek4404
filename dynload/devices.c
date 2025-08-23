@@ -101,20 +101,38 @@ int a,b;
   save_reg_params();
 
    kprinthex("cd_read ",a,8);
-   kprinthex(" ",b, 8);
    kprint("\n");
 
   userblk = (struct userbl *)get_userblk();
   kprinthex("uicnt ",userblk->uicnt,8);
-  kprinthex(" uerror ",userblk->uerror,2);
+  kprinthex(" uipos ",userblk->uipos,8);
+  kprinthex(" uistrt ",userblk->uistrt,8);
   kprint("\n");
+  
 }
 cd_write(a,b)
 int a,b;
 {
+
+  struct userbl *userblk;
+  char buffer[128];
+  int len;
+  
   save_reg_params();
 
-   kprint("cd_write\n");
+  kprint("cd_write\n");
+
+  userblk = (struct userbl *)get_userblk();
+  kprinthex("uicnt ",userblk->uicnt,8);
+  kprinthex(" uipos ",userblk->uipos,8);
+  kprinthex(" uistrt ",userblk->uistrt,8);
+  kprint("\n");
+
+  len = kcpass(buffer, sizeof(buffer));
+  buffer[len] = 0;
+  kprint(buffer);  
+  kprint("\n");
+  
 }
 cd_special()
 {
