@@ -1,3 +1,6 @@
+#include "uniflex/userbl.h"
+#include "uniflex/task.h"
+
 /* char devices are device major */
 typedef struct
 {
@@ -25,9 +28,11 @@ typedef struct
 /* block device methods */
 int rd_open()
 {
-  int minor = kgetD7();
+  int minor = get_majmin();
+  struct userbl *userblk = get_userblk();
 
-  kprinthex("rd_open:",minor,4);
+  kprinthex("rd_open: dev=",minor,4);
+  kprinthex(" userblk=",userblk, 8);
   kprint("\n");  
 
   return 0;
@@ -62,25 +67,59 @@ int minor;
 }
 
 /* char device methods */
-cd_open()
+cd_open(a,b)
+int a,b;
 {
-   kprint("cd_open\n");
-	
+  struct userbl *userblk;
+  
+  save_reg_params();
+  
+   kprinthex("cd_open ",a,8);
+   kprinthex(" ",b, 8);
+   kprint("\n");
+
+  userblk = (struct userbl *)get_userblk();
+  kprinthex("usarg0 ",userblk->usarg0,8);
+  kprinthex(" usarg1 ",userblk->usarg1,8);
+  kprint("\n");
+
 }
-cd_close()
+cd_close(a,b)
+int a,b;
 {
-   kprint("cd_close\n");
+  save_reg_params();
+
+   kprinthex("cd_close ",a,8);
+   kprinthex(" ",b, 8);
+   kprint("\n");
 }
-cd_read()
+cd_read(a,b)
+int a,b;
 {
-   kprint("cd_read\n");
+  struct userbl *userblk;
+
+  save_reg_params();
+
+   kprinthex("cd_read ",a,8);
+   kprinthex(" ",b, 8);
+   kprint("\n");
+
+  userblk = (struct userbl *)get_userblk();
+  kprinthex("uicnt ",userblk->uicnt,8);
+  kprinthex(" uerror ",userblk->uerror,2);
+  kprint("\n");
 }
-cd_write()
+cd_write(a,b)
+int a,b;
 {
+  save_reg_params();
+
    kprint("cd_write\n");
 }
 cd_special()
 {
+  save_reg_params();
+
    kprint("cd_special\n");
 }
 
@@ -107,8 +146,6 @@ BDTable *blktab;
 {
 
   kprint("Installing devices\n");
-  kprinthex("Loading at address: 0x", init, 8);
-  kprint("\n");
 
   installCD(chrtab, 10);
   installBD0(blktab, 3);
