@@ -309,7 +309,7 @@ char *typename;
     i += sym.len;
   }
 
-  // section 2: strings
+  // section 3: strings
   sect[3].sh_type = htonl(SHT_STRTAB);
   sect[3].sh_flags = htonl(SHF_STRINGS);
   sect[3].sh_addr = 0;
@@ -320,7 +320,7 @@ char *typename;
   sect[3].sh_addralign = 0;
   sect[3].sh_entsize = htonl(1);
 
-  // section 3: symbols
+  // section 4: symbols
   sect[4].sh_type = htonl(SHT_SYMTAB);
   sect[4].sh_flags = 0;
   sect[4].sh_addr = 0;
@@ -332,9 +332,31 @@ char *typename;
   sect[4].sh_entsize = htonl(sizeof(Elf32_Sym));
 
   // completed section headers
+  // Ghidra (everyone?) expects sections in increasing memory order...
+  int sectorder[] = {0,1,2,3,4};
+   Elf32_Shdr tmpsect;
+  if (ntohl(sect[0].sh_addr) > ntohl(sect[1].sh_addr))
+  {
+		tmpsect = sect[0];
+		sect[0] = sect[1];
+		sect[1] = tmpsect;
+		if (ntohl(sect[1].sh_addr) > ntohl(sect[2].sh_addr))
+		{
+			tmpsect = sect[1];
+			sect[1] = sect[2];
+			sect[2] = tmpsect;
+		}
+  }
+  if (ntohl(sect[1].sh_addr) > ntohl(sect[2].sh_addr))
+  {
+		tmpsect = sect[1];
+		sect[1] = sect[2];
+		sect[2] = tmpsect;
+  }
+
   for (i=0; i<5; i++)
   {
-    fprintf(stderr,"wrote %d bytes (Section%d %d %d)\n", (int)sizeof(sect[0]), i, ntohl(sect[i].sh_offset), ntohl(sect[i].sh_size));
+    fprintf(stderr,"wrote %d bytes (Section%d 0x%08x %d %d)\n", (int)sizeof(sect[0]), i, ntohl(sect[i].sh_addr), ntohl(sect[i].sh_offset), ntohl(sect[i].sh_size));
     write(elf_fd, &sect[i], sizeof(sect[0]));
   }
   
