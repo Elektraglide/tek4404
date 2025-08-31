@@ -91,6 +91,7 @@ _kstrlen
 findend0
     move.b (a0)+,d0
 	bne findend0
+	sub #1,a0
 	move.l a0,d0
 	sub.l 8(a6),d0
 	movem.l (sp)+,d2-d7/a2-a5
