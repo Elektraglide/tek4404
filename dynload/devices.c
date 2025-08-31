@@ -34,8 +34,7 @@ int a;
   int maxval,column;
 
   column = 0;
-  maxval = units[0];
-  while (maxval > 0)
+  while (maxval = units[column++])
   {
     i = 0;
     while(a >= maxval)
@@ -45,8 +44,7 @@ int a;
     }
     if (i)
       *buffer++ = '0' + i;
-      
-    maxval = units[++column];
+
   }
   /* special case for last digit being zero */
   if (i == 0)  
