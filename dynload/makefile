@@ -1,4 +1,4 @@
-CFLAGS= +v
+CFLAGS= +v +i=/tek
 LIBS= +l=netlib
 LFLAGS= +x=1M
 

@@ -24,6 +24,49 @@ typedef struct
   BDfuncs *BDio;	
 } BDTable;
 
+/* itoa without using mul or div! */
+int units[] = {10000,1000,100,10,1,0};
+void kitoa(buffer, a)
+char *buffer;
+int a;
+{
+  int i;
+  int maxval,column;
+
+  column = 0;
+  maxval = units[0];
+  while (maxval > 0)
+  {
+    i = 0;
+    while(a >= maxval)
+    {
+      a -= maxval;
+      i++;
+    }
+    if (i)
+      *buffer++ = '0' + i;
+      
+    maxval = units[++column];
+  }
+  /* special case for last digit being zero */
+  if (i == 0)  
+    *buffer++ = '0';
+
+  *buffer++ = '\0';
+	
+}
+
+void kprintd(fmt, a)
+char *fmt;
+int a;
+{
+  char output[16];
+
+  kprint(fmt);
+  kitoa(output, a);
+  kprint(output);
+}
+
 
 /* block device methods */
 int rd_open()
@@ -66,52 +109,76 @@ int minor;
   kprint(")\n");  
 }
 
+char devname[8];
 /* char device methods */
-cd_open(a,b)
-int a,b;
+cd_open()
 {
   struct userbl *userblk;
-  
+  struct task *atask;
+  char tmp[8];
+     
   save_reg_params();
-  
-   kprinthex("cd_open ",a,8);
-   kprinthex(" ",b, 8);
-   kprint("\n");
+  kprint("cd_open\n");
 
   userblk = (struct userbl *)get_userblk();
-  kprinthex("usarg0 ",userblk->usarg0,8);
-  kprinthex(" usarg1 ",userblk->usarg1,8);
+
+  kprinthex("fd=", get_fd(),8);
   kprint("\n");
 
+  /* make ascii device major.minor */
+  kitoa(devname, (get_majmin() >> 8));
+  kstrcat(devname, ".");
+  kitoa(tmp, (get_majmin() & 255));
+  kstrcat(devname, tmp);
 }
-cd_close(a,b)
-int a,b;
+cd_close()
 {
   save_reg_params();
-
-   kprinthex("cd_close ",a,8);
-   kprinthex(" ",b, 8);
-   kprint("\n");
+  kprint("cd_close\n");
 }
-cd_read(a,b)
-int a,b;
+static long newrnd;
+cd_read()
 {
   struct userbl *userblk;
-
+  struct task *atask;
+  char mesg[64],tmp[8];
+  int len;
+  char c;
+   
   save_reg_params();
 
-   kprinthex("cd_read ",a,8);
-   kprint("\n");
-
   userblk = (struct userbl *)get_userblk();
-  kprinthex("uicnt ",userblk->uicnt,8);
-  kprinthex(" uipos ",userblk->uipos,8);
-  kprinthex(" uistrt ",userblk->uistrt,8);
-  kprint("\n");
+  c = get_majmin() & 255;
+  if (c==0)
+  {
+    if (userblk->uipos == 0)
+    {
+      mesg[0] = 0;
+      kstrcat(mesg, "This device is: ");
+      kstrcat(mesg, devname);
+
+	  atask = (struct task *)userblk->utask;
+      kstrcat(mesg, " called from task:");
+	  kitoa(tmp, (int)atask->tstid);
+	  kstrcat(mesg, tmp);
+      kstrcat(mesg, "\n");
+
+      kpassc(mesg, kstrlen(mesg));
+    }
+  }    
+  if (c==1)
+  {
+	/* read stiml? */
+    kpassc(&newrnd, 1);
+  }   
+  if (c==7)
+  {
+    newrnd = (newrnd << 1) ^ 0x88888eef;
+    kpassc(&newrnd, 1);
+  }   
   
 }
-cd_write(a,b)
-int a,b;
+cd_write()
 {
 
   struct userbl *userblk;
@@ -119,13 +186,12 @@ int a,b;
   int len;
   
   save_reg_params();
-
   kprint("cd_write\n");
 
   userblk = (struct userbl *)get_userblk();
-  kprinthex("uicnt ",userblk->uicnt,8);
-  kprinthex(" uipos ",userblk->uipos,8);
-  kprinthex(" uistrt ",userblk->uistrt,8);
+  kprinthex("uicnt=",userblk->uicnt,8);
+  kprinthex(" uipos=",userblk->uipos,8);
+  kprinthex(" uistrt=",userblk->uistrt,8);
   kprint("\n");
 
   len = kcpass(buffer, sizeof(buffer));
@@ -133,12 +199,16 @@ int a,b;
   kprint(buffer);  
   kprint("\n");
   
+  kprint("AFTER\n");
+  kprinthex("uicnt=",userblk->uicnt,8);
+  kprinthex(" uipos=",userblk->uipos,8);
+  kprinthex(" uistrt=",userblk->uistrt,8);
+  kprint("\n");
 }
 cd_special()
 {
   save_reg_params();
-
-   kprint("cd_special\n");
+  kprint("cd_special\n");
 }
 
 void installCD(chrtab, major)
