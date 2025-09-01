@@ -6,40 +6,72 @@
 	global _kpassc,_kcpass,_kstrlen,_kstrcat,_kprint,_kprinthex
 
 	text
-* innvokes init(chrtab, blktab) to setup devices
+* innvokes cdinit(chrtab) to setup device, returns device major index
 Start
-	move.l #blktab,-(sp)
-	move.l #chrtab,-(sp)
-	jsr _init
-	add.l #8,sp
+	move.l #cdfunc,-(sp)
+	jsr _cdinit
+	add.l #4,sp
+* major device in d0 and struct is 20 bytes
+	move.l d0,d1
+	lsl.w #4,d0
+	lsl.w #2,d1
+	add.w d1,d0
+	add.l d0,a0
+* install trampolines to C functions
+	move.l #chrtab,a0
+	move.l #cd_open,(a0)
+	move.l #cd_close,4(a0)
+	move.l #cd_read,8(a0)
+	move.l #cd_write,12(a0)
+	move.l #cd_special,16(a0)
+	
 	move.l #0,d0
 	rts
-
-_save_reg_params
-	move.l a3,(userblk)
-	move.l a5,(fd)
-	move.l d7,(majmin)
+	
+cd_open
+	move.l a3,-(sp)
+	move.l d7,-(sp)
+	move.l a5,-(sp)
+	jsr (cdfunc)
+	add #12,sp
+	rts
+	
+cd_close
+	move.l a3,-(sp)
+	move.l d7,-(sp)
+	move.l a5,-(sp)
+	jsr 4(cdfunc)
+	add #12,sp
 	rts
 
-_get_userblk
-	move.l (userblk),d0
+cd_read
+	move.l a3,-(sp)
+	move.l d7,-(sp)
+	move.l a5,-(sp)
+	jsr 8(cdfunc)
+	add #12,sp
 	rts
 
-_get_fd
-	move.l (fd),d0
+cd_write
+	move.l a3,-(sp)
+	move.l d7,-(sp)
+	move.l a5,-(sp)
+	jsr 12(cdfunc)
+	add #12,sp
 	rts
 
-_get_majmin
-	move.l (majmin),d0
+cd_special
+	move.l a3,-(sp)
+	move.l d7,-(sp)
+	move.l a5,-(sp)
+	jsr 16(cdfunc)
+	add #12,sp
 	rts
 
 	data
-userblk fqb 0
-fd fqb 0
-majmin fqb 0
+cdfunc fqb 0,0,0,0,0
 
 	text
-
 * from kernel TO userspace
 * kpassc(char *, int)
 _kpassc
@@ -89,7 +121,7 @@ _kstrlen
 	movem.l d2-d7/a2-a5,-(sp)
 	move.l 8(a6),a0
 findend0
-    move.b (a0)+,d0
+	move.b (a0)+,d0
 	bne findend0
 	sub #1,a0
 	move.l a0,d0
@@ -103,7 +135,7 @@ _kstrcat
 	movem.l d2-d7/a2-a5,-(sp)
 	move.l 8(a6),a0
 findend
-    move.b (a0)+,d0
+	move.b (a0)+,d0
 	bne findend
 	move.l 12(a6),a1
 	sub #1,a0
