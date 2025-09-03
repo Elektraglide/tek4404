@@ -2,7 +2,6 @@
 
 	extern Pdata,Phex1,Phex2,Phex4,Phex,cpass,passc
 
-	global _save_reg_params,_get_userblk,_get_fd,_get_majmin
 	global _kpassc,_kcpass,_kstrlen,_kstrcat,_kprint,_kprinthex
 
 	text
@@ -16,9 +15,9 @@ Start
 	lsl.w #4,d0
 	lsl.w #2,d1
 	add.w d1,d0
+	move.l #chrtab,a0
 	add.l d0,a0
 * install trampolines to C functions
-	move.l #chrtab,a0
 	move.l #cd_open,(a0)
 	move.l #cd_close,4(a0)
 	move.l #cd_read,8(a0)
@@ -29,47 +28,58 @@ Start
 	rts
 	
 cd_open
-	move.l a3,-(sp)
-	move.l d7,-(sp)
+	move.l a3,(userblk)
 	move.l a5,-(sp)
-	jsr (cdfunc)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+	move.l (cdfunc),a0
+	jsr (a0)
 	add #12,sp
 	rts
 	
 cd_close
-	move.l a3,-(sp)
-	move.l d7,-(sp)
+	move.l a3,(userblk)
 	move.l a5,-(sp)
-	jsr 4(cdfunc)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (cdfunc+4),a0
+	jsr (a0)
 	add #12,sp
 	rts
 
 cd_read
-	move.l a3,-(sp)
-	move.l d7,-(sp)
+	move.l a3,(userblk)
 	move.l a5,-(sp)
-	jsr 8(cdfunc)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (cdfunc+8),a0
+	jsr (a0)
 	add #12,sp
 	rts
 
 cd_write
-	move.l a3,-(sp)
-	move.l d7,-(sp)
+	move.l a3,(userblk)
 	move.l a5,-(sp)
-	jsr 12(cdfunc)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (cdfunc+12),a0
+	jsr (a0)
 	add #12,sp
 	rts
 
 cd_special
-	move.l a3,-(sp)
-	move.l d7,-(sp)
+	move.l a3,(userblk)
 	move.l a5,-(sp)
-	jsr 16(cdfunc)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (cdfunc+16),a0
+	jsr (a0)
 	add #12,sp
 	rts
 
 	data
 cdfunc fqb 0,0,0,0,0
+userblk fqb 0
 
 	text
 * from kernel TO userspace

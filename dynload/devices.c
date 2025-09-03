@@ -67,12 +67,11 @@ int a;
 
 
 /* block device methods */
-int rd_open()
+int rd_open(userblk,majmin)
+struct userbl *userblk;
+int majmin;
 {
-  int minor = get_majmin();
-  struct userbl *userblk = get_userblk();
-
-  kprinthex("rd_open: dev=",minor,4);
+  kprinthex("rd_open: dev=",majmin & 255,4);
   kprinthex(" userblk=",userblk, 8);
   kprint("\n");  
 
@@ -109,44 +108,38 @@ int minor;
 
 char devname[8];
 /* char device methods */
-cd_open()
+cd_open(userblk,majmin)
+struct userbl *userblk;
+int majmin;
 {
-  struct userbl *userblk;
   struct task *atask;
   char tmp[8];
      
-  save_reg_params();
   kprint("cd_open\n");
 
-  userblk = (struct userbl *)get_userblk();
-
-  kprinthex("fd=", get_fd(),8);
-  kprint("\n");
-
   /* make ascii device major.minor */
-  kitoa(devname, (get_majmin() >> 8));
+  kitoa(devname, (majmin >> 8));
   kstrcat(devname, ".");
-  kitoa(tmp, (get_majmin() & 255));
+  kitoa(tmp, (majmin & 255));
   kstrcat(devname, tmp);
 }
-cd_close()
+cd_close(userblk,majmin)
+struct userbl *userblk;
+int majmin;
 {
-  save_reg_params();
   kprint("cd_close\n");
 }
-static long newrnd;
-cd_read()
+static unsigned long newrnd = 291964;
+cd_read(userblk,majmin)
+struct userbl *userblk;
+int majmin;
 {
-  struct userbl *userblk;
   struct task *atask;
   char mesg[64],tmp[8];
   int len;
   char c;
    
-  save_reg_params();
-
-  userblk = (struct userbl *)get_userblk();
-  c = get_majmin() & 255;
+  c = majmin & 255;
   if (c==0)
   {
     if (userblk->uipos == 0)
@@ -156,7 +149,7 @@ cd_read()
       kstrcat(mesg, devname);
 
 	  atask = (struct task *)userblk->utask;
-      kstrcat(mesg, " called from task:");
+      kstrcat(mesg, "\nCalled from task:");
 	  kitoa(tmp, (int)atask->tstid);
 	  kstrcat(mesg, tmp);
       kstrcat(mesg, "\n");
@@ -171,22 +164,22 @@ cd_read()
   }   
   if (c==7)
   {
-    newrnd = (newrnd << 1) ^ 0x88888eef;
+    newrnd = (newrnd << 11) ^ 0x88888eef;
     kpassc(&newrnd, 1);
   }   
   
 }
-cd_write()
+cd_write(userblk, majmin)
+struct userbl *userblk;
+int majmin;
 {
 
-  struct userbl *userblk;
   char buffer[128];
   int len;
   
-  save_reg_params();
   kprint("cd_write\n");
 
-  userblk = (struct userbl *)get_userblk();
+  kprint("BEFORE\n");
   kprinthex("uicnt=",userblk->uicnt,8);
   kprinthex(" uipos=",userblk->uipos,8);
   kprinthex(" uistrt=",userblk->uistrt,8);
@@ -205,37 +198,27 @@ cd_write()
 }
 cd_special()
 {
-  save_reg_params();
   kprint("cd_special\n");
 }
 
-void installCD(chrtab, major)
-CDfuncs *chrtab;
-int major;
+#define CDMAJOR 10
+int cdinit(chrdev)
+CDfuncs *chrdev;
 {
-  CDfuncs *chrdev = chrtab + major;
-  
+
+  kprint("Installing devices\n");
+
   chrdev->open = cd_open;
   chrdev->close = cd_close;
   chrdev->read = cd_read;
   chrdev->write = cd_write;
   chrdev->special = cd_special;
 
-  kprinthex("char device is major(0x",major, 2);
+  kprinthex("kitoa = ",kitoa, 8);
   kprint(")\n");  
-}
-
-
-int init(chrtab,blktab)
-CDfuncs *chrtab;
-BDTable *blktab;
-{
-
-  kprint("Installing devices\n");
-
-  installCD(chrtab, 10);
-  installBD0(blktab, 3);
+  kprinthex("char device is major(0x",CDMAJOR, 2);
+  kprint(")\n");  
   
-  return(0);
+  return(CDMAJOR);
 }
  
