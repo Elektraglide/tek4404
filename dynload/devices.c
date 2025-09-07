@@ -161,11 +161,13 @@ int majmin;
   {
 	/* read stiml? */
     kpassc(&newrnd, 1);
+    newrnd++;
   }   
   if (c==7)
   {
-    newrnd = (newrnd << 11) ^ 0x88888eef;
-    kpassc(&newrnd, 1);
+    newrnd = (newrnd << 1) ^ 0x88888eef;
+    c = newrnd >> 24;
+    kpassc(&c, 1);
   }   
   
 }
@@ -179,22 +181,11 @@ int majmin;
   
   kprint("cd_write\n");
 
-  kprint("BEFORE\n");
-  kprinthex("uicnt=",userblk->uicnt,8);
-  kprinthex(" uipos=",userblk->uipos,8);
-  kprinthex(" uistrt=",userblk->uistrt,8);
-  kprint("\n");
-
   len = kcpass(buffer, sizeof(buffer));
   buffer[len] = 0;
   kprint(buffer);  
   kprint("\n");
   
-  kprint("AFTER\n");
-  kprinthex("uicnt=",userblk->uicnt,8);
-  kprinthex(" uipos=",userblk->uipos,8);
-  kprinthex(" uistrt=",userblk->uistrt,8);
-  kprint("\n");
 }
 cd_special()
 {
@@ -206,16 +197,12 @@ int cdinit(chrdev)
 CDfuncs *chrdev;
 {
 
-  kprint("Installing devices\n");
-
   chrdev->open = cd_open;
   chrdev->close = cd_close;
   chrdev->read = cd_read;
   chrdev->write = cd_write;
   chrdev->special = cd_special;
 
-  kprinthex("kitoa = ",kitoa, 8);
-  kprint(")\n");  
   kprinthex("char device is major(0x",CDMAJOR, 2);
   kprint(")\n");  
   
