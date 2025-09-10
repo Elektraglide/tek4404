@@ -38,6 +38,70 @@ unsigned short lines[2048][2];
 
 mat33 ltm;
 
+
+//
+//  Untitled.h
+//  tek4404_utilities
+//
+//  Created by Adam Billyard on 06/09/2025.
+//
+
+// THE EXTREMELY FAST LINE ALGORITHM Variation E (Addition Fixed Point PreCalc)
+void myLine(SURFACE* surface, int x, int y, int x2, int y2)
+{
+	register unsigned int *addr;
+	short yLonger=false;
+	int shortLen=y2-y;
+	int longLen=x2-x;
+	if (abs(shortLen)>abs(longLen)) {
+		int swap=shortLen;
+		shortLen=longLen;
+		longLen=swap;
+		yLonger=true;
+	}
+	int decInc;
+	if (longLen==0) decInc=0;
+	else decInc = (shortLen << 16) / longLen;
+
+	if (yLonger) {
+		if (longLen>0) {
+			longLen+=y;
+			addr = (unsigned int *)(bb.screen->addr + (y<<7) + (x>>5));
+			for (int j=0x8000+(x<<16);y<=longLen;++y) {
+				*addr ^= (1 << ((j >> 16)&31));
+				myPixel(surface,j >> 16,y);
+				j+=decInc;
+				addr += 32;
+			}
+			return;
+		}
+		longLen+=y;
+		addr = (unsigned int *)(videomem + (y<<7) + (x>>5));
+		for (int j=0x8000+(x<<16);y>=longLen;--y) {
+			myPixel(surface,j >> 16,y);
+			j-=decInc;
+			addr -= 32;
+		}
+		return;
+	}
+
+	if (longLen>0) {
+		longLen+=x;
+		for (int j=0x8000+(y<<16);x<=longLen;++x) {
+			myPixel(surface,x,j >> 16);
+			j+=decInc;
+		}
+		return;
+	}
+	longLen+=x;
+	for (int j=0x8000+(y<<16);x>=longLen;--x) {
+		myPixel(surface,x,j >> 16);
+		j-=decInc;
+	}
+
+}
+
+
 int addvertex(x, y, z)
 double x, y, z;
 {
@@ -82,10 +146,10 @@ void init3d()
     two.fv = 2.0;
 
     fov.fv = 2.0;
-    camdist.fv = 5.0;
+    camdist.fv = 4.0;
     spinaxis.x.fv = 0.666;
     spinaxis.y.fv = 0.666;
-    spinaxis.z.fv = 0.333;
+    spinaxis.z.fv = -0.333;
 
   
     vcount = 0;
@@ -271,6 +335,9 @@ void draw3d()
         p2.y = vertices[lines[i][1]].vpy;
 
         PaintLine(&bb, &p2);
+
+      /* draw just 1 line;  is it transform or fill limited? */
+         break;
     }
 }
 
