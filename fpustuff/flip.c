@@ -376,6 +376,12 @@ char *argv[];
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
+   init3d();
+   if (argc > 1)
+   {
+   	 loadmodel(argv[1]);
+   }
+
    /* hide cursor */
    CursorVisible(FALSE);
 
@@ -389,11 +395,6 @@ char *argv[];
     ESetAlarm(frametime);
 #endif
 
-   init3d();
-   if (argc > 1)
-   {
-   	 loadmodel(argv[1]);
-   }
 
    /* animate it */
    angle = 5;

@@ -5,6 +5,7 @@
 #include <signal.h>
 
 #include "mathf.h"
+#define abs(A) (A < 0 ? -A : A)
 
 #define PAGE_FLIP
 
@@ -39,66 +40,208 @@ unsigned short lines[2048][2];
 mat33 ltm;
 
 
-//
-//  Untitled.h
-//  tek4404_utilities
-//
-//  Created by Adam Billyard on 06/09/2025.
-//
+typedef union
+{
+ int fixed;
+ struct {
+   short integral;
+   unsigned short fraction;	
+ } part;
+} fixed16;
 
-// THE EXTREMELY FAST LINE ALGORITHM Variation E (Addition Fixed Point PreCalc)
-void myLine(SURFACE* surface, int x, int y, int x2, int y2)
+static unsigned int mask[] = {
+  0x80000000,0x40000000,0x20000000,0x10000000,
+  0x08000000,0x04000000,0x02000000,0x01000000,
+  0x00800000,0x00400000,0x00200000,0x00100000,
+  0x00080000,0x00040000,0x00020000,0x00010000,
+  0x00008000,0x00004000,0x00002000,0x00001000,
+  0x00000800,0x00000400,0x00000200,0x00000100,
+  0x00000080,0x00000040,0x00000020,0x00000010,
+  0x00000008,0x00000004,0x00000002,0x00000001
+};
+
+void myLine32(bbcom,p2)
+struct BBCOM *bbcom;
+struct POINT *p2;
 {
 	register unsigned int *addr;
-	short yLonger=false;
-	int shortLen=y2-y;
-	int longLen=x2-x;
-	if (abs(shortLen)>abs(longLen)) {
-		int swap=shortLen;
-		shortLen=longLen;
-		longLen=swap;
-		yLonger=true;
-	}
+	fixed16 j;
+
+    int x = bbcom->destrect.x;
+    int y = bbcom->destrect.y;
+    int x2 = p2->x;
+    int y2 = p2->y;
 	int decInc;
+
+	short yLonger=0;
+	int shortLen=y2 - y;
+	int longLen=x2 - x;
+	if (abs(shortLen)>abs(longLen)) 
+	{
+		int swap = shortLen;
+		shortLen = longLen;
+		longLen = swap;
+
+		yLonger=1;
+	}
+
 	if (longLen==0) decInc=0;
 	else decInc = (shortLen << 16) / longLen;
 
-	if (yLonger) {
-		if (longLen>0) {
+	if (yLonger) 
+	{
+		addr = (unsigned int *)(bb.destform->addr + (y<<7));
+        j.part.integral = x;
+        j.part.fraction = 0x8000;
+		if (longLen>0) 
+		{
+			/* make absolute y */
 			longLen+=y;
-			addr = (unsigned int *)(bb.screen->addr + (y<<7) + (x>>5));
-			for (int j=0x8000+(x<<16);y<=longLen;++y) {
-				*addr ^= (1 << ((j >> 16)&31));
-				myPixel(surface,j >> 16,y);
-				j+=decInc;
+
+			do			
+	        {
+/*
+printf("%d,%d (%d)\n",j.part.integral,y, j.part.integral >> 5);
+*/	        
+
+				addr[j.part.integral >> 5] ^= mask[j.part.integral & 31];
+
+				j.fixed += decInc;
 				addr += 32;
-			}
+	        } while(y++ < longLen);
 			return;
 		}
-		longLen+=y;
-		addr = (unsigned int *)(videomem + (y<<7) + (x>>5));
-		for (int j=0x8000+(x<<16);y>=longLen;--y) {
-			myPixel(surface,j >> 16,y);
-			j-=decInc;
-			addr -= 32;
+		else
+		{
+return;
+			longLen+=y;
+
+	        while(y-- >= longLen)
+	        {
+				addr[j.part.integral >> 5] ^= mask[j.part.integral & 31];
+				j.fixed -= decInc;
+				addr -= 32;
+			}
 		}
-		return;
+	}
+	else
+	{
+		addr = (unsigned int *)bb.destform->addr + (x>>5);
+	    j.part.integral = y;
+	    j.part.fraction = 0x8000;
+		if (longLen>0) 
+		{
+			/* make absolute x */
+			longLen+=x;
+			do
+		    {
+				addr[j.part.integral << 5] ^= mask[x & 31];
+				if ((x & 31) == 31)
+					addr++;
+				j.fixed += decInc;
+			} while(x++ < longLen);
+		}
+		else
+		{
+return;		
+			longLen+=x;
+		    while(x-- >= longLen)
+		    {
+				addr[j.part.integral << 5] ^= mask[x & 31];
+				j.fixed -= decInc;
+			}
+		}
+	}
+}
+
+void myLine16(bbcom,p2)
+struct BBCOM *bbcom;
+struct POINT *p2;
+{
+	register unsigned short *addr;
+	fixed16 j;
+
+    int x = bbcom->destrect.x;
+    int y = bbcom->destrect.y;
+    int x2 = p2->x;
+    int y2 = p2->y;
+	int decInc;
+
+	short yLonger=0;
+	int shortLen=y2 - y;
+	int longLen=x2 - x;
+	if (abs(shortLen)>abs(longLen)) 
+	{
+		int swap = shortLen;
+		shortLen = longLen;
+		longLen = swap;
+
+		yLonger=1;
 	}
 
-	if (longLen>0) {
-		longLen+=x;
-		for (int j=0x8000+(y<<16);x<=longLen;++x) {
-			myPixel(surface,x,j >> 16);
-			j+=decInc;
-		}
-		return;
-	}
-	longLen+=x;
-	for (int j=0x8000+(y<<16);x>=longLen;--x) {
-		myPixel(surface,x,j >> 16);
-		j-=decInc;
-	}
+	if (longLen==0) decInc=0;
+	else decInc = (shortLen << 16) / longLen;
 
+	if (yLonger) 
+	{
+		addr = (unsigned short *)(bb.destform->addr + (y<<7));
+        j.part.integral = x;
+        j.part.fraction = 0x8000;
+		if (longLen>0) 
+		{
+			/* make absolute y */
+			longLen+=y;
+
+			do			
+	        {
+				addr[j.part.integral >> 4] ^= mask[j.part.integral & 15];
+
+				j.fixed += decInc;
+				addr += 64;
+	        } while(y++ < longLen);
+			return;
+		}
+		else
+		{
+return;
+			longLen+=y;
+
+	        while(y-- >= longLen)
+	        {
+				addr[j.part.integral >> 4] ^= mask[j.part.integral & 15];
+				j.fixed -= decInc;
+				addr -= 64;
+			}
+		}
+	}
+	else
+	{
+		addr = (unsigned int *)bb.destform->addr + (x>>4);
+	    j.part.integral = y;
+	    j.part.fraction = 0x8000;
+		if (longLen>0) 
+		{
+			/* make absolute x */
+			longLen+=x;
+			do
+		    {
+				addr[j.part.integral << 6] ^= mask[x & 15];
+				if ((x & 15) == 15)
+					addr++;
+				j.fixed += decInc;
+			} while(x++ < longLen);
+		}
+		else
+		{
+return;		
+			longLen+=x;
+		    while(x-- >= longLen)
+		    {
+				addr[j.part.integral << 6] ^= mask[x & 15];
+				j.fixed -= decInc;
+			}
+		}
+	}
 }
 
 
@@ -322,10 +465,25 @@ void draw3d()
       RectDrawX(&bb.destrect, &bb);
 
 
-      bb.rule = bbS;
+      bb.rule = bbSxorD;
       bb.destrect.w = 1;
       bb.destrect.h = 1;
       
+      bb.destrect.x = 80;
+      bb.destrect.y = page.y;
+      for(i=0; i<200; i+=5)
+      {
+#if 0
+        p2.x = 80+i;
+        p2.y = page.y + 300;
+#else
+        p2.x = 300;
+        p2.y = page.y + i;
+#endif
+/*        PaintLine(&bb, &p2);  */
+        myLine16(&bb, &p2);  
+      }
+
     for (i = 0; i < lcount; i++)
     {
         bb.destrect.x = vertices[lines[i][0]].vpx;
@@ -336,8 +494,8 @@ void draw3d()
 
         PaintLine(&bb, &p2);
 
+
       /* draw just 1 line;  is it transform or fill limited? */
-         break;
     }
 }
 
