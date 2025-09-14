@@ -7,13 +7,13 @@
 #include "mathf.h"
 #define abs(A) (A < 0 ? -A : A)
 
-#define PAGE_FLIP
-
 #ifndef unix
 #info 3d
 #info Version 1.0
 #tstmp
 #endif
+
+extern void myLine32();
 
 extern struct POINT page;
 extern struct BBCOM bb;
@@ -49,110 +49,13 @@ typedef union
  } part;
 } fixed16;
 
-static unsigned int mask[] = {
-  0x80000000,0x40000000,0x20000000,0x10000000,
-  0x08000000,0x04000000,0x02000000,0x01000000,
-  0x00800000,0x00400000,0x00200000,0x00100000,
-  0x00080000,0x00040000,0x00020000,0x00010000,
-  0x00008000,0x00004000,0x00002000,0x00001000,
-  0x00000800,0x00000400,0x00000200,0x00000100,
-  0x00000080,0x00000040,0x00000020,0x00000010,
-  0x00000008,0x00000004,0x00000002,0x00000001
+
+static unsigned short mask16[] = {
+  0x8000,0x4000,0x2000,0x1000,
+  0x0800,0x0400,0x0200,0x0100,
+  0x0080,0x0040,0x0020,0x0010,
+  0x0008,0x0004,0x0002,0x0001
 };
-
-void myLine32(bbcom,p2)
-struct BBCOM *bbcom;
-struct POINT *p2;
-{
-	register unsigned int *addr;
-	fixed16 j;
-
-    int x = bbcom->destrect.x;
-    int y = bbcom->destrect.y;
-    int x2 = p2->x;
-    int y2 = p2->y;
-	int decInc;
-
-	short yLonger=0;
-	int shortLen=y2 - y;
-	int longLen=x2 - x;
-	if (abs(shortLen)>abs(longLen)) 
-	{
-		int swap = shortLen;
-		shortLen = longLen;
-		longLen = swap;
-
-		yLonger=1;
-	}
-
-	if (longLen==0) decInc=0;
-	else decInc = (shortLen << 16) / longLen;
-
-	if (yLonger) 
-	{
-		addr = (unsigned int *)(bb.destform->addr + (y<<7));
-        j.part.integral = x;
-        j.part.fraction = 0x8000;
-		if (longLen>0) 
-		{
-			/* make absolute y */
-			longLen+=y;
-
-			do			
-	        {
-/*
-printf("%d,%d (%d)\n",j.part.integral,y, j.part.integral >> 5);
-*/	        
-
-				addr[j.part.integral >> 5] ^= mask[j.part.integral & 31];
-
-				j.fixed += decInc;
-				addr += 32;
-	        } while(y++ < longLen);
-			return;
-		}
-		else
-		{
-return;
-			longLen+=y;
-
-	        while(y-- >= longLen)
-	        {
-				addr[j.part.integral >> 5] ^= mask[j.part.integral & 31];
-				j.fixed -= decInc;
-				addr -= 32;
-			}
-		}
-	}
-	else
-	{
-		addr = (unsigned int *)bb.destform->addr + (x>>5);
-	    j.part.integral = y;
-	    j.part.fraction = 0x8000;
-		if (longLen>0) 
-		{
-			/* make absolute x */
-			longLen+=x;
-			do
-		    {
-				addr[j.part.integral << 5] ^= mask[x & 31];
-				if ((x & 31) == 31)
-					addr++;
-				j.fixed += decInc;
-			} while(x++ < longLen);
-		}
-		else
-		{
-return;		
-			longLen+=x;
-		    while(x-- >= longLen)
-		    {
-				addr[j.part.integral << 5] ^= mask[x & 31];
-				j.fixed -= decInc;
-			}
-		}
-	}
-}
 
 void myLine16(bbcom,p2)
 struct BBCOM *bbcom;
@@ -194,7 +97,7 @@ struct POINT *p2;
 
 			do			
 	        {
-				addr[j.part.integral >> 4] ^= mask[j.part.integral & 15];
+				addr[j.part.integral >> 4] ^= mask16[j.part.integral & 15];
 
 				j.fixed += decInc;
 				addr += 64;
@@ -208,7 +111,7 @@ return;
 
 	        while(y-- >= longLen)
 	        {
-				addr[j.part.integral >> 4] ^= mask[j.part.integral & 15];
+				addr[j.part.integral >> 4] ^= mask16[j.part.integral & 15];
 				j.fixed -= decInc;
 				addr -= 64;
 			}
@@ -225,7 +128,7 @@ return;
 			longLen+=x;
 			do
 		    {
-				addr[j.part.integral << 6] ^= mask[x & 15];
+				addr[j.part.integral << 6] ^= mask16[x & 15];
 				if ((x & 15) == 15)
 					addr++;
 				j.fixed += decInc;
@@ -237,7 +140,7 @@ return;
 			longLen+=x;
 		    while(x-- >= longLen)
 		    {
-				addr[j.part.integral << 6] ^= mask[x & 15];
+				addr[j.part.integral << 6] ^= mask16[x & 15];
 				j.fixed -= decInc;
 			}
 		}
@@ -465,24 +368,22 @@ void draw3d()
       RectDrawX(&bb.destrect, &bb);
 
 
-      bb.rule = bbSxorD;
+      bb.rule = bbS;
       bb.destrect.w = 1;
       bb.destrect.h = 1;
-      
+
+#ifdef TEST_LINES      
       bb.destrect.x = 80;
       bb.destrect.y = page.y;
-      for(i=0; i<200; i+=5)
+      for(i=0; i<360; i+=2)
       {
-#if 0
-        p2.x = 80+i;
-        p2.y = page.y + 300;
-#else
-        p2.x = 300;
+        p2.x = 480;
         p2.y = page.y + i;
-#endif
-/*        PaintLine(&bb, &p2);  */
-        myLine16(&bb, &p2);  
+
+        PaintLine(&bb, &p2); 
+/*        myLine8(&bb, &p2);   */
       }
+#endif
 
     for (i = 0; i < lcount; i++)
     {
@@ -493,7 +394,6 @@ void draw3d()
         p2.y = vertices[lines[i][1]].vpy;
 
         PaintLine(&bb, &p2);
-
 
       /* draw just 1 line;  is it transform or fill limited? */
     }

@@ -7,11 +7,11 @@
 #include "mathf.h"
 
 #define PAGE_FLIP
+#define SPRITES
 
 #ifndef unix
 #info flipdemo
-#info Version 1.1
-#tstmp
+#info Version 1.2
 #endif
 
 extern void init3d();
@@ -81,7 +81,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 17;
+  frametime += 33;
   framenum++;
 
   signal(sig, sh_timer);
@@ -252,13 +252,14 @@ void movesprite(asprite)
 sprite *asprite;
 {
     asprite->x += asprite->dx;
-    if (asprite->x < INT2FIX(page.x)) 
+    if (asprite->x < 0) 
     {
       asprite->x = INT2FIX(page.x); asprite->dx = -asprite->dx;
     }
-    if (asprite->x > INT2FIX(page.x+640-256)) 
+    else
+    if (asprite->x > INT2FIX(640-256)) 
     {
-      asprite->x = INT2FIX(page.x+640-256); asprite->dx = -asprite->dx;
+      asprite->x = INT2FIX(640-256); asprite->dx = -asprite->dx;
     }
 
     asprite->y += asprite->dy;
@@ -268,7 +269,7 @@ sprite *asprite;
       asprite->dy = -asprite->dy;
     }
 
-    /* gravity */
+    /* gravity and clamp speed */
     asprite->dy += 8000; 
     if (asprite->dy > INT2FIX(50)) asprite->dy = INT2FIX(50);
 
@@ -279,7 +280,7 @@ sprite* asprite;
 fixed dx, dy;
 {
     asprite->form = makeform();
-    asprite->x = INT2FIX(20);
+    asprite->x = INT2FIX(60);
     asprite->y = INT2FIX(10);
     asprite->oldx[0] = asprite->oldx[1] = -1000;
 
@@ -326,11 +327,21 @@ char *argv[];
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
 
-    screen = InitGraphics(FALSE);
     font = FontOpen("/fonts/PellucidaSans-Serif36.font");
-   fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
-      font->maps->fixed,font->maps->maxw, 
-      font->maps->line, font->maps->baseline);
+	font = FontOpen(argv[1] ? argv[1] : "/fonts/PellucidaSans-Serif36.font");
+    if (font)
+    {
+		fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
+	      font->maps->fixed,font->maps->maxw, 
+	      font->maps->line, font->maps->baseline);
+	}
+    else
+    {
+      fprintf(stderr, "FontOpen: FAILED\n");
+      return;
+    }
+	
+    screen = InitGraphics(FALSE);
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -349,13 +360,6 @@ char *argv[];
       bb.rule = bbS;
       bb.halftoneform = &GrayMask;
       RectDrawX(&bb.destrect, &bb);
-
-    /* copy page0 to page1 */
-    bb.srcform = screen;
-    bb.halftoneform = NULL;
-    bb.destrect.h = 480;
- 	bb.rule = bbS;
-	BitBlt(&bb);
 
 
    /* make a sprite to use */
@@ -386,7 +390,8 @@ char *argv[];
    CursorVisible(FALSE);
 
     /* ESetSignal(); */
-    page.x = page.y = 0;
+    page.x = 0;
+    page.y = 0;
     pindex = 0;
     frametime = EGetTime() + 500;
     framenum = 0;
@@ -395,33 +400,43 @@ char *argv[];
     ESetAlarm(frametime);
 #endif
 
+    /* copy page0 to page1 */
+    bb.srcform = screen;
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = 0;
+    bb.destrect.y = 512;
+    bb.destrect.w = 1024;
+    bb.destrect.h = 512;
+ 	bb.rule = bbS;
+	BitBlt(&bb);
+	bb.srcform = NULL;
 
    /* animate it */
    angle = 5;
-   transform3d(angle);
-   draw3d();  
    while(1)
    {
-#if 0
+#ifdef SPRITES
      restoreunder(&thesprite);
 /*     restoreunder(&thesprite2);  */
-
      movesprite(&thesprite);
 /*     movesprite(&thesprite2);  */
-
      saveunder(&thesprite);
 /*     saveunder(&thesprite2);   */
+#endif
+
+     angle += 2;
+     transform3d(angle);  
+     draw3d();
+
 
      drawsprite(&thesprite);
 /*     drawsprite(&thesprite2);   */
-#endif
 
-     angle++;
-     transform3d(angle); 
-     draw3d();  
 
 #ifdef PAGE_FLIP
-     /* show draw time */
+     /* show draw time by how long we waited for VBLANK */
      waiting >>= 4;
      bb.srcform = NULL;
      bb.rule = bbS;
