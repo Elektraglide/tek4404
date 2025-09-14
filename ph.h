@@ -1,17 +1,29 @@
+#ifndef PH_H
+#define PH_H
+
 /* tek4404 executable header */
 
 #ifdef __clang__
 #pragma pack(push, 1)
 #endif
-/* probably 64 bytes, big endian */
+/* 64 bytes, big endian */
 typedef struct
 {
-  unsigned char magic[2];    /* exe: 0x04, 0x00,  relocatable:  0x05, 0x00, BASIC compiled: 0x8d,0x00 */
+  unsigned char magic[2];
+  /* 0x04 = exe
+     0x05 = relocatable
+     0x06 = manifest???
+     0x8d = BASIC compiled
+     
+     0x00 = normal load
+     0x20 = demand paged
+     0x40 = quick load
+	*/
   int textsize;
   int datasize;
   int bsssize;
-
   int relocsize;
+
   int xferaddress;
   int textstart;
   int datastart;
@@ -24,17 +36,19 @@ typedef struct
   short commentsize;
 	short namesize;
   short flags;
-  /* 0x8000 = no xfer address
+  /* 0x8000 = valid xfer address
      0x1000 = has 68881 instructions
-     0x0800 = produce core dump
+     0x0800 = produce no core dump
      0x0400 = has 68020 instructions
      0x0200 = 68881 signals enabled
      0x0020 = bss not cleared
+     0x00c0 = segment xfer code
 	*/
 
-  short unknown1;
-	int unknown2;			/* address mask? */
+  short minpagealloc;
+	short maxpagealloc;
 	
+	short taskdescriptor;
   short rcssize;
   
   int unknown3;
@@ -88,6 +102,23 @@ typedef struct {
 	
 } relocheader;
 
+/* memory map */
+
+/* Uniflex device driver entry */
+typedef struct {
+	int (*d_open)();
+	int (*d_close)();
+	int (*d_read)();
+	int (*d_write)();
+	int (*d_ioctl)();
+} devicedriver;
+
+/* 10 standard device drivers */
+/* devicedriver *majordevices = (devicedriver *)0x4c4; */
+
 #ifdef __clang__
 #pragma pack(pop)
 #endif
+
+#endif /* PH_H */
+
