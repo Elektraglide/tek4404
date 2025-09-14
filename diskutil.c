@@ -46,7 +46,8 @@ char **argv;
 	printf("Total FDN blocks: %d\n", record.sszfdn);
 	printf("Free FDN: %d\n", record.sfdnc);
 
-        /* NB its only 2 bytes, so discard lower 8 bits */
+    /* NB its only 2 bytes, so discard lower 8 bits */
+ 	printf("Swap start: %d\n", getsize(record.sswpbg) / 256 * 512);
  	printf("Swap size: %d\n", getsize(record.sswpsz) / 256 * 512);
  	printf("Flawed blocks: %d\n", record.sflawc);
 
