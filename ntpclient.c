@@ -153,28 +153,26 @@ char **argv;
   if ( connect( sockfd, ( struct sockaddr * ) &serv_addr, sizeof( serv_addr) ) < 0 )
     error( "ERROR connecting" );
 
+#if 0
+  /* blast out 3 requests.. Uniflex seems to lose first one! */
   n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
   if ( n < 0 )
     error( "ERROR send to socket" );
 
-#if 0
-  n = write( sockfd, ( char* ) &packet, sizeof( ntp_packet ) );
+  n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
   if ( n < 0 )
-    error( "ERROR writing to socket" );
-#endif
+    error( "ERROR send to socket" );
 
-  alarm(10);
+#endif
+  n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
+  if ( n < 0 )
+    error( "ERROR send to socket" );
+
+  alarm(15);
   
-  n = 0;
-  while(n <= 0)
-  {
-    n = read( sockfd, ( char* ) &packet, sizeof( ntp_packet ) );
-    if ( n < 0 )
-    {
-     if (errno != EINTR)
-        error( "ERROR reading from socket" );
-    }
-  }
+  n = read( sockfd, ( char* ) &packet, sizeof( ntp_packet ) );
+  if ( n < 0 )
+    error( "ERROR reading from socket" );
 
   /* These two fields contain the time-stamp seconds as the packet left the NTP server. */
   /* The number of seconds correspond to the seconds passed since 1900.*/
