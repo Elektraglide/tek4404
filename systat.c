@@ -60,8 +60,11 @@ int symbolsize;
 char bootfile[32],buffer[32];
 struct fault_information *fresult;
 
+  memman(1, bigdata, bigdata+255);
+  printf("memman %d\n", errno);
+  
   /* unknown params; start add, end addr?  */
-  fptr = pagemonitor(SET_READ_MONITOR,0, 32);
+  fptr = pagemonitor(SET_READ_MONITOR, bigdata, bigdata+64);
   printf("%8.8x\n", fptr);
 
   signal(SIGRFAULT, sh_fault);
