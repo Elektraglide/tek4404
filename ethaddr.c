@@ -9,7 +9,7 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
-// undocumented pioctl() params
+/* undocumented pioctl() params */
 #define ENIOCONLINE	(ENIOCBASE+4)
 #define ENIOCOFFLINE	(ENIOCBASE+5)
 #define ENIOCGETADDR	(ENIOCBASE+6)
@@ -27,7 +27,7 @@ char *argv[];
 int fd;
 int i,n,v;
 
-  // em
+  /* */
   fd = socket(AF_ETHER, SOCK_RAW, 0);
   if (fd > 0)
   {
@@ -35,7 +35,8 @@ int i,n,v;
     pioctl(fd, ENIOCGETADDR, macaddr, 6,6);  /* why second 6 needed? */
     for(i=0; i<6; i++)
     {
-      printf("%2.2x ", macaddr[i] );
+      if (i) printf(":");
+      printf("%2.2x", macaddr[i] );
     }
     printf("\n");
     close(fd);
