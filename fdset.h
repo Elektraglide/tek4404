@@ -1,9 +1,9 @@
-//
-//  fdset.h
+/*
+//   fdset.h
 //  tek4404_utilities
 //
 //  Created by Adam Billyard on 26/09/2023.
-//
+*/
 
 #ifndef fdset_h
 #define fdset_h
