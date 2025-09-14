@@ -170,7 +170,7 @@ while(1)
 	pstime = 0;
 	openfd = 0;
 	
-	printf("\033[5;1H\033[>32l");
+	printf("\033[5;1H");
 	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.\033[K%s\033[0m\n", framenum & 1 ? "QUANTUM.PERSON" : "CMDLINE");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
@@ -436,7 +436,6 @@ while(1)
 		}
 	}
     printf("\033[2K");	
-	printf("\033[1K\033[>31l");
 	printf("\033[1;1H");
 	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
 
