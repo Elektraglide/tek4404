@@ -3,11 +3,12 @@
 #include <font.h>
 #include <graphics.h>
 #include <signal.h>
+#include <errno.h>
 
 #include "mathf.h"
 
 #define PAGE_FLIP
-#define SPRITES
+#define SPRITESxx
 
 #ifndef unix
 #info flipdemo
@@ -328,7 +329,6 @@ char *argv[];
     signal(SIGMILLI, sh_timer);
 
     font = FontOpen("/fonts/PellucidaSans-Serif36.font");
-	font = FontOpen(argv[1] ? argv[1] : "/fonts/PellucidaSans-Serif36.font");
     if (font)
     {
 		fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
@@ -337,7 +337,7 @@ char *argv[];
 	}
     else
     {
-      fprintf(stderr, "FontOpen: FAILED\n");
+      fprintf(stderr, "FontOpen: FAILED: %s\n",strerror(errno));
       return;
     }
 	
@@ -430,10 +430,10 @@ char *argv[];
      transform3d(angle);  
      draw3d();
 
-
+#ifdef SPRITES
      drawsprite(&thesprite);
 /*     drawsprite(&thesprite2);   */
-
+#endif
 
 #ifdef PAGE_FLIP
      /* show draw time by how long we waited for VBLANK */
