@@ -4,6 +4,7 @@
 *
 * memory-mapped FPU functions
 *
+	global _vmftoi
 	global _vmmulf
 	global _vmdivf
 	global _vmaddf
@@ -78,6 +79,24 @@ _maddf	move.l 4(sp),d0
 	rts	
 
 *  NB includes swap on inputs and output
+
+_vmftoi
+	link a6,#0
+	move.l #$7de004,a0
+	move.l 8(a6),d0
+    swap d0
+    move.w #$3e,8(a0)
+    move.w #$3f42,(a0)
+    move.l d0,(a0)+
+    move #32,d1
+L0
+    move.w (a0),d0
+    dbpl d1,L0
+    move.l -(a0),d0
+	swap d0
+
+	unlk a6
+	rts
 
 _vmmulf
 	link a6,#0
