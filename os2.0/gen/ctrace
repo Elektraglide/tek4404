@@ -1,0 +1,19 @@
+
+Syntax:
+
+    ctrace <executable_name> [arguments to executable]
+
+Description:
+
+    Runs executable and lists each system call it makes
+
+Arguments:
+
+    <executable_name> - name of executable to trace system calls
+
+Examples:
+
+        ctrace /bin/date
+
+    To show all system calls made during execution of date
+
