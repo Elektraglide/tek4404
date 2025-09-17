@@ -315,8 +315,8 @@ int sx,sy,sz;
 void transform3d(radians)
 int radians;
 {
-    mat33* mat = &ltm;
-    Vertex3d* src = vertices;
+    register mat33* mat = &ltm;
+    register Vertex3d* src = vertices;
     short count = vcount;
     real vpw, vph;
 
@@ -344,8 +344,8 @@ int radians;
         ooz.iv = half.iv;
 #endif
        
-        src->vpx = ftoi(vmmulf(src->cc.x.iv, ooz.iv)) + 320;
-        src->vpy = ftoi(vmmulf(src->cc.y.iv, ooz.iv)) + 240 + (page.y);
+        src->vpx = vmftoi(vmmulf(src->cc.x.iv, ooz.iv)) + 320;
+        src->vpy = vmftoi(vmmulf(src->cc.y.iv, ooz.iv)) + 240 + (page.y);
 
         src++;
     }
@@ -360,13 +360,14 @@ void draw3d()
       bb.rule = bbZero;
       bb.halftoneform = NULL;
 
+#if 1
       /* clear viewport */
       bb.destrect.x = 80;
       bb.destrect.y = page.y;
       bb.destrect.w = 480;
       bb.destrect.h = 480;
       RectDrawX(&bb.destrect, &bb);
-
+#endif
 
       bb.rule = bbS;
       bb.destrect.w = 1;
