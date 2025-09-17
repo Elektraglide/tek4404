@@ -96,7 +96,7 @@ fillbuf0
 	move.l 12(a6),d2
 	sub.l #1,d2
 	move.l d2,12(a6)
-	bpl fillbuf0
+	bne fillbuf0
 eofread
 	move.l a1,d0
 	sub.l 8(a6),d0

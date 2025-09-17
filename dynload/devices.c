@@ -135,8 +135,8 @@ struct userbl *userblk;
 int majmin;
 {
   struct task *atask;
-  char mesg[64],tmp[8];
-  int len;
+  char mesg[80],tmp[8];
+  int len,i;
   char c;
    
   c = majmin & 255;
@@ -159,13 +159,58 @@ int majmin;
   }    
   if (c==1)
   {
-	/* read stiml? */
-    kpassc(&newrnd, 1);
-    newrnd++;
+    if (userblk->uipos == 0)
+    {
+    	int swapsize;
+		char *tty_struct;
+		struct mt *arun;
+		unsigned int *page_entry;
+		unsigned int *paddr;
+		unsigned int argcee;
+		unsigned char *argvee;
+		
+		atask = (struct task *)userblk->utask;
+
+		mesg[0] = 0;
+		kstrcat(mesg, "pid:");
+		kitoa(tmp, (int)atask->tstid);
+	 	kstrcat(mesg, tmp);
+
+		swapsize = 4 * (userblk->usizet+userblk->usized+userblk->usizes);
+		kstrcat(mesg," size:");
+		kitoa(tmp, swapsize);
+	 	kstrcat(mesg, tmp);
+		kstrcat(mesg,"K");
+
+		tty_struct = (char *)atask->tstty + 0x1c;
+		kstrcat(mesg," term:tty");
+		kitoa(tmp, (int)tty_struct[2]);
+	 	kstrcat(mesg, tmp);
+
+		/* read user stack page entry for oldest page in chunk */
+		arun = (struct mt *)(userblk->umem);		
+		page_entry = arun[2].paddr + (arun[2].numpages - 1) * 4;
+		
+		/* remove permissions bits */
+		paddr = (*page_entry & 0xfffff) << 12;
+
+		argcee = paddr[0];
+		kstrcat(mesg," cmd:");
+		for(i=0; i<argcee; i++)
+		{
+			argvee = (char *)paddr + (paddr[1+i] & 0xfff);
+			kstrcat(mesg, argvee);
+			kstrcat(mesg, " ");
+        }    	
+		kstrcat(mesg, "\n");
+		kpassc(mesg, kstrlen(mesg));
+	}
   }   
   if (c==7)
   {
-    newrnd = (newrnd << 1) ^ 0x88888eef;
+    newrnd ^= (newrnd << 13);
+    newrnd ^= (newrnd >> 17);
+    newrnd ^= (newrnd << 5);
     c = newrnd >> 24;
     kpassc(&c, 1);
   }   
