@@ -24,6 +24,7 @@ typedef struct
     vec3 wc;
     vec3 cc;
     short vpx, vpy;
+    int dummy;   /* round to 32 byte */
 } Vertex3d;
 
 real zero,half,one,two, fov,camdist;
@@ -353,6 +354,8 @@ int radians;
 
 void draw3d()
 {
+    register short *lineptr;
+    register Vertex3d *vptr;
     struct POINT p2;
     short i;
 
@@ -386,14 +389,17 @@ void draw3d()
       }
 #endif
 
+	lineptr = lines;
     for (i = 0; i < lcount; i++)
     {
-        bb.destrect.x = vertices[lines[i][0]].vpx;
-        bb.destrect.y = vertices[lines[i][0]].vpy;
+        bb.destrect.x = vertices[lineptr[0]].vpx;
+        bb.destrect.y = vertices[lineptr[0]].vpy;
 
-        p2.x = vertices[lines[i][1]].vpx;
-        p2.y = vertices[lines[i][1]].vpy;
+        p2.x = vertices[lineptr[1]].vpx;
+        p2.y = vertices[lineptr[1]].vpy;
 
+		lineptr += 2;
+		
         PaintLine(&bb, &p2);
 
       /* draw just 1 line;  is it transform or fill limited? */
