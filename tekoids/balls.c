@@ -6,9 +6,6 @@
 #include <signal.h>
 #include <errno.h>
 
-#define PAGE_FLIP
-#define SPRITES
-
 #ifndef unix
 #info Asteronix
 #info Version 1.0
@@ -52,16 +49,12 @@ struct POINT page;
 unsigned long frametime;
 unsigned int framenum;
 
-
+#define MAXROCKS 30
 short numbigrocks;
-sprite bigrocks[30];
+sprite bigrocks[MAXROCKS];
 short nummediumrocks;
-sprite mediumrocks[30];
+sprite mediumrocks[MAXROCKS];
 char status[16];
-
-
-struct FORM *form;
-struct FORM *formshift[16];
 
 extern makemeteorforms();
 extern struct FORM big,big_m;
@@ -132,11 +125,12 @@ int sig;
   ESetAlarm(frametime);
 }
 
-void screenfast(splash, mask)
+void blitfast(splash, halftone)
 struct FORM *splash;
-struct FORM* halftone;
+struct FORM *halftone;
 {
-    register unsigned long *dst, *src, *mask;
+    register unsigned long *dst, *src;
+    register unsigned short *mask;
     register short h = splash->h;
 
     src = splash->addr;
@@ -146,21 +140,22 @@ struct FORM* halftone;
     dst = ((char*)screen->addr) + (page.y << 7);
     do
     {
-        /* mask 1 128byte scanline */
-        register amask = mask[h & 15];
+        /* mask 640px scanline */
+        register unsigned long amask = mask[h & 15];
+        amask |= amask<<16;
+
         *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
         *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
         *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
         *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
         *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+		dst += 12;
     } while (--h > 0);
 }
 
-void restoreunder(asprite)
+void restoreunder(asprite, w,h)
 sprite *asprite;
+int w,h;
 {
 
     bb.srcform = NULL;
@@ -169,8 +164,8 @@ sprite *asprite;
     bb.destform = screen;
 	bb.destrect.x = asprite->oldx[pindex];
     bb.destrect.y = asprite->oldy[pindex];
-	bb.destrect.w = formshift[0]->w;
-    bb.destrect.h = formshift[0]->h;
+	bb.destrect.w = w;
+    bb.destrect.h = h;
  	bb.rule = bbnS;
     bb.halftoneform = NULL;
 	BitBlt(&bb);
@@ -332,57 +327,6 @@ int *w,*h;
   return form;
 }
 
-
-struct FORM *makeform()
-{
-  struct POINT origin,p1,p2;
-  struct RECT r;
-  struct FORM *form;
-  short i;
-     
-   form = FormCreate(64,64);
-   
-   if (font && form)
-   {
-     /* NB text is formatted WRT the destrect, so make it large */
-     bb.destform = form;
-     bb.destrect.x = 0;
-     bb.destrect.y = 0;
-     bb.destrect.w = 1024;
-     bb.destrect.h = 1024;
-     bb.rule = bbS;
-     bb.halftoneform = NULL;
-     bb.cliprect.x = 4;
-     bb.cliprect.y = 4;
-     bb.cliprect.w = form->w - 10;
-     bb.cliprect.h = form->h - 8;
-
-     origin.x = 2;
-     origin.y = font->maps->line;
-     StringDrawX("Tektronix\n  4404", &origin, &bb, font);
-
-	 /* frame around it */
-     bb.rule = bbSorD;
-     bb.halftoneform = &GrayMask;
-     bb.cliprect.x = 0;
-     bb.cliprect.y = 0;
-     bb.cliprect.w = form->w;
-     bb.cliprect.h = form->h;
-     bb.srcform = NULL;
-     r.x = r.y = 4;
-     r.w = 60-8;
-     r.h = 60-8;
-     RectBoxDrawX(&r,4, &bb);
-
-	 origin.x = 32;
-	 origin.y = 32;
-	 
-	 CircleDrawX(&origin, 28, 2, &bb);
-   }
-
-   return form;
-}
-
 makeshifted(src,dstarr,rule)
 struct FORM *src;
 struct FORM **dstarr;
@@ -421,7 +365,6 @@ int rule;
        BitBlt(&bb);
 	}
 }
-
 
 void movesprite(asprite)
 sprite *asprite;
@@ -488,7 +431,7 @@ char *argv[];
     unsigned int waiting;
 	int w,h;
 	
-    nummediumrocks = 5;
+    nummediumrocks = 1;
     numbigrocks = 10;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
@@ -530,9 +473,7 @@ char *argv[];
     pindex = 0;
     frametime = EGetTime() + 250;
     framenum = 0;
-#ifdef PAGE_FLIP
     ESetAlarm(frametime);
-#endif
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -550,21 +491,27 @@ char *argv[];
 	splash = readtga("splash.tga",&w,&h);
 	if (splash)
 	{
-	  bb.srcform = splash;
-	  for(i=0; i<6; i++)
+	  int loop;
+	  
+ 	  loop = 5;
+	  while(loop--)
+	  {
+	  for(i=1; i<6; i++)
 	  {	
-        bb.destrect.x = 0;
-        bb.destrect.y = page.y;
-     	bb.rule = bbS;
-        bb.halftoneform = shading[i];
-		BitBlt(&bb);
-		waitframes(8);		
+		blitfast(splash, shading[i]);   
+		waitframes(2);
+		waitflip();
 	  }
+	  for(i=5; i>=2; i--)
+	  {	
+		blitfast(splash, shading[i]);   
+		waitframes(4);
+		waitflip();
+	  }
+	  }
+	 
     }
-
-	/* make shape to draw */
-   	form = makeform();
-	makeshifted(form, formshift, bbS);
+    waitflip();
 
 	/* build forms from embedded data */
 	makemeteorforms();
@@ -572,7 +519,8 @@ char *argv[];
 	makeshifted(&big_m, big_mshift, bbnS);
 	makeshifted(&medium, mediumshift, bbnS);
 	makeshifted(&medium_m, medium_mshift, bbnS);
-	/* mask sprite */
+
+	/* mask sprites; why needed? */
 	for (i=0; i<16; i++)
 	{
  	   bb.srcform = big_mshift[i];		
@@ -583,6 +531,16 @@ char *argv[];
        bb.destrect.h = bigshift[i]->h;
        bb.rule = bbSnandD;
        BitBlt(&bb);
+#if 1
+ 	   bb.srcform = medium_mshift[i];		
+	   bb.destform = mediumshift[i];
+       bb.destrect.x = 0;
+       bb.destrect.y = 0;
+       bb.destrect.w = mediumshift[i]->w;
+       bb.destrect.h = mediumshift[i]->h;
+       bb.rule = bbSnandD;
+       BitBlt(&bb);
+#endif
 	}
 
 
@@ -611,25 +569,9 @@ for(i=0; i<16; i++)
 	
 	waitframes(90);
 
-    /* splash screen fade down */
+    /* splash screen cleanup */
 	if (splash)
 	{
-	  bb.srcform = splash;
-	  bb.destform = screen;
-      bb.destrect.w = 1024;
-      bb.destrect.h = 512;
-	  for(i=5; i>=0; i--)
-	  {	
-        bb.destrect.x = 0;
-        bb.destrect.y = page.y;
-     	bb.rule = bbS;
-        bb.halftoneform = shading[i];
-		BitBlt(&bb);
-		waitframes(4);
-		
-		waitflip();
-	  }
-
 	  FormDestroy(splash);
   	  splash = NULL;
       bb.srcform = NULL;  	  
@@ -638,9 +580,9 @@ for(i=0; i<16; i++)
     ClearScreen();
 
 	/* make a sprite to use */
-    for (i = 0; i < 30; i++)
+    for (i=0; i<MAXROCKS; i++)
         makesprite(&mediumrocks[i]);
-    for(i=0; i<30; i++)
+    for(i=0; i<MAXROCKS; i++)
 	    makesprite(&bigrocks[i]);
 
     /* set up the bitblt command stuff */
@@ -669,10 +611,10 @@ for(i=0; i<16; i++)
 
     rockptr = bigrocks;
 	for(i=0; i<numbigrocks; i++)
-        restoreunder(rockptr++);
+        restoreunder(rockptr++, 64, 48);
     rockptr = mediumrocks;
     for (i = 0; i < nummediumrocks; i++)
-        restoreunder(rockptr++);
+        restoreunder(rockptr++, 48, 32);
 
     rockptr = bigrocks;
 	for(i=0; i<numbigrocks; i++)
@@ -703,7 +645,6 @@ for(i=0; i<16; i++)
      origin.y = page.y + font->maps->line;
      StringDrawX(status, &origin, &bb, font);
 
-#ifdef PAGE_FLIP
      /* show draw time by how long we waited for VBLANK */
      waiting >>= 4;
      bb.srcform = NULL;
@@ -723,7 +664,6 @@ for(i=0; i<16; i++)
      oldwaiting[pindex] = waiting;
 
 	 waiting = waitflip();
-#endif
 
    }
 
