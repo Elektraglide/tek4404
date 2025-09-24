@@ -172,6 +172,73 @@ int w,h;
 	BitBlt(&bb);
 }
 
+void blitclear(sx, sy, sh)
+int sx, sy, sh;
+{
+    register unsigned long* dst;
+    register short h = sh;
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = dst[1] = 0;
+        dst += 32;
+    } while (--h > 0);
+}
+
+void bigblitmasked(sx, sy, shift)
+int sx, sy;
+struct FORM **shift;
+{
+    register unsigned long* dst, * src, *mask;
+    register short h = bigshift[0]->h;
+
+    src = shift[sx & 15]->addr;
+    mask = big_mshift[sx & 15]->addr;
+
+    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
+    {
+    	printf("error %d %d\n", sx, sy);
+    	return;
+    }
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+
+    do
+    {
+        dst[0] = (dst[0] & *mask++) | *src++;
+        dst[1] = (dst[1] & *mask++) | *src++;
+        dst += 32;
+    } while (--h > 0);
+}
+
+void bigblitfast(sx, sy)
+int sx, sy;
+{
+    register unsigned long* dst, * src;
+    register short h = bigshift[0]->h;
+
+    src = bigshift[sx & 15]->addr;
+
+    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
+    {
+    	printf("error %d %d\n", sx, sy);
+    	return;
+    }
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = *src++;
+        dst[1] = *src++;
+        dst += 32;
+    } while (--h > 0);
+
+}
+
 /* draw 64 wide sprite */
 void bigdrawfast(asprite)
 sprite *asprite;
@@ -434,7 +501,7 @@ char *argv[];
 	int sndfd;
 	char sndbuffer[8];
 	
-    numbigrocks = 10;
+    numbigrocks = 20;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
     nummediumrocks = numbigrocks / 2;
@@ -493,33 +560,6 @@ char *argv[];
     bb.destrect.w = 1024;
     bb.destrect.h = 512;
 
-	/* splash screen fade up */
-	splash = readtga("splash.tga",&w,&h);
-	if (splash)
-	{
-	  int loop;
-	  
- 	  loop = 5;
-	  while(loop--)
-	  {
-	  for(i=1; i<7; i++)
-	  {	
-		blitfast(splash, shading[i]);   
-		waitframes(2);
-		waitflip();
-	  }
-	  waitframes(20);
-	  for(i=6; i>=2; i--)
-	  {	
-		blitfast(splash, shading[i]);   
-		waitframes(3);
-		waitflip();
-	  }
-	  }
-	 
-    }
-    waitflip();
-
 	/* build forms from embedded data */
 	makemeteorforms();
 	makeshifted(&big, bigshift, bbnS);
@@ -549,6 +589,86 @@ char *argv[];
        BitBlt(&bb);
 #endif
 	}
+
+	/* splash screen fade up */
+	splash = readtga("splash.tga",&w,&h);
+	if (splash)
+	{
+	  int loop,x,y;
+
+      for(i=0; i<7; i++)
+      {
+        blitfast(splash, shading[i]);
+        waitframes(4);
+        waitflip();
+      }
+      waitframes(20);
+
+	  /* robotron */
+      loop = 4096;
+      while (--loop)
+      {
+      	short off = loop & 63;
+      	short id;
+
+		  blitclear(0,0,448);
+		  blitclear(640-64,0,448);
+
+		  /* animate border with meteors */      	
+          for (x = 0; x < 640-64; x += 64)
+          {
+              bigblitfast(x + (off), 0);
+              bigblitfast(x + (64-off), 384);
+          }
+          for (y = 0; y < 384; y += 64)
+          {
+              bigblitmasked(0, y + (64-off), bigshift);
+              bigblitmasked(640-64, y + (off), bigshift);
+          }
+
+		  /*  ping 1 of 30 of them (9 + 6 + 9 + 6) */
+		  id = (-loop) & 31;
+		  if (id < 30)
+		  {
+		  if (id < 9)
+		  {
+		  	x = id * 64 + off;
+		  	y = 0;
+		  }
+		  else
+		  if (id < 15)
+		  {
+		  	x = 640 - 64;
+		  	y = (id - 9) * 64 + off;
+		  }
+		  else
+		  if (id < 24)
+		  {
+		  	x = (8 - (id - 15)) * 64 + (64-off);
+		  	y = 384;	
+		  }
+		  else
+		  if (id < 30)
+		  {
+		  	x = 0;	
+		  	y = (5 - (id - 24)) * 64 + (64-off);
+		  }
+
+   	       bb.srcform = &big_m;
+           bb.destform = screen;
+           bb.destrect.x = x;
+           bb.destrect.y = y + page.y;
+           bb.destrect.w = big.w;
+           bb.destrect.h = big.h;
+           bb.rule = bbSorD;
+           BitBlt(&bb);
+          }
+		  
+          waitflip();
+      }
+
+    }
+    waitflip();
 
 
 #if 0
