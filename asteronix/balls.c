@@ -40,7 +40,8 @@ struct FORM *shading[] = {
 	&LightGrayMask,
 	&GrayMask,
 	&DarkGrayMask,
-	&BlackMask
+	&BlackMask,
+	&BlackMask,
 };
 struct BBCOM bb;
 short pindex;
@@ -430,11 +431,16 @@ char *argv[];
     struct RECT r;
     unsigned int waiting;
 	int w,h;
+	int sndfd;
+	char sndbuffer[8];
 	
-    nummediumrocks = 1;
     numbigrocks = 10;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
+    nummediumrocks = numbigrocks / 2;
+
+	sndfd = open("/dev/sound", O_WRONLY);
+	
 
     
     /* map FPU into our memory space */
@@ -496,16 +502,17 @@ char *argv[];
  	  loop = 5;
 	  while(loop--)
 	  {
-	  for(i=1; i<6; i++)
+	  for(i=1; i<7; i++)
 	  {	
 		blitfast(splash, shading[i]);   
 		waitframes(2);
 		waitflip();
 	  }
-	  for(i=5; i>=2; i--)
+	  waitframes(20);
+	  for(i=6; i>=2; i--)
 	  {	
 		blitfast(splash, shading[i]);   
-		waitframes(4);
+		waitframes(3);
 		waitflip();
 	  }
 	  }
@@ -566,8 +573,9 @@ for(i=0; i<16; i++)
 	  BitBlt(&bb);
 }
 #endif
-	
+printf("waiting\n");	
 	waitframes(90);
+printf("GO\n");
 
     /* splash screen cleanup */
 	if (splash)
