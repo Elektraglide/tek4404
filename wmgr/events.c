@@ -30,6 +30,8 @@ unsigned char shifted[128] =
 
 unsigned char keymap[256];
 unsigned long timestamp = 0;
+unsigned char lastkey = 0;
+unsigned int lastrepeat = 0;
 
 unsigned char *getkeymap()
 {
@@ -47,6 +49,21 @@ int maxlen;
   unsigned char ch;
   
   ecount = EGetCount();
+
+  /* repeatkey */
+  if (ecount == 0)
+  {
+  	if (lastkey)
+  	{
+  		unsigned int currtime = EGetTime();
+  		if (currtime > lastrepeat)
+  		{
+            buffer[total++] = lastkey;
+  			lastrepeat = currtime + 100;
+  		}
+  	}	
+  }
+  else
   while (ecount-- > 0 && total < maxlen)
   {
     ev.evalue = EGetNext();
@@ -82,11 +99,15 @@ int maxlen;
             }
 
             buffer[total++] = ch;
+
+	      	lastkey = ch;
+	      	lastrepeat = EGetTime() + 750;
         }
         break;
         
       case E_RELEASE:
         keymap[ev.estruct.eparam] = 0;
+        lastkey = 0;
         break;
         
       case E_XMOUSE:
