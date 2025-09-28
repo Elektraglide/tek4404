@@ -248,12 +248,12 @@ while(1)
 		{
 			rc = lseek(pmem, 0, SEEK_CUR);
 			/* struct is TTYSIZ (0x2a) */
-			lseek(pmem, ntohl(atask.tstty) + 0x1c, 0);
+			lseek(pmem, ntohl(atask.tstty) + 0x10, 0);
 			read(pmem, buffer, 4);
 			lseek(pmem, rc, SEEK_SET);
+			i = buffer[0];
+			tty[0] = (i == 1) ? 'p' : 't';
 			i = buffer[1];
-			tty[0] = ((i & 0x6) == 0x06) ? 'p' : 't';
-			i = buffer[2];
 			tty[3] = '0' + (i / 10);
 			tty[4] = '0' + (i % 10);
 		}
