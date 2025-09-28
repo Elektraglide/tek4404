@@ -44,6 +44,7 @@ ibuffer	dc.w systat
 _system_control	link a6,#0
 	movem.l d2-d7/a2-a5,-(sp)
 	move.l 8(a6),d0
+	move.l 12(a6),d1
 	sys system_control
 	movem.l (sp)+,d2-d7/a2-a5
 	unlk a6
