@@ -1,9 +1,3 @@
-/*
-Ctrl-C is received  but writing to fdmaster does not send SIGINT
-Is that shell ignoring it, or broken pty implementation?
-Appears to be broken pty implementation AND shell ignoring SIGINT
-
-*/
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -433,9 +427,14 @@ char *from;
   {
     /* PARENT */
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
-    n &= ~(PTY_REMOTE_MODE | PTY_READ_WAIT);
-/*    n |= PTY_READ_WAIT;  */
-/*    n |= PTY_REMOTE_MODE; */
+    
+    n &= ~(PTY_READ_WAIT);
+
+#if 0
+    /* do not process input for Ctrl-C etc */
+    n |= (PTY_REMOTE_MODE);
+#endif
+
 #ifdef USE_PACKETMODE
     n |= PTY_PACKET_MODE;
 #endif
@@ -510,7 +509,7 @@ fprintf(console, "** select n(%d) timeout(%d) => %d\012\n", n+1, timeout.tv_usec
 
         if (rc < 0 && errno != EINTR)
         {
-            fprintf(console, "select(): error %d\n", errno);
+            /* fprintf(console, "select(): error %d\n", errno);  */
             break;
         }
         else
@@ -533,9 +532,9 @@ fprintf(console, "**Read din\012\n");
 
               if (n < 0)
               {
-                if (errno != EINTR)
+                /* fprintf(console, "din read() error %d\n", errno); */
+                if (errno != EINTR && errno != EWOULDBLOCK)
                 {
-                 fprintf(console, "read() error %d\n", errno);
                   break;
                 }
 
@@ -556,7 +555,6 @@ fprintf(console, "**Read din\012\n");
           }
 
 #if 1
-
           /* Parse user input for telnet options */
           if (istelnet != 0)
              parse(&ts);
@@ -569,19 +567,15 @@ fprintf(console, "**Read din\012\n");
 fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
 #endif
               n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
-
-             /* Uniflex pty does not handle Ctrl-C! */
-             if (ts.bi.start[0] == 0x03)
-             {
-               /* should skip iff RAW mode.. */
-             
-               /* we would like to kill any buffered output */
-               control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
-               write(dout, "SIGINT\012\n", 8);
-
-               fprintf(console, "sent SIGINT to %d\012\n", sessionpid);
-               kill(sessionpid, SIGINT);
-             }
+              if (n < 0)
+              {
+                fprintf(console, "fdmaster write() error %d\012\n", errno);
+                if (errno != EINTR && errno != EWOULDBLOCK)
+                {
+                  break;
+                }
+                continue;
+              }
 
              /* Uniflex pty does not handle Ctrl-D! */
              if (ts.bi.start[0] == 0x04)
@@ -597,17 +591,8 @@ fprintf(console, "**Write master %d bytes\012\n", ts.bi.end - ts.bi.start);
 
              }
              
-             if (n < 0)
-              {
-                if (errno != EINTR)
-                {
-                 fprintf(console, "fdmaster write() error %d\n", errno);
-                  break;
-                }
-                continue;
-              }
 
-              ts.bi.start += n;
+             ts.bi.start += n;
           }
         }
 
@@ -631,23 +616,25 @@ fprintf(console, "**Read master\012\n");
             n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
             if (n < 0)
             {
-              if (errno != EINTR)
+              fprintf(console, "fdmaster read() error %d\012\n", errno);
+              if (errno != EINTR && errno != EWOULDBLOCK)
               {
-                 fprintf(console, "fdmaster read() error %d\n", errno);
                 break;
               }
+
               continue;
             }
 
             if (n == 0)
             {
-                fprintf(console,"broken connection\012\n");
+            	if (errno != EINTR && errno != EWOULDBLOCK)
+                  fprintf(console,"broken connection %d\012\n",errno);
                 break;
             }
             else
             if (n == sizeof(ts.bo.data))
             {
-              fprintf(console,"read chocked\n");
+              fprintf(console,"read choked\n");
             }
 
 #ifdef USE_PACKETMODE
@@ -679,29 +666,22 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
             if (n < 0)
             {
-              if (errno != EINTR)
+              /* fprintf(console, "dout write() error %d\012\n", errno); */
+              if (errno != EINTR && errno != EWOULDBLOCK)
+              {
                 break;
+              }
+
+              continue;
             }
+
             if (n < ts.bo.end - ts.bo.start)
             {
-              fprintf(console, "output choked\n");
+              fprintf(console, "output choked\012\n");
             }
             ts.bo.start += n;
           }
 
-#ifndef USE_PACKETMODE
-#ifndef __clang__
-          /* check again if any output */
-          
-         /* problem is this precludes ^S / ^Q flow control */
-         
-          ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
-          if (ptystatus & PTY_OUTPUT_QUEUED)
-          {
-          /*  fprintf(console, "MORE slave output is waiting\012\n");  */
-          }
-#endif
-#endif
         }
       }
     
@@ -750,7 +730,7 @@ fprintf(console, "**Write dout %d bytes \012\n", ts.bo.end - ts.bo.start);
     sessionargv[1] = NULL;
       
     /* calls pty_make_controlling_terminal */
-    system_control(2);
+    system_control(2, fdslave);
     
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
     dup2(fdslave, 1); /* PTY becomes standard output (1) */
