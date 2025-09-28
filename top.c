@@ -3,6 +3,8 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/fcntl.h>
+#include <sys/modes.h>
+#include <sys/sgtty.h>
 #include <pwd.h>
 #include "ph.h"
 #include "kernutils.h"
@@ -43,6 +45,7 @@
 
 char tty[] = "tty00";
 char numbers[16] = "000";
+struct sgttyb orig_term_settings;
 
 void printbuffer(buffer, len)
 unsigned char *buffer;
@@ -102,14 +105,22 @@ char **argv;
 	int prunning;
 	int putime;
 	int pstime;
-  int totalcpu;
-  int openfd;
-  int framenum = 0;
+	int totalcpu;
+ 	int openfd;
+	int framenum = 0;
+	struct sgttyb term_settings;
   
 #ifdef __clang__
 	strcpy(buffer, "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/system.boot");
 #else
 	kernbootfile(buffer);
+
+  gtty(fileno(stdin), &orig_term_settings);
+  term_settings = orig_term_settings;
+  term_settings.sg_flag |= CBREAK;
+  term_settings.sg_flag &= ~ECHO;
+  stty(fileno(stdin), &term_settings);
+
 #endif
 
 	sprintf(bootfile, "/%s", buffer);
@@ -435,6 +446,21 @@ while(1)
 					openfd++;
 		}
 	}
+
+    /* quit? */
+	{
+	    gtty(fileno(stdin), &term_settings);
+    	if (term_settings.sg_speed & INCHR)
+		{
+		    rc = (int)read(fileno(stdin), buffer, 1);
+			if (rc == 1 && buffer[0] == 'q')
+			{
+				stty(fileno(stdin), &orig_term_settings);
+				exit(0);
+			}
+		}
+	}   
+
     printf("\033[2K");	
 	printf("\033[1;1H");
 	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
@@ -474,7 +500,6 @@ netdev *ptr;
   }
 }
 #endif
-
 	sleep(5);
 	
 	/* used for %CPU */
