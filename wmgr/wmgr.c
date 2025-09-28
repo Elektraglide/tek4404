@@ -7,6 +7,7 @@
 #include <sys/sgtty.h>
 #include <sys/fcntl.h>
 #include <net/ftype.h>
+#include <net/nerrno.h>
 #include <signal.h>
 
 #include <font.h>
@@ -46,7 +47,7 @@ void setsid() {}
 extern int rand();
 extern int open();
 
-extern int system_control(); /* arg=1 does something, arg=2 makes controlling termnal */
+extern int system_control(); /* arg=1 does something, arg=2 makes controlling terminal */
 
 #ifdef __clang__
 #define POLLINGPTYx
@@ -55,8 +56,8 @@ extern int system_control(); /* arg=1 does something, arg=2 makes controlling te
 #define POLLINGINPx
 #else
 #define POLLINGPTY			/* cannot select() pty; only way to check for pty input is to poll using control_pty() */
-#define USE_EVENTSx			/* use Event system to get input */
-#define USE_TTYREADER		/* cannot select() stdin; use a socketpair + child process */
+#define USE_EVENTS			/* use Event system to get input */
+#define USE_TTYREADERx		/* cannot select() stdin; use a socketpair + child process */
 #define POLLINGINPx			/* PLAN Z;  Poll stdin by checking (sg_speed & INCHR) */
 #endif
 
@@ -295,12 +296,12 @@ int islogger;
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_flag &= ~ECHO;
-#if 0
+
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
     new_term_settings.sg_prot |= TRANS;
     new_term_settings.sg_prot |= ANY;
-#endif
+
     stty(fdslave, &new_term_settings);
 
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
@@ -309,7 +310,7 @@ int islogger;
 
 #ifndef __clang__
     /* calls pty_make_controlling_terminal */
-    system_control(2);
+    system_control(2, fdslave);
 #endif
 
     /* As the child is a session leader, set the controlling terminal to be the slave side of the PTY */
@@ -1062,18 +1063,15 @@ int wid;
   struct RECT oldrect;
   int i;
 
-  fprintf(stderr, "WindowDestroy: %d\012\n", wid);
-
   /* unlink it */
   prevwin = NULL;
   awin = wintopmost;
   for(i=0; i<numwindows; i++)
   {
-  	fprintf(stderr, "WindowDestroy: checking %d\012\n", awin - allwindows);
     if (awin == &allwindows[wid])
     {
       if (prevwin)
-        prevwin->next = allwindows[wid].next;
+        prevwin->next = awin->next;
       
       /* continue walking so we determine last/bottom window */
     }
@@ -1081,36 +1079,28 @@ int wid;
     awin = awin->next;
   }
 
-
-
-  oldrect = allwindows[wid].windowrect;
+	oldrect = allwindows[wid].windowrect;
   
-  /* reclaim a window slot by swapping with last entry */
-
-
-  /* is top window being destroyed? */
   if (wintopmost == &allwindows[wid])
     wintopmost = wintopmost->next;
 
-  /* update refs TO last element (which is about to be moved) */
-  if (prevwin->next == &allwindows[numwindows-1])
-    prevwin->next = &allwindows[wid];
-
-  /* update refs FROM last element (which is about to be moved) */
-  if (allwindows[numwindows-1].next == &allwindows[wid])
-    allwindows[numwindows-1].next = allwindows[wid].next;
-
-  /* update top window ref to last element (which is about to be moved) */
   if (wintopmost == &allwindows[numwindows-1])
     wintopmost = &allwindows[wid];
 
-  /* move last element to fill gap of deleted window */
+  /* reclaim the window slot by swapping with last entry */
   memcpy(&allwindows[wid], &allwindows[numwindows-1], sizeof(Window));
+
+  for(i=0; i<numwindows; i++)
+  {
+		if (allwindows[i].next == &allwindows[numwindows-1])
+				allwindows[i].next = &allwindows[0];
+  }
+
   numwindows--;
+
 
   if (numwindows > 0)
   {
-    fprintf(stderr, "WindowDestroy: wintopmost %d\012\n", wintopmost - allwindows);
     WindowTop(wintopmost);
   }
   
@@ -1167,14 +1157,11 @@ int sig;
   pid = wait(&i);
   WindowLog("child proc(%d) died with exit code %d\012\n", pid, i);
 
-  fprintf(stderr," cleanup_window: kill win with pid %d\012\n", pid);
   for(i=0; i<numwindows; i++)
   {
     if (allwindows[i].pid == pid)
     {
-      fprintf(stderr, "cleanup_window: destroy %d\012\n", i);
    	  WindowDestroy(i);
-
       break;
     }
   }
@@ -1241,7 +1228,10 @@ char **argv;
 
   SaveDisplayState(&ds);
 
-  font = FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed6.font");
+  font = FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed7.font");
+  if (!font)
+    fprintf(stderr,"Failed to open font: %s\n", strerror(errno));
+    
   fprintf(stderr, "name: %s: face: %s\n", font->name, font->face);
   fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
   fprintf(stderr, "fixed: %d width:%d height:%d\n", 
@@ -1403,30 +1393,23 @@ dummysock = fdtty;
           last_read = 5;
 
           n = (int)write(wintopmost->master, inputbuffer, n);
-
-          /* Uniflex pty does not handle Ctrl-C! */
-          if (inputbuffer[0] == 0x03)
-          {
-              control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-              kill(wintopmost->pid, SIGINT);
-
-              WindowLog("Sent SIGINT to window%d\012\n", wintopmost - allwindows);
-          }
-
+		  if (n < 0)
+		  {
+		    if (errno != EINTR && errno != EWOULDBLOCK)
+		    {
+		      /* should destroy window? */
+		      break;
+		    }
+		    continue;
+		  }
+		  
+          /* Uniflex pty does not handle Ctrl-D */
           if (inputbuffer[0] == 0x04)
           {
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
               kill(wintopmost->pid, SIGHUP);
 
               WindowLog("Sent SIGHUP to window%d\012\n", wintopmost - allwindows);
-          }
-
-          if (inputbuffer[0] == 0x1c)
-          {
-              control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-              kill(wintopmost->pid, SIGQUIT);
-
-              WindowLog("Sent SIGQUIT to window%d\012\n", wintopmost - allwindows);
           }
 
 /* we dont know whether we are in RAW mode.. */
@@ -1461,24 +1444,25 @@ dummysock = fdtty;
       {
         n = (int)write(wintopmost->master, inputbuffer, n);
         
-        /* Uniflex pty does not handle Ctrl-C! */
-        if (inputbuffer[0] == 0x03)
+        /* Uniflex pty does not handle Ctrl-D */
+        if (inputbuffer[0] == 0x04)
         {
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-          WindowOutput(wintopmost - allwindows, "SIGINT\012\n", 8);
-          kill(wintopmost->pid, SIGINT);
+          WindowOutput(wintopmost - allwindows, "SIGHUP\012\n", 8);
+          kill(wintopmost->pid, SIGHUP);
         }
       
         if (n < 0)
         {
-       	  WindowDestroy((int)(wintopmost - allwindows));
+          if (errno != EINTR && errno != EWOULDBLOCK)
+	       	  WindowDestroy((int)(wintopmost - allwindows));
         }
       }
     }
 #endif
 
 
-    /* read any output from window process */
+    /* read any output from window processes */
     for(i=0; i<numwindows; i++)
     {
 #ifdef POLLINGPTY
@@ -1492,24 +1476,27 @@ dummysock = fdtty;
         n = (int)read(allwindows[i].master, inputbuffer, sizeof(inputbuffer));
 
         /* window process terminated */
+        if (n <= 0)
+        {
+          if (errno != EINTR && errno != EWOULDBLOCK)
+          {
+            rc = 0;
+            wait(&rc);
+
+            WindowDestroy(i);
+            WindowLog("window%d destroyed with exit code 0x%04x\012\n", i, rc);
+            break;
+          }
+        }
+        else
         if (n > 0)
         {
           WindowOutput(i, inputbuffer, n);
         }
-        else
-        if (n == 0)
-        {
-          rc = 0;
-          wait(&rc);
-
-          WindowDestroy(i);
-          WindowLog("window%d destroyed with exit code 0x%04x\012\n", i, rc);
-          break;
-        }
         
 #ifdef POLLINGPTY
-          /* check again if any output */
-          n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
+        /* check again if any output */
+        n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
 #endif
 
       }
@@ -1544,6 +1531,9 @@ dummysock = fdtty;
 
       if (GetButtons() & M_LEFT)
       {
+		/* always make it visible */
+      	CursorVisible(1);
+      	
         /* walk from frontmost windows back to find which we are over */
         GetMPosition(&origin);
 
@@ -1604,12 +1594,15 @@ dummysock = fdtty;
       else
       if (GetButtons() & M_RIGHT)
       {
-          /* pop up menu */
+		/* always make it visible */
+      	CursorVisible(1);
+      	
+        /* pop up menu */
 
-          while (GetButtons() & M_RIGHT);
+        while (GetButtons() & M_RIGHT);
 
-          GetMPosition(&origin);
-          WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+        GetMPosition(&origin);
+        WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
       }
 
     /* debugging dirtylines */
