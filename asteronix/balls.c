@@ -6,29 +6,12 @@
 #include <signal.h>
 #include <errno.h>
 
+#include "asteronix.h"
+
 #ifndef unix
 #info Asteronix
 #info Version 1.0
 #endif
-
-#define INT2FIX(A)  ((A)<<8)
-#define FIX2INT(A)  ((A)>>8)
-
-typedef long fixed;
-
-typedef struct
-{
-  fixed x,y;
-  fixed dx,dy;
-
-  short oldx[2],oldy[2];
-} sprite;
-
-typedef struct
-{
-  sprite spr;
-  short lifetime;  
-} bullet;
 
 typedef struct
 {
@@ -66,17 +49,90 @@ sprite mediumrocks[MAXROCKS];
 short numbullets;
 bullet bullets[MAXBULLETS];
 
-char status[32];
+char status[64];
+char keyinput[16];
 
 #define ATTRACTFLASH 7
 
-extern makemeteorforms();
-extern struct FORM big,big_m;
-extern struct FORM medium,medium_m;
-struct FORM *bigshift[16];
-struct FORM *big_mshift[16];
-struct FORM *mediumshift[16];
-struct FORM *medium_mshift[16];
+
+/************* SOUND ************/
+
+int sndfd;
+unsigned char sb[32];
+
+noise(f,v,l)
+int f,v,l;
+{
+	sb[0] = 1;
+	sb[1] = 0x80 | 0x60 | 0x04 | (f & 3);
+	sb[2] = 0;
+	
+    sb[3] = 1;
+    sb[4] = 0x80 | 0x70 | (v & 15);
+    sb[5] = l;
+	write(sndfd, sb, 6);
+}
+
+voice1(f,v,l)
+int f,v,l;
+{
+	sb[0] = 2;
+	sb[1] = 0x80 | 0x20 | (f & 15);
+	sb[2] = (f >> 4) & 63;
+	sb[3] = 0;
+
+	sb[4] = 1;
+	sb[5] = 0x80 | 0x30 | (v & 15);
+	sb[6] = l;
+	write(sndfd, sb, 7);
+}
+
+voice2(f,v,l)
+int f,v,l;
+{
+	sb[0] = 2;
+	sb[1] = 0x80 | 0x40 | (f & 15);
+	sb[2] = (f >> 4) & 63;
+	sb[3] = 0;
+
+	sb[4] = 1;
+	sb[5] = 0x80 | 0x50 | (v & 15);
+	sb[6] = l;
+	write(sndfd, sb, 7);
+}
+
+testsound(f)
+int f;
+{
+  int v;
+
+  voice1(f,8,0);	
+  voice2(f/2,8,0);
+
+  for(v=4; v<16; v++)
+  {
+    voice1(f,v,2);
+    voice1(f/2,v,2);
+  }
+}
+
+boomsound()
+{
+    /* only way to cancel plating sound!! */
+	close(sndfd);
+	sndfd = open("/dev/sound", O_RDONLY);
+
+ 	noise(2, 15,0);
+	noise(2, 0, 1);
+	noise(2, 4, 2);
+	noise(2, 6, 2);
+	noise(2, 8, 2);
+	noise(2, 10, 2);
+	noise(2, 12, 4);
+ 	noise(2, 15,0);
+}
+
+/************** GRAPHICS **********/
 
 void flip()
 {
@@ -85,7 +141,6 @@ void flip()
 
   page.y ^= 512;
   pindex ^= 1;
-
 
 #if 0
   /* horizontal scrolling */
@@ -148,256 +203,94 @@ int myrand()
     return newrnd;	
 }
 
-
-void blitfast(splash, halftone)
-struct FORM *splash;
-struct FORM *halftone;
+int rand2()
 {
-    register unsigned long *dst, *src;
-    register unsigned short *mask;
-    register short h = splash->h;
+  int v = myrand() & 7;
+  if (v > 4) v -= 5;
 
-    src = splash->addr;
-    mask = halftone->addr;
-
-    /* draw on current page */
-    dst = ((char*)screen->addr) + (page.y << 7);
-    do
-    {
-        /* mask 640px scanline */
-        register unsigned long amask = mask[h & 15];
-        amask |= amask<<16;
-
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
-		dst += 12;
-    } while (--h > 0);
+  return v - 2;
 }
 
-void restoreunder(asprite, w,h)
-sprite *asprite;
+void makesprite(asprite, x,y)
+sprite* asprite;
+int x,y;
+{
+    int v;
+
+    asprite->x = INT2FIX(x);
+    asprite->y = INT2FIX(y);
+    asprite->oldx[0] = asprite->oldx[1] = -1000;
+
+    /* ensure never zero */
+    asprite->dx = INT2FIX(1 + (myrand() & 31)) >> 3;
+    asprite->dy = INT2FIX(1 + (myrand() & 31)) >> 3;
+    v = myrand();
+    if (v & 1)
+        asprite->dx = -asprite->dx;
+    if (v & 2)
+        asprite->dy = -asprite->dy;
+
+    /* immortal for 20 frames */
+    asprite->state = ALIVE + 20;
+}
+
+void makefastsprite(asprite, parent, angle)
+sprite* asprite;
+sprite* parent;
+int angle;
+{
+    asprite->x = parent->x;
+    asprite->y = parent->y;
+    asprite->oldx[0] = asprite->oldx[1] = -1000;
+
+    /* ricochet angles */
+    if (angle == 0)
+    {
+        asprite->dx = (parent->dx + parent->dy);
+        asprite->dy = (parent->dy + parent->dx);
+    }
+    else
+    {
+        asprite->dx = (parent->dx - parent->dy);
+        asprite->dy = (parent->dy - parent->dx);
+    }
+
+    /* immortal for 20 frames */
+    asprite->state = ALIVE + 20;
+}
+
+int hit(rockptr,w,h)
+register sprite *rockptr;
 int w,h;
 {
+register bullet *bulletptr; 
+register short i;
 
-    bb.srcform = NULL;
-    bb.srcpoint.x = 0;
-    bb.srcpoint.y = 0;
-    bb.destform = screen;
-	bb.destrect.x = asprite->oldx[pindex];
-    bb.destrect.y = asprite->oldy[pindex];
-	bb.destrect.w = w;
-    bb.destrect.h = h;
- 	bb.rule = bbnS;
-    bb.halftoneform = NULL;
-	BitBlt(&bb);
-}
+  /* dying cannot be hit again */
+  if (rockptr->state != ALIVE)
+    return 0;
 
-void blitclear64(sx, sy, sh)
-int sx, sy, sh;
-{
-    register unsigned long* dst;
-    register short h = sh;
+  bulletptr = bullets;  
+  for(i=0; i<numbullets; i++,bulletptr++)
+  {
+    register short dx;
 
-    sy += page.y;
-    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
-    do
-    {
-        dst[0] = dst[1] = 0;
-        dst += 32;
-    } while (--h > 0);
-}
-
-void bigblitflash(sx, sy)
-int sx,sy;
-{
-     bb.srcform = &big_m;
-     bb.destform = screen;
-     bb.destrect.x = sx;
-     bb.destrect.y = sy + page.y;
-     bb.destrect.w = big.w;
-     bb.destrect.h = big.h;
-     bb.rule = bbSorD;
-     BitBlt(&bb);
-}
-
-void bigblitmasked(sx, sy, shift)
-int sx, sy;
-struct FORM **shift;
-{
-    register unsigned long* dst, * src, *mask;
-    register short h = bigshift[0]->h;
-
-    src = shift[sx & 15]->addr;
-    mask = big_mshift[sx & 15]->addr;
-
-    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
-    {
-    	printf("error %d %d\n", sx, sy);
-    	return;
+    if (bulletptr->spr.state >= ALIVE)
+    {      
+      dx = FIX2INT(bulletptr->spr.x - rockptr->x);
+      if ( (dx > (0)) && (dx < (w)) )
+      {
+        dx = FIX2INT(bulletptr->spr.y - rockptr->y);
+        if ( (dx > (0)) && (dx < (h)) )
+        {
+          /* start dying */
+          bulletptr->spr.state = DYING2;
+          return 1;
+        }
+      }
     }
-
-    sy += page.y;
-    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
-
-    do
-    {
-        dst[0] = (dst[0] & *mask++) | (*src++);
-        dst[1] = (dst[1] & *mask++) | (*src++);
-        dst += 32;
-    } while (--h > 0);
-}
-
-void bigblitfast(sx, sy)
-int sx, sy;
-{
-    register unsigned long* dst, * src;
-    register short h = bigshift[0]->h;
-
-    src = bigshift[sx & 15]->addr;
-
-    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
-    {
-    	printf("error %d %d\n", sx, sy);
-    	return;
-    }
-
-    sy += page.y;
-    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
-    do
-    {
-        dst[0] = *src++;
-        dst[1] = *src++;
-        dst += 32;
-    } while (--h > 0);
-
-}
-
-/* draw 64 wide sprite */
-void bigdrawfast(asprite)
-sprite *asprite;
-{
-	register unsigned long *dst,*src,*mask;
-	register short h = bigshift[0]->h;
-	short sx = FIX2INT(asprite->x);
-	short sy = FIX2INT(asprite->y);
-
-	src = bigshift[sx & 15]->addr;
-	mask = big_mshift[sx & 15]->addr;
-
-	if (sy < 0) 		/* clip to top */
-	{
-		src -= sy << 1;
-		mask -= sy << 1;
-		h += sy;
-		sy = 0;
-	}
-	else
-	if (sy + h > 480)	/* clip to bottom */
-	{
-		h = 480 - sy;
-	}
-	
-	/* draw on current page */
-	sy += page.y;
-
-    dst = ((char *)screen->addr) + (sy<<7) + ((sx & -16) >> 3);
-    do
-    {
-      dst[0] = (dst[0] & *mask++) | *src++;
-      dst[1] = (dst[1] & *mask++) | *src++;
-      dst += 32;
-    } while (--h > 0);
-
-    asprite->oldx[pindex] = sx & -16;
-    asprite->oldy[pindex] = sy;
-}
-
-/* draw 48 wide sprite */
-void mediumdrawfast(asprite)
-sprite* asprite;
-{
-	register unsigned short *dst, *src, *mask;
-	register short h = mediumshift[0]->h;
-	short sx = FIX2INT(asprite->x);
-	short sy = FIX2INT(asprite->y);
-
-	src = mediumshift[sx & 15]->addr;
-	mask = medium_mshift[sx & 15]->addr;
-
-	if (sy < 0) 		/* clip to top */
-	{
-		src -= sy + (sy << 1);
-		mask -= sy + (sy << 1);
-		h += sy;
-		sy = 0;
-	}
-	else
-		if (sy + h > 480)	/* clip to bottom */
-		{
-			h = 480 - sy;
-		}
-
-	/* draw on current page */
-	sy += page.y;
-
-	dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
-	do
-	{
-		dst[0] = (dst[0] & *mask++) | *src++;
-        dst[1] = (dst[1] & *mask++) | *src++;
-        dst[2] = (dst[2] & *mask++) | *src++;
-        dst += 64;
-	} while (--h > 0);
-
-	asprite->oldx[pindex] = sx & -16;
-	asprite->oldy[pindex] = sy;
-}
-
-void drawsprite(asprite)
-sprite *asprite;
-{
-    short sx = FIX2INT(asprite->x);
-    short sy = FIX2INT(asprite->y);
-	short h = bigshift[0]->h;
-
-	/* clip to bottom */
-	if (sy + h > 480)
-		h = 480 - sy;
-
-	/* draw on current page */
-	sy += page.y;
-		
-    /* mask out */
-    bb.srcform = big_mshift[sx & 15]; 
-    bb.srcpoint.x = 0;
-    bb.srcpoint.y = 0;
-    bb.destform = screen;
-	bb.destrect.x = sx & -16;
-    bb.destrect.y = sy;
-	bb.destrect.w = bigshift[0]->w;
-    bb.destrect.h = h;
- 	bb.rule = bbSandD;
-    bb.halftoneform = NULL;
-	BitBlt(&bb); 
-
-    /* draw over */
-    bb.srcform = bigshift[sx & 15]; 
-    bb.srcpoint.x = 0;
-    bb.srcpoint.y = 0;
-    bb.destform = screen;
-	bb.destrect.x = sx & -16;
-    bb.destrect.y = sy;
-	bb.destrect.w = bigshift[0]->w;
-    bb.destrect.h = h;
- 	bb.rule = bbSorD;
-    bb.halftoneform = NULL;
- 	BitBlt(&bb); 
-
-    asprite->oldx[pindex] = sx & -16;
-    asprite->oldy[pindex] = sy;
+  }
+  return 0;
 }
 
 fixed d360[] = {
@@ -405,7 +298,7 @@ fixed d360[] = {
    INT2FIX(1),INT2FIX(0),	
    INT2FIX(0),INT2FIX(-1),	
    INT2FIX(0),INT2FIX(1),	
-   INT2FIX(-1),INT2FIX(-1),	
+   INT2FIX(-2),INT2FIX(-1),	
    INT2FIX(-1),INT2FIX(1),	
 };
 
@@ -414,10 +307,14 @@ int sx,sy;
 {
 int i, *dir;
 
+return;
+
+  /* boomsound();  */
+  
   dir = d360;
   for(i=0; i<6; i++)
   {
-    if (numbullets < 32)
+    if (numbullets < MAXBULLETS)
     {
 		bullets[numbullets].spr.x = INT2FIX(sx);
 		bullets[numbullets].spr.y = INT2FIX(sy);
@@ -425,12 +322,10 @@ int i, *dir;
         bullets[numbullets].spr.dy = *dir++;
 	    bullets[numbullets].spr.oldx[0] =
 	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
-		
-	    bullets[numbullets].lifetime = 5;
+		bullets[numbullets].spr.state = ALIVE + 25;
  	    numbullets++;
  	}
   }
-	
 }
 
 void dobullets()
@@ -453,21 +348,20 @@ void dobullets()
       
       dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
       dst[0] &= ~(0x8000 >> (sx & 15));
-
     }
     
 	/* move */
     bulletptr->spr.x += bulletptr->spr.dx;
-    if (bulletptr->spr.x < 0) bulletptr->spr.x += 640;
-    if (bulletptr->spr.x >640) bulletptr->spr.x -= 640;
+    if (bulletptr->spr.x < INT2FIX(0)) bulletptr->spr.x += INT2FIX(640);
+    if (bulletptr->spr.x >INT2FIX(640)) bulletptr->spr.x -= INT2FIX(640);
     bulletptr->spr.y += bulletptr->spr.dy;
-    if (bulletptr->spr.y < 0) bulletptr->spr.y += 480;
-    if (bulletptr->spr.y >480) bulletptr->spr.y -= 480;
-	bulletptr->lifetime--;
+    if (bulletptr->spr.y < INT2FIX(0)) bulletptr->spr.y += INT2FIX(480);
+    if (bulletptr->spr.y >INT2FIX(480)) bulletptr->spr.y -= INT2FIX(480);
 
+    bulletptr->spr.state--;
 
     /* draw */
-	if (bulletptr->lifetime > 0)
+	if (bulletptr->spr.state >= ALIVE)
 	{
       sx = FIX2INT(bulletptr->spr.x);
       sy = FIX2INT(bulletptr->spr.y);
@@ -476,25 +370,113 @@ void dobullets()
       dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
       dst[0] |= 0x8000 >> (sx & 15);
       
-	  bulletptr->spr.oldx[pindex] = sx;
+      bulletptr->spr.oldx[pindex] = sx;
       bulletptr->spr.oldy[pindex] = sy;
-     
-	}
-	else
-	{
-	  /* remove remaining trace */
-      sx = bulletptr->spr.oldx[pindex ^ 1];
-      sy = bulletptr->spr.oldy[pindex ^ 1];
-      
-      dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
-      dst[0] &= ~(0x8000 >> (sx & 15));
-
-	  numbullets--;
-	  *bulletptr = bullets[numbullets];
-	}
- 
+    }
+    else
+    if (bulletptr->spr.state == DEAD)
+    {
+      numbullets--;
+      *bulletptr-- = bullets[numbullets];
+      i--;
+    }
   }	
+}
 
+dorocks()
+{
+register sprite *rockptr;
+short i;
+	
+    rockptr = bigrocks;
+	for(i=0; i<numbigrocks; i++,rockptr++)
+	{
+      restoreunder(rockptr, 64, 41);
+
+      /* has it hit a bullet? */
+      if (hit(rockptr, 48,41))
+      {
+        rockptr->state = DYING1;
+
+  /* STOP */        
+
+        /* 2 smaller fragments */
+        if (nummediumrocks < MAXROCKS-2)
+        {
+          makefastsprite(&mediumrocks[nummediumrocks++], rockptr, 0);
+          makefastsprite(&mediumrocks[nummediumrocks++], rockptr, 1);
+        }
+      }
+    }
+    rockptr = mediumrocks;
+    for (i = 0; i < nummediumrocks; i++,rockptr++)
+    {
+      restoreunder(rockptr, 48, 22);
+
+      /* has it hit a bullet? */
+      if (hit(rockptr, 32,22))
+      {
+        rockptr->state = DYING2;
+
+        makeboom(rockptr->oldx[pindex], rockptr->oldy[pindex]);
+      }
+    }
+
+    /* move */
+    rockptr = bigrocks;
+	for(i=0; i<numbigrocks; i++)
+        movesprite(rockptr++);
+    rockptr = mediumrocks;
+    for (i = 0; i < nummediumrocks; i++)
+        movesprite(rockptr++);
+
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = 1024;
+    bb.destrect.h = 1024;
+
+    /* draw */
+    rockptr = bigrocks;
+	for(i=0; i<numbigrocks; i++,rockptr++)
+	{
+      if (rockptr->state >= ALIVE)
+      {
+        /* count down immortal state */
+        if (rockptr->state > ALIVE) rockptr->state--;
+        bigdrawfast(rockptr);
+      }
+      else
+      {
+        rockptr->state--;
+        if (rockptr->state == DEAD)
+        {
+            numbigrocks--;
+            *rockptr-- = bigrocks[numbigrocks];
+            i--;
+        }
+      }
+    }
+
+    rockptr = mediumrocks;
+    for (i = 0; i < nummediumrocks; i++,rockptr++)
+    {
+      if (rockptr->state >= ALIVE)
+      {
+          /* count down immortal state */
+          if (rockptr->state > ALIVE) rockptr->state--;
+          mediumdrawfast(rockptr);
+      }
+      else
+      {
+          rockptr->state--;
+          if (rockptr->state == DEAD)
+          {
+              nummediumrocks--;
+              *rockptr-- = mediumrocks[nummediumrocks];
+              i--;
+          }
+      }
+	}
 }
 
 struct FORM *readtga(filename, w,h)
@@ -528,45 +510,6 @@ int *w,*h;
   return form;
 }
 
-makeshifted(src,dstarr,rule)
-struct FORM *src;
-struct FORM **dstarr;
-int rule;
-{
-	int i,len;
-    struct RECT r;
-    	
-     bb.srcform = src;
-     bb.srcpoint.x = 0;
-     bb.srcpoint.y = 0;
-     bb.cliprect.x = 0;
-     bb.cliprect.y = 0;
-     bb.cliprect.w = 1024;
-     bb.cliprect.h = 1024;
-     bb.halftoneform = NULL;
-     bb.rule = rule;
-
-	/* cache shifted versions of it */
-	r.x = 0;
-	r.y = 0;
-	r.w = src->w + 16;
-	r.h = src->h;
-	len = (r.w >> 3) * r.h;
-	for (i=0; i<16; i++)
-	{
-	   dstarr[i] = FormCreate(src->w + 16,src->h);
-
-	   memset(dstarr[i]->addr, 0xff, len);
-		
-	   bb.destform = dstarr[i];
-       bb.destrect.x = i;
-       bb.destrect.y = 0;
-       bb.destrect.w = src->w;
-       bb.destrect.h = src->h;
-       BitBlt(&bb);
-	}
-}
-
 void movesprite(asprite)
 sprite *asprite;
 {
@@ -593,62 +536,23 @@ sprite *asprite;
     }
 }
 
-void makesprite(asprite)
-sprite* asprite;
-{
-    asprite->x = INT2FIX(128 + (rand() & 255));
-    asprite->y = INT2FIX(64 + (rand() & 255));
-    asprite->oldx[0] = asprite->oldx[1] = -1000;
-
-    asprite->dx = INT2FIX((rand() & 15) - 8) >> 2;
-    asprite->dy = INT2FIX((rand() & 15) - 8) >> 2;
-    
-}
-
 void sh_int(sig)
 int sig;
 {
   struct POINT p;
   p.x = p.y = 0;
   SetViewport(&p);
+
+  EventDisable();
+  SetKBCode(1);
+
   ExitGraphics();
   FontClose(font);
 
   exit(2);
 }
 
-/************* SOUND ************/
-int sndfd;
-unsigned char sb[32];
-
-noise(f,v,l)
-int f,v,l;
-{
-	sb[0] = 1;
-	sb[1] = 0x80 | 0x60 | 0x04 | (f & 3);
-	sb[2] = 0;
-	
-    sb[3] = 1;
-    sb[4] = 0x80 | 0x70 | (v & 15);
-    sb[5] = l;
-	write(sndfd, sb, 6);
-}
-
-voice1(f,v,l)
-int f,v,l;
-{
-	sb[0] = 2;
-	sb[1] = 0x80 | 0x20 | (f & 15);
-	sb[2] = (f >> 4) & 63;
-	sb[3] = 0;
-
-	sb[4] = 1;
-	sb[5] = 0x80 | 0x30 | (v & 15);
-	sb[6] = l;
-	write(sndfd, sb, 6);
-}
-
-int *mapped_fpu;
+unsigned char* keyboardmap;
 unsigned int oldwaiting[2];
 main(argc,argv)
 int argc;
@@ -665,10 +569,10 @@ char *argv[];
 	newrnd = time(NULL);
 	
 	numbullets = 0;	
+    nummediumrocks = 0;
     numbigrocks = 20;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
-    nummediumrocks = numbigrocks / 2;
 
 
 	sndfd = open("/dev/sound", O_WRONLY);
@@ -679,23 +583,14 @@ char *argv[];
 	sb[2] = 6;
     write(sndfd, sb, 3);
 
-	voice1(700, 0,200);
-	voice1(400, 8,200);
-	voice1(400, 12,20);
+/*	testsound(600);  */
 		
-    
-    /* map FPU into our memory space */
-	mapped_fpu = phys(2);
-	if (mapped_fpu == NULL)
-	{
-		fprintf(stderr, "no FPU mapped\n");
-		exit(2);
-	}
-
     signal(SIGINT, sh_int);
+    signal(SIGQUIT, sh_int);
+    signal(SIGTERM, sh_int);
     signal(SIGMILLI, sh_timer);
 
-    font = FontOpen("/fonts/MagnoliaFixed8.font");
+    font = FontOpen("/fonts/MagnoliaFixed7.font");
     if (font)
     {
 		fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
@@ -711,8 +606,14 @@ char *argv[];
     screen = InitGraphics(FALSE);
     ClearScreen();
 
+    EventEnable();
+    SetKBCode(0);
+
     /* hide cursor */
     CursorVisible(FALSE);
+
+    /* get reference to keymap */
+    keyboardmap = getkeymap();
 
     /* ESetSignal(); */
     page.x = 0;
@@ -736,10 +637,6 @@ char *argv[];
 
 	/* build forms from embedded data */
 	makemeteorforms();
-	makeshifted(&big, bigshift, bbnS);
-	makeshifted(&big_m, big_mshift, bbnS);
-	makeshifted(&medium, mediumshift, bbnS);
-	makeshifted(&medium_m, medium_mshift, bbnS);
 
 	/* mask sprites; why needed? */
 	for (i=0; i<16; i++)
@@ -752,7 +649,7 @@ char *argv[];
        bb.destrect.h = bigshift[i]->h;
        bb.rule = bbSnandD;
        BitBlt(&bb);
-#if 1
+
  	   bb.srcform = medium_mshift[i];		
 	   bb.destform = mediumshift[i];
        bb.destrect.x = 0;
@@ -761,7 +658,6 @@ char *argv[];
        bb.destrect.h = mediumshift[i]->h;
        bb.rule = bbSnandD;
        BitBlt(&bb);
-#endif
 	}
 
 	/* splash screen fade up */
@@ -782,7 +678,7 @@ char *argv[];
       loop = 4096;
       while (--loop)
       {
-      	short off = loop & 63;
+      	short off = (loop<<1) & 63;
       	short id;
 
  	      if (GetButtons() & M_LEFT)
@@ -832,46 +728,74 @@ char *argv[];
 
 
 #if 0
+ClearScreen();
 
 bb.srcpoint.x = 0;
 bb.srcpoint.y = 0;
 bb.destform = screen;
 bb.destrect.w = bigshift[0]->w;
 bb.destrect.h = bigshift[0]->h;
-for(i=0; i<16; i++)
+for(i=0; i<8; i++)
 {
       bb.srcform = bigshift[i];
-      bb.destrect.x = i * 80;
-      bb.destrect.y = 128;
+      bb.destrect.x = i * 64;
+      bb.destrect.y = page.y + 128;
+   	  bb.rule = bbS;
+	  BitBlt(&bb);
+      bb.srcform = bigshift[8+i];
+      bb.destrect.x = i * 64;
+      bb.destrect.y = page.y + 128 + 64;
    	  bb.rule = bbS;
 	  BitBlt(&bb);
 
+     bb.srcform = &BlackMask;
+   	 bb.rule = bbS;
+     r.x = bb.destrect.x;
+     r.y = page.y + 128;
+     r.w = 64;
+     r.h = 128;
+     RectBoxDrawX(&r,1, &bb);
+
       bb.srcform = big_mshift[i];
-      bb.destrect.x = i * 80;
-      bb.destrect.y = 192;
+      bb.destrect.x = i * 64;
+      bb.destrect.y = page.y + 256;
    	  bb.rule = bbS;
 	  BitBlt(&bb);
+      bb.srcform = big_mshift[8+i];
+      bb.destrect.x = i * 64;
+      bb.destrect.y = page.y + 256 + 64;
+   	  bb.rule = bbS;
+	  BitBlt(&bb);
+
+     bb.srcform = &WhiteMask;
+   	 bb.rule = bbS;
+     r.x = bb.destrect.x;
+     r.y = page.y + 256;
+     r.w = 64;
+     r.h = 128;
+     RectBoxDrawX(&r,1, &bb);
+
 }
+waitflip();
+	waitframes(900);
 #endif
-printf("waiting\n");	
+
 	waitframes(90);
-printf("GO\n");
+
 
     /* splash screen cleanup */
 	if (splash)
 	{
 	  FormDestroy(splash);
   	  splash = NULL;
-      bb.srcform = NULL;  	  
+      bb.srcform = NULL;
     }
 
     ClearScreen();
 
-	/* make a sprite to use */
-    for (i=0; i<MAXROCKS; i++)
-        makesprite(&mediumrocks[i]);
+	/* make sprites to use */
     for(i=0; i<MAXROCKS; i++)
-	    makesprite(&bigrocks[i]);
+	    makesprite(&bigrocks[i], myrand() % 640, myrand() % 480);
 
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
@@ -888,52 +812,45 @@ printf("GO\n");
     bb.cliprect.h = 1024;
 
    /* animate it */
-   while(1)
+   while(numbigrocks + nummediumrocks > 0)
    {
    	register sprite *rockptr;
    	
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = 1024;
+    bb.destrect.h = 1024;
     bb.cliprect.x = 0;
     bb.cliprect.y = page.y;
     bb.cliprect.w = 1024;
     bb.cliprect.h = 512;
 
-    rockptr = bigrocks;
-	for(i=0; i<numbigrocks; i++)
-        restoreunder(rockptr++, 64, 48);
-    rockptr = mediumrocks;
-    for (i = 0; i < nummediumrocks; i++)
-        restoreunder(rockptr++, 48, 32);
-
-    rockptr = bigrocks;
-	for(i=0; i<numbigrocks; i++)
-        movesprite(rockptr++);
-    rockptr = mediumrocks;
-    for (i = 0; i < nummediumrocks; i++)
-        movesprite(rockptr++);
-
-    rockptr = bigrocks;
-	for(i=0; i<numbigrocks; i++)
-        bigdrawfast(rockptr++);
-    rockptr = mediumrocks;
-    for (i = 0; i < nummediumrocks; i++)
-        mediumdrawfast(rockptr++);
-
+	dorocks();
+	
 	dobullets();
 
 	if ((framenum & 15) == 0)
 	{
-      sprintf(status, "pos:%d,%d N:%d", 
-      	bullets[0].spr.x, bullets[0].spr.y, 
-      	numbullets);
+      sprintf(status, "bullets:%d big:%d med:%d   ",  numbullets, numbigrocks,nummediumrocks);
 	}
 	
-     bb.srcform = NULL;
+    readkeyboardevents(keyinput, 8);
+    if (keyboardmap[3])
+    {
+        sh_int(2);
+    }
+
+    status[0] = keyboardmap[0x7a] ? 'D' : 'U';
+    status[1] = keyboardmap[0x78] ? 'D' : 'U';
+
+
+    bb.srcform = NULL;
      bb.rule = bbS;
      bb.destrect.x = 0;
      bb.destrect.y = 0;
      bb.destrect.w = 1024;
      bb.destrect.h = 1024;
-     origin.x = 256;
+     origin.x = 192;
      origin.y = page.y + font->maps->line;
      StringDrawX(status, &origin, &bb, font);
 
@@ -955,23 +872,25 @@ printf("GO\n");
      }
      oldwaiting[pindex] = waiting;
 
+     /* DEBUG */
      if (GetButtons() & M_RIGHT)
      {
-       makeboom(200,200);	
+       GetMPosition(&p2);
+       makeboom(FIX2INT(p2.x), FIX2INT(p2.y));
      }
 
- 	 if (numbullets < 10 && GetButtons() & M_LEFT)
+ 	 if (numbullets < MAXBULLETS && GetButtons() & M_LEFT)
  	 {
 		bullets[numbullets].spr.x = INT2FIX(320); 	 	
 		bullets[numbullets].spr.y = INT2FIX(240);
 
-        bullets[numbullets].spr.dx = INT2FIX(((int)rand() & 7) - 4) >> 2;
-        bullets[numbullets].spr.dy = INT2FIX(((int)rand() & 7) - 4) >> 2;
+        bullets[numbullets].spr.dx = INT2FIX(rand2());
+        bullets[numbullets].spr.dy = INT2FIX(rand2());
 
 	    bullets[numbullets].spr.oldx[0] =
 	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
 		
-	    bullets[numbullets].lifetime = 40;
+	    bullets[numbullets].spr.state = ALIVE + 60;
 	    
  	    numbullets++;
  	 }
@@ -980,5 +899,6 @@ printf("GO\n");
 
    }
 
+   sh_int(0);
 
 }

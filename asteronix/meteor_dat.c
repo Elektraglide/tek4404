@@ -1,7 +1,9 @@
 #include <graphics.h>
+#include "asteronix.h"
 
 #define MEDHEIGHT 22
 #define BIGHEIGHT 41
+
 
 short medium_meteor[] = {
 0xFC0F, 0xFFFF, 0xFA04, 0x1FFF, 0xF502, 0x0FFF,
@@ -78,9 +80,52 @@ short big_shadowmask[] = {
 
 struct FORM big, big_m;
 struct FORM medium, medium_m;
+struct FORM* bigshift[16];
+struct FORM* big_mshift[16];
+struct FORM* mediumshift[16];
+struct FORM* medium_mshift[16];
+
+void makeshifted(src, dstarr, rule)
+struct FORM* src;
+struct FORM** dstarr;
+int rule;
+{
+    int i, len;
+    struct RECT r;
+
+    bb.srcform = src;
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.cliprect.x = 0;
+    bb.cliprect.y = 0;
+    bb.cliprect.w = 1024;
+    bb.cliprect.h = 1024;
+    bb.halftoneform = NULL;
+    bb.rule = rule;
+
+    /* cache shifted versions of it */
+    r.x = 0;
+    r.y = 0;
+    r.w = src->w + 16;
+    r.h = src->h;
+    len = (r.w >> 3) * r.h;
+    for (i = 0; i < 16; i++)
+    {
+        dstarr[i] = FormCreate(src->w + 16, src->h);
+
+        memset(dstarr[i]->addr, 0xff, len);
+
+        bb.destform = dstarr[i];
+        bb.destrect.x = i;
+        bb.destrect.y = 0;
+        bb.destrect.w = src->w;
+        bb.destrect.h = src->h;
+        BitBlt(&bb);
+    }
+}
 
 /* build forms from embedded data borrowed from Megaroids */
-makemeteorforms()
+void makemeteorforms()
 {
 	big.addr = big_meteor;
     big.w = 48;
@@ -106,4 +151,261 @@ makemeteorforms()
     medium_m.offsetw = medium_m.offseth = 0;
     medium_m.inc = 4;
 
+    /* build shifted versions */
+    makeshifted(&big, bigshift, bbnS);
+    makeshifted(&big_m, big_mshift, bbnS);
+    makeshifted(&medium, mediumshift, bbnS);
+    makeshifted(&medium_m, medium_mshift, bbnS);
+}
+
+
+void blitfast(splash, halftone)
+struct FORM* splash;
+struct FORM* halftone;
+{
+    register unsigned long* dst, * src;
+    register unsigned short* mask;
+    register short h = splash->h;
+
+    src = splash->addr;
+    mask = halftone->addr;
+
+    /* draw on current page */
+    dst = ((char*)screen->addr) + (page.y << 7);
+    do
+    {
+        /* mask 640px scanline */
+        register unsigned long amask = mask[h & 15];
+        amask |= amask << 16;
+
+        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+        *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask); *dst++ = (*src++ & amask);
+        dst += 12;
+    } while (--h > 0);
+}
+
+void restoreunder(asprite, w, h)
+sprite* asprite;
+int w, h;
+{
+
+    bb.srcform = NULL;
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = asprite->oldx[pindex];
+    bb.destrect.y = asprite->oldy[pindex];
+    bb.destrect.w = w;
+    bb.destrect.h = h;
+    bb.rule = bbnS;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+}
+
+void blitclear64(sx, sy, sh)
+int sx, sy, sh;
+{
+    register unsigned long* dst;
+    register short h = sh;
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = dst[1] = 0;
+        dst += 32;
+    } while (--h > 0);
+}
+
+void bigblitflash(sx, sy)
+int sx, sy;
+{
+    bb.srcform = &big_m;
+    bb.destform = screen;
+    bb.destrect.x = sx;
+    bb.destrect.y = sy + page.y;
+    bb.destrect.w = big.w;
+    bb.destrect.h = big.h;
+    bb.rule = bbSorD;
+    BitBlt(&bb);
+}
+
+void bigblitmasked(sx, sy, shift)
+int sx, sy;
+struct FORM** shift;
+{
+    register unsigned long* dst, * src, * mask;
+    register short h = bigshift[0]->h;
+
+    src = shift[sx & 15]->addr;
+    mask = big_mshift[sx & 15]->addr;
+
+    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
+    {
+        printf("error %d %d\n", sx, sy);
+        return;
+    }
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+
+    do
+    {
+        dst[0] = (dst[0] & *mask++) | (*src++);
+        dst[1] = (dst[1] & *mask++) | (*src++);
+        dst += 32;
+    } while (--h > 0);
+}
+
+void bigblitfast(sx, sy)
+int sx, sy;
+{
+    register unsigned long* dst, * src;
+    register short h = bigshift[0]->h;
+
+    src = bigshift[sx & 15]->addr;
+
+    if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
+    {
+        printf("error %d %d\n", sx, sy);
+        return;
+    }
+
+    sy += page.y;
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = *src++;
+        dst[1] = *src++;
+        dst += 32;
+    } while (--h > 0);
+
+}
+
+/* draw 64 wide sprite */
+void bigdrawfast(asprite)
+sprite* asprite;
+{
+    register unsigned long* dst, * src, * mask;
+    register short h = bigshift[0]->h;
+    short sx = FIX2INT(asprite->x);
+    short sy = FIX2INT(asprite->y);
+
+    src = bigshift[sx & 15]->addr;
+    mask = big_mshift[sx & 15]->addr;
+
+    if (sy < 0) 		/* clip to top */
+    {
+        src -= sy << 1;
+        mask -= sy << 1;
+        h += sy;
+        sy = 0;
+    }
+    else
+        if (sy + h > 480)	/* clip to bottom */
+        {
+            h = 480 - sy;
+        }
+
+    /* draw on current page */
+    sy += page.y;
+
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = (dst[0] & *mask++) | *src++;
+        dst[1] = (dst[1] & *mask++) | *src++;
+        dst += 32;
+    } while (--h > 0);
+
+    asprite->oldx[pindex] = sx & -16;
+    asprite->oldy[pindex] = sy;
+}
+
+/* draw 48 wide sprite */
+void mediumdrawfast(asprite)
+sprite* asprite;
+{
+    register unsigned short* dst, * src, * mask;
+    register short h = mediumshift[0]->h;
+    short sx = FIX2INT(asprite->x);
+    short sy = FIX2INT(asprite->y);
+
+    src = mediumshift[sx & 15]->addr;
+    mask = medium_mshift[sx & 15]->addr;
+
+    if (sy < 0) 		/* clip to top */
+    {
+        src -= sy + (sy << 1);
+        mask -= sy + (sy << 1);
+        h += sy;
+        sy = 0;
+    }
+    else
+        if (sy + h > 480)	/* clip to bottom */
+        {
+            h = 480 - sy;
+        }
+
+    /* draw on current page */
+    sy += page.y;
+
+    dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
+    do
+    {
+        dst[0] = (dst[0] & *mask++) | *src++;
+        dst[1] = (dst[1] & *mask++) | *src++;
+        dst[2] = (dst[2] & *mask++) | *src++;
+        dst += 64;
+    } while (--h > 0);
+
+    asprite->oldx[pindex] = sx & -16;
+    asprite->oldy[pindex] = sy;
+}
+
+void drawsprite(asprite)
+sprite* asprite;
+{
+    short sx = FIX2INT(asprite->x);
+    short sy = FIX2INT(asprite->y);
+    short h = bigshift[0]->h;
+
+    /* clip to bottom */
+    if (sy + h > 480)
+        h = 480 - sy;
+
+    /* draw on current page */
+    sy += page.y;
+
+    /* mask out */
+    bb.srcform = big_mshift[sx & 15];
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = sx & -16;
+    bb.destrect.y = sy;
+    bb.destrect.w = bigshift[0]->w;
+    bb.destrect.h = h;
+    bb.rule = bbSandD;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+    /* draw over */
+    bb.srcform = bigshift[sx & 15];
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = sx & -16;
+    bb.destrect.y = sy;
+    bb.destrect.w = bigshift[0]->w;
+    bb.destrect.h = h;
+    bb.rule = bbSorD;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+    asprite->oldx[pindex] = sx & -16;
+    asprite->oldy[pindex] = sy;
 }
