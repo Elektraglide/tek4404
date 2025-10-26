@@ -54,6 +54,18 @@ char keyinput[16];
 
 #define ATTRACTFLASH 7
 
+/* ship controls */
+#define LEFT    1
+#define RIGHT   2
+#define THRUST  4
+#define FIRE    8
+typedef struct
+{
+    fixed x,y,dx,dy;
+    short angle;
+} ship;
+
+ship aship;
 
 /************* SOUND ************/
 
@@ -307,10 +319,8 @@ int sx,sy;
 {
 int i, *dir;
 
-return;
+    boomsound();
 
-  /* boomsound();  */
-  
   dir = d360;
   for(i=0; i<6; i++)
   {
@@ -495,11 +505,17 @@ int *w,*h;
 	*w = header.width[0] + header.width[1] * 256;
 	*h = header.height[0] + header.height[1] * 256;
 	form = FormCreate(*w,*h);
+    if (form)
+    {
+        /* this assumes width and stride match */
+        len = (*w >> 3) * (*h);
+        read(fd, form->addr, len);
+    }
+    else
+    {
+        fprintf(stderr, "FormCreate: %s\n", strerr(errno));
+    }
 
-	/* this assumes width and stride match */
-  	len = (*w >> 3) * (*h);
-	read(fd, form->addr, len);  	
-    
     close(fd);
   }
   else
@@ -678,16 +694,17 @@ char *argv[];
       loop = 4096;
       while (--loop)
       {
-      	short off = (loop<<1) & 63;
-      	short id;
+        short off = (loop<<1) & 63;
+        short id;
 
- 	      if (GetButtons() & M_LEFT)
-			break;
+          /* wait for a key */
+          if (readkeyboardevents(keyinput, 8))
+            break;
 
-		  blitclear64(0,0,440);
-		  blitclear64(640-64,0,440);
+          blitclear64(0,0,440);
+          blitclear64(640-64,0,440);
 
-		  /* animate border with meteors */
+          /* animate border with meteors */
           id = (loop>>1);
           for (x = 0; x < 640 - 64; x += 64)
           {
@@ -696,16 +713,16 @@ char *argv[];
                 bigblitflash(x + (off), 0);
           }
 
-		  /* doing this out of order to avoid masking problems! */
-		  id += 8;
+          /* doing this out of order to avoid masking problems! */
+          id += 8;
           for (x = 512; x >= 0; x -= 64)
           {
-          	bigblitfast(x + (64 - off), 384);
+            bigblitfast(x + (64 - off), 384);
               if ((++id & ATTRACTFLASH) == 0) 
                 bigblitflash(x + (64 - off), 384);
           }
-		  id -= 8;
-		  
+          id -= 8;
+          
           for (y = 0; y < 384; y += 64)
           {
           	 bigblitmasked(640 - 64, y + (off), bigshift);
@@ -723,6 +740,10 @@ char *argv[];
           waitflip();
       }
 
+    }
+    else
+    {
+        sh_int(1);
     }
     waitflip();
 
@@ -797,6 +818,12 @@ waitflip();
     for(i=0; i<MAXROCKS; i++)
 	    makesprite(&bigrocks[i], myrand() % 640, myrand() % 480);
 
+    aship.x = INT2FIX(320);
+    aship.y = INT2FIX(240);
+    aship.dx = 0;
+    aship.dy = 0;
+    aship.angle = 0;
+
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
     bb.destform = screen;			/* dest is screen */
@@ -811,11 +838,12 @@ waitflip();
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
-   /* animate it */
+   /* keep going while things exist */
    while(numbigrocks + nummediumrocks > 0)
    {
    	register sprite *rockptr;
-   	
+    short keys;
+
     bb.destrect.x = 0;
     bb.destrect.y = 0;
     bb.destrect.w = 1024;
@@ -831,20 +859,25 @@ waitflip();
 
 	if ((framenum & 15) == 0)
 	{
-      sprintf(status, "bullets:%d big:%d med:%d   ",  numbullets, numbigrocks,nummediumrocks);
+      sprintf(status, "   angle=%d bullets:%d big:%d med:%d   ", aship.angle & 15, numbullets, numbigrocks,nummediumrocks);
 	}
 	
     readkeyboardevents(keyinput, 8);
-    if (keyboardmap[3])
+    if (keyinput[0] == 0x03 || keyinput[0] == 0x1b)     /* Ctrl-C or ESC */
     {
         sh_int(2);
     }
 
-    status[0] = keyboardmap[0x7a] ? 'D' : 'U';
-    status[1] = keyboardmap[0x78] ? 'D' : 'U';
+    keys = 0;
+    if (keyboardmap[0x61]) keys |= LEFT;    /* A */
+    if (keyboardmap[0x64]) keys |= RIGHT;   /* D */
+    if (keyboardmap[0x77]) keys |= THRUST;  /* W */
+    if (keyboardmap[0x73]) keys |= FIRE;    /* S */
 
+    status[0] = (keys & LEFT) ? 'L' : '_';
+    status[1] = (keys & RIGHT) ? 'R' : '_';
 
-    bb.srcform = NULL;
+     bb.srcform = NULL;
      bb.rule = bbS;
      bb.destrect.x = 0;
      bb.destrect.y = 0;
@@ -873,16 +906,21 @@ waitflip();
      oldwaiting[pindex] = waiting;
 
      /* DEBUG */
-     if (GetButtons() & M_RIGHT)
+     if (keys & THRUST)
      {
        GetMPosition(&p2);
        makeboom(FIX2INT(p2.x), FIX2INT(p2.y));
      }
 
- 	 if (numbullets < MAXBULLETS && GetButtons() & M_LEFT)
+     if (keys & LEFT)
+         aship.angle -= 1;
+     if (keys & RIGHT)
+         aship.angle += 1;
+
+ 	 if (numbullets < MAXBULLETS && (keys & FIRE))
  	 {
-		bullets[numbullets].spr.x = INT2FIX(320); 	 	
-		bullets[numbullets].spr.y = INT2FIX(240);
+		bullets[numbullets].spr.x = aship.x;
+		bullets[numbullets].spr.y = aship.y;
 
         bullets[numbullets].spr.dx = INT2FIX(rand2());
         bullets[numbullets].spr.dy = INT2FIX(rand2());
