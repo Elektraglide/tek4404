@@ -988,19 +988,20 @@ waitflip();
      if (keys & RIGHT)
          aship.angle -= 1;
 
+     /* attenuate velocity by 250.0/256.0 (0.976) */
+     aship.dx = (aship.dx * 250) >> 8;
+     aship.dy = (aship.dy * 250) >> 8;
+
      if (keys & THRUST)
      {
-         aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x)>>3;
-         aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y)>>3;
+         aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x)>>4;
+         aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y)>>4;
      }
 
-     /* attenuate velocity by 246.0/256.0 (0.96) */
      aship.x += aship.dx;
      aship.y += aship.dy;
-     aship.dx = (aship.dx * 246) >> 8;
-     aship.dy = (aship.dy * 246) >> 8;
 
- 	 if (numbullets < MAXBULLETS && (keys & FIRE))
+ 	 if (numbullets < MAXBULLETS && (keys & FIRE) && ((framenum & 3)==0))
  	 {
 		bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
 		bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
