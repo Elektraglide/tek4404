@@ -63,9 +63,14 @@ typedef struct
 {
     fixed x,y,dx,dy;
     short angle;
+    short oldx[2], oldy[2];
 } ship;
 
 ship aship;
+
+#define NUM_ANGLES 32
+#define ANGLE_MASK (NUM_ANGLES-1)
+struct POINT shipshape[NUM_ANGLES][4];
 
 /************* SOUND ************/
 
@@ -221,6 +226,64 @@ int rand2()
   if (v > 4) v -= 5;
 
   return v - 2;
+}
+
+struct POINT shipmodel[4] = {
+    { 0, 8}
+    {-8,-8},
+    { 0,-4},
+    { 8,-8},
+};
+
+void doship()
+{
+    register struct POINT* shapeptr;
+    register short sx, sy;
+    struct POINT p2;
+
+    /* restore previous */
+    bb.srcform = NULL;
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = aship.oldx[pindex] - 12;
+    bb.destrect.y = aship.oldy[pindex] - 12;
+    bb.destrect.w = 24;
+    bb.destrect.h = 24;
+    bb.rule = bbnS;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+    /* origin */
+    sx = FIX2INT(aship.x);
+    sy = FIX2INT(aship.y);
+    sy += page.y;
+
+    shapeptr = shipshape[aship.angle & ANGLE_MASK];
+    bb.destrect.x = sx + shapeptr->x;
+	bb.destrect.y = sy + shapeptr->y;
+    shapeptr++;
+    p2.x = sx + shapeptr->x;
+    p2.y = sy + shapeptr->y;
+    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+
+    shapeptr++;
+    bb.destrect.x = sx + shapeptr->x;
+    bb.destrect.y = sy + shapeptr->y;
+    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+
+    shapeptr++;
+    p2.x = sx + shapeptr->x;
+    p2.y = sy + shapeptr->y;
+    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+
+    shapeptr = shipshape[aship.angle & ANGLE_MASK];
+    bb.destrect.x = sx + shapeptr->x;
+    bb.destrect.y = sy + shapeptr->y;
+    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+
+    aship.oldx[pindex] = sx;
+    aship.oldy[pindex] = sy;
 }
 
 void makesprite(asprite, x,y)
@@ -513,7 +576,7 @@ int *w,*h;
     }
     else
     {
-        fprintf(stderr, "FormCreate: %s\n", strerr(errno));
+        fprintf(stderr, "FormCreate: %s\n", strerror(errno));
     }
 
     close(fd);
@@ -574,7 +637,7 @@ main(argc,argv)
 int argc;
 char *argv[];
 {
-    register short i;
+    register short i,j;
     fixed x,y,dx,dy;
     struct FORM *splash;
     struct POINT origin,p2;
@@ -657,7 +720,7 @@ char *argv[];
 	/* mask sprites; why needed? */
 	for (i=0; i<16; i++)
 	{
- 	   bb.srcform = big_mshift[i];		
+ 	   bb.srcform = big_mshift[i];
 	   bb.destform = bigshift[i];
        bb.destrect.x = 0;
        bb.destrect.y = 0;
@@ -666,7 +729,7 @@ char *argv[];
        bb.rule = bbSnandD;
        BitBlt(&bb);
 
- 	   bb.srcform = medium_mshift[i];		
+ 	   bb.srcform = medium_mshift[i];
 	   bb.destform = mediumshift[i];
        bb.destrect.x = 0;
        bb.destrect.y = 0;
@@ -823,6 +886,19 @@ waitflip();
     aship.dx = 0;
     aship.dy = 0;
     aship.angle = 0;
+	for(i=0; i<NUM_ANGLES; i++)
+	{
+	   float c = cos((i/(float)NUM_ANGLES) * 2.0 * 3.1415926);
+	   float s = sin((i/(float)NUM_ANGLES) * 2.0 * 3.1415926);
+	   float s2 = -s;
+
+	   for (j=0; j<4; j++)
+	   {
+		  shipshape[i][j].x = (short)(shipmodel[j].x * c  + shipmodel[j].y * s);
+		  shipshape[i][j].y = (short)(shipmodel[j].x * s2 + shipmodel[j].y * c);
+	   }
+	}
+
 
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
@@ -853,17 +929,19 @@ waitflip();
     bb.cliprect.w = 1024;
     bb.cliprect.h = 512;
 
+    doship();
+
 	dorocks();
 	
 	dobullets();
 
 	if ((framenum & 15) == 0)
 	{
-      sprintf(status, "   angle=%d bullets:%d big:%d med:%d   ", aship.angle & 15, numbullets, numbigrocks,nummediumrocks);
+      sprintf(status, "   angle=%d bullets:%d big:%d med:%d   ", aship.angle & ANGLE_MASK, numbullets, numbigrocks,nummediumrocks);
 	}
 	
     readkeyboardevents(keyinput, 8);
-    if (keyinput[0] == 0x03 || keyinput[0] == 0x1b)     /* Ctrl-C or ESC */
+    if (keyinput[0] == 0x03)     /* Ctrl-C */
     {
         sh_int(2);
     }
@@ -905,25 +983,30 @@ waitflip();
      }
      oldwaiting[pindex] = waiting;
 
-     /* DEBUG */
+     if (keys & LEFT)
+         aship.angle += 1;
+     if (keys & RIGHT)
+         aship.angle -= 1;
+
      if (keys & THRUST)
      {
-       GetMPosition(&p2);
-       makeboom(FIX2INT(p2.x), FIX2INT(p2.y));
+         aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x)>>3;
+         aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y)>>3;
      }
 
-     if (keys & LEFT)
-         aship.angle -= 1;
-     if (keys & RIGHT)
-         aship.angle += 1;
+     /* attenuate velocity by 246.0/256.0 (0.96) */
+     aship.x += aship.dx;
+     aship.y += aship.dy;
+     aship.dx = (aship.dx * 246) >> 8;
+     aship.dy = (aship.dy * 246) >> 8;
 
  	 if (numbullets < MAXBULLETS && (keys & FIRE))
  	 {
-		bullets[numbullets].spr.x = aship.x;
-		bullets[numbullets].spr.y = aship.y;
+		bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
+		bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
 
-        bullets[numbullets].spr.dx = INT2FIX(rand2());
-        bullets[numbullets].spr.dy = INT2FIX(rand2());
+        bullets[numbullets].spr.dx = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x);
+        bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
 
 	    bullets[numbullets].spr.oldx[0] =
 	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
