@@ -67,6 +67,7 @@ typedef struct
 } ship;
 
 ship aship;
+int respawndelay;
 
 #define NUM_ANGLES 32
 #define ANGLE_MASK (NUM_ANGLES-1)
@@ -235,6 +236,33 @@ struct POINT shipmodel[4] = {
     { 8,-8},
 };
 
+void initship()
+{
+    int i, j;
+
+    for (i = 0; i < NUM_ANGLES; i++)
+    {
+        float c = cos((i / (float)NUM_ANGLES) * 2.0 * 3.1415926);
+        float s = sin((i / (float)NUM_ANGLES) * 2.0 * 3.1415926);
+        float s2 = -s;
+
+        for (j = 0; j < 4; j++)
+        {
+            shipshape[i][j].x = (short)(shipmodel[j].x * c + shipmodel[j].y * s);
+            shipshape[i][j].y = (short)(shipmodel[j].x * s2 + shipmodel[j].y * c);
+        }
+    }
+}
+
+void newship()
+{
+    aship.x = INT2FIX(320);
+    aship.y = INT2FIX(240);
+    aship.dx = 0;
+    aship.dy = 0;
+    aship.angle = NUM_ANGLES / 2;   /* display origin top left, so angle 0 pointing down.. */
+}
+
 void doship()
 {
     register struct POINT* shapeptr;
@@ -253,6 +281,32 @@ void doship()
     bb.rule = bbnS;
     bb.halftoneform = NULL;
     BitBlt(&bb);
+
+    /* attenuate velocity by 250.0/256.0 (0.976) */
+    aship.dx = (aship.dx * 250) >> 8;
+    aship.dy = (aship.dy * 250) >> 8;
+
+    /* move */
+    aship.x += aship.dx;
+    if (aship.x < 0)
+    {
+        aship.x += INT2FIX(640);
+    }
+    else
+    if (aship.x > INT2FIX(640))
+    {
+        aship.x -= INT2FIX(640);
+    }
+    aship.y += aship.dy;
+    if (aship.y < 0)
+    {
+        aship.y += INT2FIX(480);
+    }
+    else
+    if (aship.y > INT2FIX(480))
+    {
+        aship.y -= INT2FIX(480);
+    }
 
     /* origin */
     sx = FIX2INT(aship.x);
@@ -593,7 +647,7 @@ void movesprite(asprite)
 sprite *asprite;
 {
     asprite->x += asprite->dx;
-    if (asprite->x < 0) 
+    if (asprite->x < 0)
     {
       asprite->x += INT2FIX(640);
     }
@@ -881,24 +935,8 @@ waitflip();
     for(i=0; i<MAXROCKS; i++)
 	    makesprite(&bigrocks[i], myrand() % 640, myrand() % 480);
 
-    aship.x = INT2FIX(320);
-    aship.y = INT2FIX(240);
-    aship.dx = 0;
-    aship.dy = 0;
-    aship.angle = 0;
-	for(i=0; i<NUM_ANGLES; i++)
-	{
-	   float c = cos((i/(float)NUM_ANGLES) * 2.0 * 3.1415926);
-	   float s = sin((i/(float)NUM_ANGLES) * 2.0 * 3.1415926);
-	   float s2 = -s;
-
-	   for (j=0; j<4; j++)
-	   {
-		  shipshape[i][j].x = (short)(shipmodel[j].x * c  + shipmodel[j].y * s);
-		  shipshape[i][j].y = (short)(shipmodel[j].x * s2 + shipmodel[j].y * c);
-	   }
-	}
-
+    initship();
+    respawndelay = framenum + 60;
 
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
@@ -920,6 +958,12 @@ waitflip();
    	register sprite *rockptr;
     short keys;
 
+    readkeyboardevents(keyinput, 8);
+    if (keyinput[0] == 0x03)     /* Ctrl-C */
+    {
+        sh_int(2);
+    }
+
     bb.destrect.x = 0;
     bb.destrect.y = 0;
     bb.destrect.w = 1024;
@@ -929,31 +973,60 @@ waitflip();
     bb.cliprect.w = 1024;
     bb.cliprect.h = 512;
 
-    doship();
+    if (respawndelay)
+    {
+        if (respawndelay < framenum)
+        {
+            newship();
+            respawndelay = 0;
+        }
+    }
+    else
+    {
+        doship();
 
-	dorocks();
-	
-	dobullets();
+        keys = 0;
+        if (keyboardmap[0x61]) keys |= LEFT;    /* A */
+        if (keyboardmap[0x64]) keys |= RIGHT;   /* D */
+        if (keyboardmap[0x77]) keys |= THRUST;  /* W */
+        if (keyboardmap[0x73]) keys |= FIRE;    /* S */
+
+        if (keys & LEFT)
+            aship.angle += 1;
+        if (keys & RIGHT)
+            aship.angle -= 1;
+
+        if (keys & THRUST)
+        {
+            aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x) >> 4;
+            aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y) >> 4;
+        }
+
+        if (numbullets < MAXBULLETS && (keys & FIRE) && ((framenum & 7) == 0))
+        {
+            bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
+            bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
+
+            bullets[numbullets].spr.dx = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x);
+            bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
+
+            bullets[numbullets].spr.oldx[0] =
+                bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
+
+            bullets[numbullets].spr.state = ALIVE + 60;
+
+            numbullets++;
+        }
+    }
+
+    dorocks();
+    
+    dobullets();
 
 	if ((framenum & 15) == 0)
 	{
-      sprintf(status, "   angle=%d bullets:%d big:%d med:%d   ", aship.angle & ANGLE_MASK, numbullets, numbigrocks,nummediumrocks);
+      sprintf(status, "bullets:%d big:%d med:%d   ", numbullets, numbigrocks,nummediumrocks);
 	}
-	
-    readkeyboardevents(keyinput, 8);
-    if (keyinput[0] == 0x03)     /* Ctrl-C */
-    {
-        sh_int(2);
-    }
-
-    keys = 0;
-    if (keyboardmap[0x61]) keys |= LEFT;    /* A */
-    if (keyboardmap[0x64]) keys |= RIGHT;   /* D */
-    if (keyboardmap[0x77]) keys |= THRUST;  /* W */
-    if (keyboardmap[0x73]) keys |= FIRE;    /* S */
-
-    status[0] = (keys & LEFT) ? 'L' : '_';
-    status[1] = (keys & RIGHT) ? 'R' : '_';
 
      bb.srcform = NULL;
      bb.rule = bbS;
@@ -965,6 +1038,7 @@ waitflip();
      origin.y = page.y + font->maps->line;
      StringDrawX(status, &origin, &bb, font);
 
+#if 0
      /* show draw time by how long we waited for VBLANK */
      waiting >>= 4;
      bb.srcform = NULL;
@@ -982,40 +1056,7 @@ waitflip();
          RectDrawX(&r, &bb);
      }
      oldwaiting[pindex] = waiting;
-
-     if (keys & LEFT)
-         aship.angle += 1;
-     if (keys & RIGHT)
-         aship.angle -= 1;
-
-     /* attenuate velocity by 250.0/256.0 (0.976) */
-     aship.dx = (aship.dx * 250) >> 8;
-     aship.dy = (aship.dy * 250) >> 8;
-
-     if (keys & THRUST)
-     {
-         aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x)>>4;
-         aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y)>>4;
-     }
-
-     aship.x += aship.dx;
-     aship.y += aship.dy;
-
- 	 if (numbullets < MAXBULLETS && (keys & FIRE) && ((framenum & 3)==0))
- 	 {
-		bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
-		bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
-
-        bullets[numbullets].spr.dx = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x);
-        bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
-
-	    bullets[numbullets].spr.oldx[0] =
-	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
-		
-	    bullets[numbullets].spr.state = ALIVE + 60;
-	    
- 	    numbullets++;
- 	 }
+#endif
 
 	 waiting = waitflip();
 
