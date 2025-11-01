@@ -64,10 +64,13 @@ typedef struct
     fixed x,y,dx,dy;
     short angle;
     short oldx[2], oldy[2];
+    sprstate state;
+    short cooldown;
 } ship;
 
 ship aship;
 int respawndelay;
+int gameoverman;
 
 #define NUM_ANGLES 32
 #define ANGLE_MASK (NUM_ANGLES-1)
@@ -78,76 +81,101 @@ struct POINT shipshape[NUM_ANGLES][4];
 int sndfd;
 unsigned char sb[32];
 
-noise(f,v,l)
-int f,v,l;
+noise(f, v, l)
+int f, v, l;
 {
-	sb[0] = 1;
-	sb[1] = 0x80 | 0x60 | 0x04 | (f & 3);
-	sb[2] = 0;
-	
-    sb[3] = 1;
-    sb[4] = 0x80 | 0x70 | (v & 15);
-    sb[5] = l;
-	write(sndfd, sb, 6);
+    sb[0] = 2;
+    sb[1] = 0x80 | 0x60 | (f & 7);
+    sb[2] = 0x80 | 0x70 | (v & 15);
+    sb[3] = l;
+    write(sndfd, sb, 4);
 }
 
-voice1(f,v,l)
-int f,v,l;
+voice(voice, f, v, l)
+int voice, f, v, l;
 {
-	sb[0] = 2;
-	sb[1] = 0x80 | 0x20 | (f & 15);
-	sb[2] = (f >> 4) & 63;
-	sb[3] = 0;
-
-	sb[4] = 1;
-	sb[5] = 0x80 | 0x30 | (v & 15);
-	sb[6] = l;
-	write(sndfd, sb, 7);
+    /* 10-bit frequency */
+    sb[0] = 3;
+    sb[1] = 0x80 | (voice << 5) | 0x00 | (f & 15);
+    sb[2] = (f >> 4) & 63;
+    /* 4-bit volume */
+    sb[3] = 0x80 | (voice << 5) | 0x10 | (v & 15);
+    sb[4] = l;
+    write(sndfd, sb, 5);
 }
 
-voice2(f,v,l)
-int f,v,l;
-{
-	sb[0] = 2;
-	sb[1] = 0x80 | 0x40 | (f & 15);
-	sb[2] = (f >> 4) & 63;
-	sb[3] = 0;
-
-	sb[4] = 1;
-	sb[5] = 0x80 | 0x50 | (v & 15);
-	sb[6] = l;
-	write(sndfd, sb, 7);
-}
 
 testsound(f)
 int f;
 {
   int v;
 
-  voice1(f,8,0);	
-  voice2(f/2,8,0);
+  voice(0,  f,8,0);	
+  voice(1, f/2,8,0);
 
   for(v=4; v<16; v++)
   {
-    voice1(f,v,2);
-    voice1(f/2,v,2);
+    voice(0, f,v,2);
+    voice(1, f/2,v,2);
   }
+}
+
+explodesound()
+{
+    /* only way to cancel plating sound!! */
+	close(sndfd);
+	sndfd = open("/dev/sound", O_WRONLY);
+
+    voice(2, 300,15,1);
+	noise(7, 0, 5);
+	noise(7, 4, 10);
+	noise(7, 8, 10);
+	noise(7, 12, 10);
+	noise(7, 15, 0);
 }
 
 boomsound()
 {
     /* only way to cancel plating sound!! */
 	close(sndfd);
-	sndfd = open("/dev/sound", O_RDONLY);
+	sndfd = open("/dev/sound", O_WRONLY);
 
- 	noise(2, 15,0);
-	noise(2, 0, 1);
-	noise(2, 4, 2);
-	noise(2, 6, 2);
-	noise(2, 8, 2);
-	noise(2, 10, 2);
-	noise(2, 12, 4);
- 	noise(2, 15,0);
+	noise(6, 4, 5);
+	noise(6, 6, 10);
+	noise(6, 8, 10);
+	noise(6, 10, 10);
+	noise(6, 12, 10);
+ 	noise(6, 15, 0);
+}
+
+boomsound2()
+{
+    /* only way to cancel plating sound!! */
+    close(sndfd);
+    sndfd = open("/dev/sound", O_WRONLY);
+
+    voice(2, 200, 15, 1);
+    noise(7, 4, 5);
+    noise(7, 6, 10);
+    noise(7, 8, 10);
+    noise(7, 10, 10);
+    noise(7, 12, 10);
+    noise(7, 15, 0);
+}
+
+thrustsound()
+{
+    voice(2, 340,15,1);
+    noise(7, 4, 5);
+}
+
+firesound()
+{
+	voice(0, 300,8,1);
+	voice(0, 300,8,1);
+	voice(0, 340,6,1);
+	voice(0, 380,4,1);
+	voice(0, 420,4,1);
 }
 
 /************** GRAPHICS **********/
@@ -196,7 +224,7 @@ int n;
    /* wait for frame flip */
    waiting = 0;
    currframe = framenum + n;
-   while (currframe != framenum)
+   while (currframe > framenum)
        waiting++;
 }
 
@@ -261,6 +289,9 @@ void newship()
     aship.dx = 0;
     aship.dy = 0;
     aship.angle = NUM_ANGLES / 2;   /* display origin top left, so angle 0 pointing down.. */
+
+    aship.state = ALIVE;
+    aship.cooldown = 0;
 }
 
 void doship()
@@ -268,23 +299,6 @@ void doship()
     register struct POINT* shapeptr;
     register short sx, sy;
     struct POINT p2;
-
-    /* restore previous */
-    bb.srcform = NULL;
-    bb.srcpoint.x = 0;
-    bb.srcpoint.y = 0;
-    bb.destform = screen;
-    bb.destrect.x = aship.oldx[pindex] - 12;
-    bb.destrect.y = aship.oldy[pindex] - 12;
-    bb.destrect.w = 24;
-    bb.destrect.h = 24;
-    bb.rule = bbnS;
-    bb.halftoneform = NULL;
-    BitBlt(&bb);
-
-    /* attenuate velocity by 250.0/256.0 (0.976) */
-    aship.dx = (aship.dx * 250) >> 8;
-    aship.dy = (aship.dy * 250) >> 8;
 
     /* move */
     aship.x += aship.dx;
@@ -308,36 +322,55 @@ void doship()
         aship.y -= INT2FIX(480);
     }
 
+    /* attenuate velocity by 250.0/256.0 (0.976) */
+    aship.dx = (aship.dx * 250) >> 8;
+    aship.dy = (aship.dy * 250) >> 8;
+
     /* origin */
     sx = FIX2INT(aship.x);
     sy = FIX2INT(aship.y);
     sy += page.y;
 
-    shapeptr = shipshape[aship.angle & ANGLE_MASK];
-    bb.destrect.x = sx + shapeptr->x;
-	bb.destrect.y = sy + shapeptr->y;
-    shapeptr++;
-    p2.x = sx + shapeptr->x;
-    p2.y = sy + shapeptr->y;
-    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+    if (aship.state == ALIVE)
+    {
+        shapeptr = shipshape[aship.angle & ANGLE_MASK];
+        bb.destrect.x = sx + shapeptr->x;
+        bb.destrect.y = sy + shapeptr->y;
+        shapeptr++;
+        p2.x = sx + shapeptr->x;
+        p2.y = sy + shapeptr->y;
+        LineDraw(&bb.destrect, &p2, 1, 0, &bb);
 
-    shapeptr++;
-    bb.destrect.x = sx + shapeptr->x;
-    bb.destrect.y = sy + shapeptr->y;
-    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+        shapeptr++;
+        bb.destrect.x = sx + shapeptr->x;
+        bb.destrect.y = sy + shapeptr->y;
+        LineDraw(&bb.destrect, &p2, 1, 0, &bb);
 
-    shapeptr++;
-    p2.x = sx + shapeptr->x;
-    p2.y = sy + shapeptr->y;
-    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+        shapeptr++;
+        p2.x = sx + shapeptr->x;
+        p2.y = sy + shapeptr->y;
+        LineDraw(&bb.destrect, &p2, 1, 0, &bb);
 
-    shapeptr = shipshape[aship.angle & ANGLE_MASK];
-    bb.destrect.x = sx + shapeptr->x;
-    bb.destrect.y = sy + shapeptr->y;
-    LineDraw(&bb.destrect, &p2, 1, 0, &bb);
+        shapeptr = shipshape[aship.angle & ANGLE_MASK];
+        bb.destrect.x = sx + shapeptr->x;
+        bb.destrect.y = sy + shapeptr->y;
+        LineDraw(&bb.destrect, &p2, 1, 0, &bb);
 
-    aship.oldx[pindex] = sx;
-    aship.oldy[pindex] = sy;
+        aship.oldx[pindex] = sx;
+        aship.oldy[pindex] = sy;
+    }
+    else
+    if (aship.state > DEAD)
+    {
+        if (aship.state == DYING3)
+        {
+            respawndelay = framenum + 90;
+            explodesound();
+        }
+
+        aship.state--;
+        makeboom(FIX2INT(aship.x), FIX2INT(aship.y));
+    }
 }
 
 void makesprite(asprite, x,y)
@@ -359,8 +392,8 @@ int x,y;
     if (v & 2)
         asprite->dy = -asprite->dy;
 
-    /* immortal for 20 frames */
-    asprite->state = ALIVE + 20;
+    /* immortal for 10 frames */
+    asprite->state = ALIVE + 10;
 }
 
 void makefastsprite(asprite, parent, angle)
@@ -368,8 +401,9 @@ sprite* asprite;
 sprite* parent;
 int angle;
 {
-    asprite->x = parent->x;
-    asprite->y = parent->y;
+    /* medrocks need offset from parent position */
+    asprite->x = parent->x + 8;
+    asprite->y = parent->y + 11;
     asprite->oldx[0] = asprite->oldx[1] = -1000;
 
     /* ricochet angles */
@@ -394,18 +428,33 @@ int w,h;
 {
 register bullet *bulletptr; 
 register short i;
+register short dx;
 
   /* dying cannot be hit again */
   if (rockptr->state != ALIVE)
     return 0;
 
-  bulletptr = bullets;  
+
+  if (aship.state == ALIVE)
+  {
+      dx = FIX2INT(aship.x - rockptr->x);
+      if ((dx > (-4)) && (dx < (w + 4)))
+      {
+          dx = FIX2INT(aship.y - rockptr->y);
+          if ((dx > (-4)) && (dx < (h + 4)))
+          {
+              aship.state = DYING1;
+              return 1;
+          }
+      }
+  }
+
+  bulletptr = bullets;
   for(i=0; i<numbullets; i++,bulletptr++)
   {
-    register short dx;
 
     if (bulletptr->spr.state >= ALIVE)
-    {      
+    {
       dx = FIX2INT(bulletptr->spr.x - rockptr->x);
       if ( (dx > (0)) && (dx < (w)) )
       {
@@ -429,16 +478,20 @@ fixed d360[] = {
    INT2FIX(0),INT2FIX(1),	
    INT2FIX(-2),INT2FIX(-1),	
    INT2FIX(-1),INT2FIX(1),	
+   INT2FIX(-2),INT2FIX(-1),
+   INT2FIX(2),INT2FIX(1),
+   INT2FIX(-2),INT2FIX(-1),
+   INT2FIX(1),INT2FIX(2)
 };
+fixed d360end[1];
+int* dir = d360;
 
 void makeboom(sx,sy)
 int sx,sy;
 {
 int i, *dir;
 
-    boomsound();
-
-  dir = d360;
+    dir = d360;
   for(i=0; i<6; i++)
   {
     if (numbullets < MAXBULLETS)
@@ -451,6 +504,8 @@ int i, *dir;
 	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
 		bullets[numbullets].spr.state = ALIVE + 25;
  	    numbullets++;
+        if (dir >= d360end)
+            dir = d360;
  	}
   }
 }
@@ -515,6 +570,20 @@ dorocks()
 register sprite *rockptr;
 short i;
 	
+    /* restore previous ship */
+    bb.srcform = NULL;
+    bb.srcpoint.x = 0;
+    bb.srcpoint.y = 0;
+    bb.destform = screen;
+    bb.destrect.x = aship.oldx[pindex] - 12;
+    bb.destrect.y = aship.oldy[pindex] - 12;
+    bb.destrect.w = 24;
+    bb.destrect.h = 24;
+    bb.rule = bbnS;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+
     rockptr = bigrocks;
 	for(i=0; i<numbigrocks; i++,rockptr++)
 	{
@@ -524,8 +593,10 @@ short i;
       if (hit(rockptr, 48,41))
       {
         rockptr->state = DYING1;
+        boomsound2();
 
-  /* STOP */        
+
+  /* STOP */
 
         /* 2 smaller fragments */
         if (nummediumrocks < MAXROCKS-2)
@@ -535,6 +606,7 @@ short i;
         }
       }
     }
+
     rockptr = mediumrocks;
     for (i = 0; i < nummediumrocks; i++,rockptr++)
     {
@@ -545,9 +617,13 @@ short i;
       {
         rockptr->state = DYING2;
 
-        makeboom(rockptr->oldx[pindex], rockptr->oldy[pindex]);
+    /* STOP */
+
+        makeboom(FIX2INT(rockptr->x)+16, FIX2INT(rockptr->y)+11);
+        boomsound();
       }
     }
+
 
     /* move */
     rockptr = bigrocks;
@@ -701,26 +777,26 @@ char *argv[];
 
 	newrnd = time(NULL);
 	
-	numbullets = 0;	
+    dir = d360;
+    numbullets = 0;
     nummediumrocks = 0;
-    numbigrocks = 20;
+    numbigrocks = 10;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
 
 
 	sndfd = open("/dev/sound", O_WRONLY);
 
-	/* tempo 0.1Hz */
+	/* tempo 0.05Hz */
 	sb[0] = 0;
 	sb[1] = 0;
-	sb[2] = 6;
+	sb[2] = 3;
     write(sndfd, sb, 3);
 
-/*	testsound(600);  */
-		
     signal(SIGINT, sh_int);
     signal(SIGQUIT, sh_int);
     signal(SIGTERM, sh_int);
+    signal(SIGBND, sh_int);
     signal(SIGMILLI, sh_timer);
 
     font = FontOpen("/fonts/MagnoliaFixed7.font");
@@ -864,60 +940,6 @@ char *argv[];
     }
     waitflip();
 
-
-#if 0
-ClearScreen();
-
-bb.srcpoint.x = 0;
-bb.srcpoint.y = 0;
-bb.destform = screen;
-bb.destrect.w = bigshift[0]->w;
-bb.destrect.h = bigshift[0]->h;
-for(i=0; i<8; i++)
-{
-      bb.srcform = bigshift[i];
-      bb.destrect.x = i * 64;
-      bb.destrect.y = page.y + 128;
-   	  bb.rule = bbS;
-	  BitBlt(&bb);
-      bb.srcform = bigshift[8+i];
-      bb.destrect.x = i * 64;
-      bb.destrect.y = page.y + 128 + 64;
-   	  bb.rule = bbS;
-	  BitBlt(&bb);
-
-     bb.srcform = &BlackMask;
-   	 bb.rule = bbS;
-     r.x = bb.destrect.x;
-     r.y = page.y + 128;
-     r.w = 64;
-     r.h = 128;
-     RectBoxDrawX(&r,1, &bb);
-
-      bb.srcform = big_mshift[i];
-      bb.destrect.x = i * 64;
-      bb.destrect.y = page.y + 256;
-   	  bb.rule = bbS;
-	  BitBlt(&bb);
-      bb.srcform = big_mshift[8+i];
-      bb.destrect.x = i * 64;
-      bb.destrect.y = page.y + 256 + 64;
-   	  bb.rule = bbS;
-	  BitBlt(&bb);
-
-     bb.srcform = &WhiteMask;
-   	 bb.rule = bbS;
-     r.x = bb.destrect.x;
-     r.y = page.y + 256;
-     r.w = 64;
-     r.h = 128;
-     RectBoxDrawX(&r,1, &bb);
-
-}
-waitflip();
-	waitframes(900);
-#endif
-
 	waitframes(90);
 
 
@@ -936,7 +958,8 @@ waitflip();
 	    makesprite(&bigrocks[i], myrand() % 640, myrand() % 480);
 
     initship();
-    respawndelay = framenum + 60;
+    respawndelay = framenum + 90;
+    gameoverman = 90;
 
     /* set up the bitblt command stuff */
     bb.srcform = (struct FORM *)NULL;		/* no source */
@@ -953,10 +976,17 @@ waitflip();
     bb.cliprect.h = 1024;
 
    /* keep going while things exist */
-   while(numbigrocks + nummediumrocks > 0)
+   while(gameoverman)
    {
-   	register sprite *rockptr;
-    short keys;
+    short keys,thrustheld;
+
+    /* all rocks gone */
+    if (numbigrocks + nummediumrocks == 0)
+    {
+        /* now count down to exit */
+        if (gameoverman)
+            gameoverman--;
+    }
 
     readkeyboardevents(keyinput, 8);
     if (keyinput[0] == 0x03)     /* Ctrl-C */
@@ -973,6 +1003,11 @@ waitflip();
     bb.cliprect.w = 1024;
     bb.cliprect.h = 512;
 
+
+    dorocks();
+
+    dobullets();
+
     if (respawndelay)
     {
         if (respawndelay < framenum)
@@ -985,47 +1020,64 @@ waitflip();
     {
         doship();
 
-        keys = 0;
-        if (keyboardmap[0x61]) keys |= LEFT;    /* A */
-        if (keyboardmap[0x64]) keys |= RIGHT;   /* D */
-        if (keyboardmap[0x77]) keys |= THRUST;  /* W */
-        if (keyboardmap[0x73]) keys |= FIRE;    /* S */
-
-        if (keys & LEFT)
-            aship.angle += 1;
-        if (keys & RIGHT)
-            aship.angle -= 1;
-
-        if (keys & THRUST)
+        if (aship.state == ALIVE)
         {
-            aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x) >> 4;
-            aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y) >> 4;
-        }
+            keys = 0;
+            if (keyboardmap[0x61]) keys |= LEFT;    /* A */
+            if (keyboardmap[0x64]) keys |= RIGHT;   /* D */
+            if (keyboardmap[0x77]) keys |= THRUST;  /* W */
+            if (keyboardmap[0x73]) keys |= FIRE;    /* S */
 
-        if (numbullets < MAXBULLETS && (keys & FIRE) && ((framenum & 7) == 0))
-        {
-            bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
-            bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
+            if (keys & LEFT)
+                aship.angle += 1;
+            if (keys & RIGHT)
+                aship.angle -= 1;
 
-            bullets[numbullets].spr.dx = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x);
-            bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
+            if (keys & THRUST)
+            {
+                aship.dx += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x) >> 4;
+                aship.dy += INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y) >> 4;
+                thrustheld++;
 
-            bullets[numbullets].spr.oldx[0] =
-                bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
+                if ((thrustheld & 1) == 0) thrustsound();
+            }
+            else
+            {
+                thrustheld = 0;
+            }
 
-            bullets[numbullets].spr.state = ALIVE + 60;
+            if (aship.cooldown == 0)
+            {
+                if (numbullets < MAXBULLETS && (keys & FIRE))
+                {
+                    bullets[numbullets].spr.x = aship.x + shipshape[aship.angle & ANGLE_MASK][0].x;
+                    bullets[numbullets].spr.y = aship.y + shipshape[aship.angle & ANGLE_MASK][0].y;
 
-            numbullets++;
+                    bullets[numbullets].spr.dx = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].x);
+                    bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
+
+                    bullets[numbullets].spr.oldx[0] =
+                        bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
+
+                    bullets[numbullets].spr.state = ALIVE + 60;
+
+                    numbullets++;
+                    aship.cooldown = 4;
+                    firesound();
+                }
+            }
+            else
+            {
+                aship.cooldown--;
+            }
+
         }
     }
 
-    dorocks();
-    
-    dobullets();
-
-	if ((framenum & 15) == 0)
+#if 0
+    if ((framenum & 0) == 0)
 	{
-      sprintf(status, "bullets:%d big:%d med:%d   ", numbullets, numbigrocks,nummediumrocks);
+      sprintf(status, "respawn:%d bullets:%d big:%d med:%d   ", respawndelay-framenum, numbullets, numbigrocks,nummediumrocks);
 	}
 
      bb.srcform = NULL;
@@ -1038,7 +1090,6 @@ waitflip();
      origin.y = page.y + font->maps->line;
      StringDrawX(status, &origin, &bb, font);
 
-#if 0
      /* show draw time by how long we waited for VBLANK */
      waiting >>= 4;
      bb.srcform = NULL;
