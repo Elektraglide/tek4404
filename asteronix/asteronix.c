@@ -94,23 +94,45 @@ int f, v, l;
 voice(voice, f, v, l)
 int voice, f, v, l;
 {
-    /* 10-bit frequency */
-    sb[0] = 3;
-    sb[1] = 0x80 | (voice << 5) | 0x00 | (f & 15);
-    sb[2] = (f >> 4) & 63;
-    /* 4-bit volume */
-    sb[3] = 0x80 | (voice << 5) | 0x10 | (v & 15);
-    sb[4] = l;
-    write(sndfd, sb, 5);
+    register unsigned char* ptr = sb;
+
+    *ptr++ = 0;
+    if (f >= 0)
+    {
+        /* 10-bit frequency */
+        *ptr++ = 0x80 | (voice << 5) | 0x00 | (f & 15);
+        *ptr++ = (f >> 4) & 63;
+        sb[0] += 2;
+    }
+    if (v >= 0)
+    {
+        /* 4-bit volume */
+        *ptr++ = 0x80 | (voice << 5) | 0x10 | (v & 15);
+        sb[0] += 1;
+    }
+    *ptr++ = l;
+
+    write(sndfd, sb, ptr - sb);
 }
 
+silence()
+{
+    voice(0, 0, 15, 0);
+    voice(1, 0, 15, 0);
+    voice(2, 0, 15, 0);
+    noise(0, 15, 1);
+
+    /* only way to cancel playing sound!! */
+    close(sndfd);
+    sndfd = open("/dev/sound", O_WRONLY);
+}
 
 testsound(f)
 int f;
 {
   int v;
 
-  voice(0,  f,8,0);	
+  voice(0,  f,8,0);
   voice(1, f/2,8,0);
 
   for(v=4; v<16; v++)
@@ -122,25 +144,21 @@ int f;
 
 explodesound()
 {
-    /* only way to cancel plating sound!! */
-	close(sndfd);
-	sndfd = open("/dev/sound", O_WRONLY);
+    silence();
 
     voice(2, 300,15,1);
-	noise(7, 0, 5);
-	noise(7, 4, 10);
-	noise(7, 8, 10);
-	noise(7, 12, 10);
+	noise(7, 0, 20);
+	noise(7, 4, 20);
+	noise(7, 8, 20);
+	noise(7, 12, 20);
 	noise(7, 15, 0);
 }
 
-boomsound()
+medboomsound()
 {
-    /* only way to cancel plating sound!! */
-	close(sndfd);
-	sndfd = open("/dev/sound", O_WRONLY);
+    silence();
 
-	noise(6, 4, 5);
+	noise(6, 4, 10);
 	noise(6, 6, 10);
 	noise(6, 8, 10);
 	noise(6, 10, 10);
@@ -148,14 +166,12 @@ boomsound()
  	noise(6, 15, 0);
 }
 
-boomsound2()
+bigboomsound()
 {
-    /* only way to cancel plating sound!! */
-    close(sndfd);
-    sndfd = open("/dev/sound", O_WRONLY);
+    silence();
 
     voice(2, 200, 15, 1);
-    noise(7, 4, 5);
+    noise(7, 4, 10);
     noise(7, 6, 10);
     noise(7, 8, 10);
     noise(7, 10, 10);
@@ -165,17 +181,18 @@ boomsound2()
 
 thrustsound()
 {
-    voice(2, 340,15,1);
-    noise(7, 4, 5);
+    noise(4, 4, 5);
 }
 
 firesound()
 {
-	voice(0, 300,8,1);
-	voice(0, 300,8,1);
-	voice(0, 340,6,1);
-	voice(0, 380,4,1);
-	voice(0, 420,4,1);
+    short i;
+
+    for (i = 200; i < 500; i += 20)
+    {
+        voice(0, i, 4, 1);
+    }
+    voice(0, 0, 15, 1);
 }
 
 /************** GRAPHICS **********/
@@ -593,7 +610,7 @@ short i;
       if (hit(rockptr, 48,41))
       {
         rockptr->state = DYING1;
-        boomsound2();
+        bigboomsound();
 
 
   /* STOP */
@@ -620,7 +637,7 @@ short i;
     /* STOP */
 
         makeboom(FIX2INT(rockptr->x)+16, FIX2INT(rockptr->y)+11);
-        boomsound();
+        medboomsound();
       }
     }
 
@@ -787,10 +804,10 @@ char *argv[];
 
 	sndfd = open("/dev/sound", O_WRONLY);
 
-	/* tempo 0.05Hz */
+	/* tempo 30Hz */
 	sb[0] = 0;
 	sb[1] = 0;
-	sb[2] = 3;
+	sb[2] = 2;
     write(sndfd, sb, 3);
 
     signal(SIGINT, sh_int);
