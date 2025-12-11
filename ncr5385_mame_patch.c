@@ -19,9 +19,11 @@ char *argv[];
     exit(1);
   }
 
-  // see mame/src/machine/device/ncr5385.cpp for more details
-  printf("MAME ncr5385 emulation causes a hang for tek4404 due to a late arrival of scsi IRQ3\n");
-  printf("A solution is to patch the scsi driver so an early IRQ does not hang the machine.\n");
+  /* see mame/src/machine/device/ncr5385.cpp for more details */
+  printf("MAME ncr5385 emulation causes a hang for tek4404 due to\n");
+  printf("a late arrival of scsi IRQ3.\n");
+  printf("A solution is to patch the scsi driver so an early IRQ does not\n");
+  printf("hang the machine.\n");
 
   /* sanity check this address is correct; should be 0x66 there */
   lseek(pmem_fd, 0x1285e, SEEK_SET);
