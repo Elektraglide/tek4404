@@ -121,10 +121,18 @@ struct DISPSTATE {
 
 /* Event value structure and type definitions */
 union EVENTUNION {	/* events are either a struct or a specific value */
+#ifdef __GNUC__
+    struct {
+    unsigned int dummy : 16;	/* AB gcc lays out fields left to right.. */
+	unsigned int etype : 4;		/* type code, defined below */
+	unsigned int eparam : 12;	/* parameter associated with type */
+    } estruct;
+#else
     struct {
 	unsigned int eparam : 12;	/* parameter associated with type */
 	unsigned int etype : 4;		/* type code, defined below */
     } estruct;
+#endif
     unsigned long evalue;		/* some types have parameters with */
 };					/* more than 12 bits, so they use */
 					/* the next event codes, too. */
