@@ -80,9 +80,9 @@ int sig;
     readerpid = 0;
 
 #if 0  /* why does this hang indefinitely? */
-    fprintf(stderr, "waiting to reap ttyreader\012\n");	
+    fprintf(stderr, "waiting to reap ttyreader\015");	
     pid = wait(&i);  
-    fprintf(stderr, "pid=%d\012\n", pid);
+    fprintf(stderr, "pid=%d\015", pid);
 #endif
   }
 }
@@ -104,7 +104,7 @@ int *sockinput;
   rc = socketpair(AF_INTRA,SOCK_DGRAM,0, sockpair);
   if (rc < 0)
   {
-    fprintf(stderr, "Error %s on socketpair\n", nserror());
+    fprintf(stderr, "Error %s on socketpair\015", nserror());
     exit(errno);
   }
   
@@ -147,7 +147,7 @@ int *sockinput;
     close(2);
     execvp(droneprocess[0], droneprocess);
 
-    fprintf(stderr, "ttyreader exit\012\n");
+    fprintf(stderr, "ttyreader exit\015");
     exit(1);
   }
 }
@@ -192,7 +192,7 @@ char *logprocess[] = {"/bin/UNIXtools/tail","-f", "/etc/log/system.log", NULL};
 char *winprocess[] = {"ash", NULL};
 #endif
 
-char welcome[] = "Welcome to Tektronix 4404\012\n";
+char welcome[] = "Welcome to Tektronix 4404\015";
 
 void SetClip(r)
 struct RECT *r;
@@ -243,7 +243,7 @@ void cleanup_child(sig)
 int sig;
 {
 
-  WindowLog("signal(%d): child of parent %d\n", sig, getpid());
+  WindowLog("signal(%d): child of parent %d\015", sig, getpid());
   exit(sig);
 }
 
@@ -262,7 +262,7 @@ int islogger;
   rc = create_pty(ptfd);
   if (rc < 0)
   {
-    fprintf(stderr, "Error %d on create_pty\n", errno);
+    fprintf(stderr, "Error %d on create_pty\015", errno);
     exit(1);
   }
 
@@ -328,7 +328,7 @@ int islogger;
     rc = islogger ? execvp(logprocess[0], logprocess) : execvp(winprocess[0], winprocess);
     if (rc < 0)
     {
-      fprintf(stderr, "Error %d on exec\n", errno);
+      fprintf(stderr, "Error %d on exec\015", errno);
   }
 
     /* error */
@@ -343,7 +343,7 @@ Window *win;
 {
   if (win < allwindows || win >= allwindows+numwindows)
   {
-    fprintf(stderr, "invalid win pointer %d\012\n", win-allwindows);
+    fprintf(stderr, "invalid win pointer %d\015", win-allwindows);
 	return 0;
   }
   else
@@ -440,7 +440,7 @@ Window *win;
       awin = awin->next;
     }
     
-    /* fprintf(stderr, "topwindow: %s\n", win->title); */
+    /* fprintf(stderr, "topwindow: %s\015", win->title); */
 
     VTfocus(win->vt, win->master);
 
@@ -1115,7 +1115,7 @@ int sig;
   struct POINT p;
   int i;
 	
-  fprintf(stderr, "cleanup on %d\012\n", sig);
+  fprintf(stderr, "cleanup on %d\015", sig);
 
 #ifdef USE_TTYREADER
   ttycleanup(sig);
@@ -1143,7 +1143,7 @@ int sig;
   FontClose(font);
   RestoreDisplayState(&ds);
 
-  fprintf(stderr, "Sic transit gloria Tektronix 4404\012\n");
+  fprintf(stderr, "Sic transit gloria Tektronix 4404\015");
   exit(2);
 }
 
@@ -1155,7 +1155,7 @@ int sig;
   int i,pid;
 
   pid = wait(&i);
-  WindowLog("child proc(%d) died with exit code %d\012\n", pid, i);
+  WindowLog("child proc(%d) died with exit code %d\015", pid, i);
 
   for(i=0; i<numwindows; i++)
   {
@@ -1173,7 +1173,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  WindowLog("timer signal\012\n");
+  WindowLog("timer signal\015");
   signal(sig, sh_timer);
   ESetAlarm(EGetTime() + 1000);
 }
@@ -1191,7 +1191,7 @@ void sh_input(sig)
 int sig;
 {
 
-  WindowLog("input signal\012\n");
+  WindowLog("input signal\015");
   signal(sig, sh_input);
 }
 
@@ -1228,20 +1228,20 @@ char **argv;
 
   SaveDisplayState(&ds);
 
-  font = FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed7.font");
+  font = (struct FontHeader *)FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed7.font");
   if (!font)
-    fprintf(stderr,"Failed to open font: %s\n", strerror(errno));
+    fprintf(stderr,"Failed to open font: %s\015", strerror(errno));
     
-  fprintf(stderr, "name: %s: face: %s\n", font->name, font->face);
-  fprintf(stderr, "size: %d res: %d\n", font->ptsize, font->resolution);
-  fprintf(stderr, "fixed: %d width:%d height:%d\n", 
+  fprintf(stderr, "name: %s: face: %s\015", font->name, font->face);
+  fprintf(stderr, "size: %d res: %d\015", font->ptsize, font->resolution);
+  fprintf(stderr, "fixed: %d width:%d height:%d\015", 
       font->maps->fixed,font->maps->maxw, font->maps->line);
-  fprintf(stderr, "bitmap: %8.8x (%d x %d)\n", 
+  fprintf(stderr, "bitmap: %8.8x (%d x %d)\015", 
       font->bitmap, font->width, font->height);
 
   /* can we use a custom text render? */
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
-  fprintf(stderr,"usecustom=%d\n",usecustomblit);
+  fprintf(stderr,"usecustom=%d\015",usecustomblit);
 
   menu = MenuCreateX(3,items,flags,0,font);
 
@@ -1287,7 +1287,7 @@ char **argv;
 #ifdef USE_TTYREADER
 
   name = getttysock(&fdtty);
-  /* fprintf(stderr, "reading %s on socket(%d)\012\n", name, fdtty); */
+  /* fprintf(stderr, "reading %s on socket(%d)\015", name, fdtty); */
 
 #endif
 
@@ -1295,7 +1295,7 @@ char **argv;
 #ifdef POLLINGINP
   /* keyboard */
   fdtty = open(ttyname(fileno(stdin)), O_RDWR);
-  /* fprintf(stderr, "reading %s using fd(%d)\012\n", ttyname(fileno(stdin)), fdtty); */
+  /* fprintf(stderr, "reading %s using fd(%d)\015", ttyname(fileno(stdin)), fdtty); */
   /* CBREAK input */
   rc = gtty(fdtty, &new_term_settings);
   new_term_settings.sg_flag |= CBREAK | RAW;
@@ -1326,7 +1326,7 @@ dummysock = fdtty;
 	/* we want this to be snappy */
 	nice(-32);
 
-  WindowLog("Window Manager started as pid%d\012\n", getpid());
+  WindowLog("Window Manager started as pid%d\015", getpid());
 
   /* mainloop */
   last_read = 0;
@@ -1360,7 +1360,7 @@ dummysock = fdtty;
   {
     if (errno != EINTR)
     {
-      fprintf(stderr, "select(%d) error %s\012\n", n, strerror(errno));
+      fprintf(stderr, "select(%d) error %s\015", n, strerror(errno));
       exit(23);
     }
     else
@@ -1409,7 +1409,7 @@ dummysock = fdtty;
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
               kill(wintopmost->pid, SIGHUP);
 
-              WindowLog("Sent SIGHUP to window%d\012\n", wintopmost - allwindows);
+              WindowLog("Sent SIGHUP to window%d\015", wintopmost - allwindows);
           }
 
 /* we dont know whether we are in RAW mode.. */
@@ -1418,12 +1418,12 @@ dummysock = fdtty;
           if (inputbuffer[0] == 0x11)
           {
               control_pty(wintopmost->master, PTY_START_OUTPUT, 0);
-              WindowLog( "XON\012\n");
+              WindowLog( "XON\015");
           }
           if (inputbuffer[0] == 0x13)
           {
               control_pty(wintopmost->master, PTY_STOP_OUTPUT, 0);
-              WindowLog( "XOFF\012\n");
+              WindowLog( "XOFF\015");
           }
 #endif
 
@@ -1448,7 +1448,7 @@ dummysock = fdtty;
         if (inputbuffer[0] == 0x04)
         {
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-          WindowOutput(wintopmost - allwindows, "SIGHUP\012\n", 8);
+          WindowOutput(wintopmost - allwindows, "SIGHUP\015", 8);
           kill(wintopmost->pid, SIGHUP);
         }
       
@@ -1484,7 +1484,7 @@ dummysock = fdtty;
             wait(&rc);
 
             WindowDestroy(i);
-            WindowLog("window%d destroyed with exit code 0x%04x\012\n", i, rc);
+            WindowLog("window%d destroyed with exit code 0x%04x\015", i, rc);
             break;
           }
         }
