@@ -37,7 +37,7 @@ char *argv[];
   if (n !=4 || buffer[0] != 0x67 || buffer[1] != 0xec)
   {
     close(pmem_fd);
-    fprintf(stderr,"Did not find expected instruction to patch\n");
+    fprintf(stderr,"error: did not find expected instruction to patch\n");
     exit(2);
   }
   
