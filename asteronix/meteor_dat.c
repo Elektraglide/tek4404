@@ -243,11 +243,13 @@ struct FORM** shift;
     src = shift[sx & 15]->addr;
     mask = big_mshift[sx & 15]->addr;
 
+#ifdef DEBUG
     if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
     {
         printf("error %d %d\n", sx, sy);
         return;
     }
+#endif
 
     sy += page.y;
     dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
@@ -268,11 +270,13 @@ int sx, sy;
 
     src = bigshift[sx & 15]->addr;
 
+#ifdef DEBUG
     if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
     {
         printf("error %d %d\n", sx, sy);
         return;
     }
+#endif
 
     sy += page.y;
     dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
@@ -305,10 +309,10 @@ sprite* asprite;
         sy = 0;
     }
     else
-        if (sy + h > 480)	/* clip to bottom */
-        {
-            h = 480 - sy;
-        }
+    if (sy + h > 480)	/* clip to bottom */
+    {
+        h = 480 - sy;
+    }
 
     /* draw on current page */
     sy += page.y;
@@ -345,10 +349,10 @@ sprite* asprite;
         sy = 0;
     }
     else
-        if (sy + h > 480)	/* clip to bottom */
-        {
-            h = 480 - sy;
-        }
+    if (sy + h > 480)	/* clip to bottom */
+    {
+        h = 480 - sy;
+    }
 
     /* draw on current page */
     sy += page.y;
