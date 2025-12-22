@@ -53,9 +53,6 @@ struct mapstr {
     char mtype;
 };
 
-unsigned short sizs[MAX_SIZE_ERRS];
-short size_error_cnt;
-
 USHORT oors[MAX_OORS];
 short oors_cnt;
 
@@ -70,6 +67,14 @@ short udupcnt;    /* unique dups count */
 
 struct mapstr badmap;
 short badblocks;     /* ".badblocks" exists flag */
+
+#define MAX_RUNS 255
+struct blockrun {
+    USHORT start, end;
+};
+struct blockrun runs[MAX_RUNS+1];
+struct blockrun* runptr;
+short run_cnt;
 
 char sir_area[512];  /* buffer area for SIR */
 struct sir *sirbuf;
@@ -388,7 +393,6 @@ short phase_a;
     clear_buf();   /* zero out buffer */
 
     dups_cnt = oors_cnt = 0;
-    size_error_cnt = 0;
 
     freeblks = 0;
     regblks = dirblks = mapblks = 0;
@@ -451,7 +455,22 @@ short phase_a;
             if((filetype==S_IFREG)||(filetype==S_IFDIR)) 
             {
                 /* follow blocks and mark in map */
+
+                runptr = runs;
+                runptr->start = 0;
+                runptr->end = 0;
+                run_cnt = 0;
                 findblks(fdnptr);
+
+                if (run_cnt > 2)
+                {
+                    printf("%d: ", fdnno);
+                    for (i = 0; i < run_cnt; i++)
+                    {
+                        printf("[%d - %d]", runs[i].start, runs[i].end);
+                    }
+                    printf("\n");
+                }
             }
 
             ++fdnno;
@@ -475,7 +494,7 @@ short phase_a;
 
     /* show occupancy map in 8 x 512 byte blocks (4096 bytes) */
     j = 0;
-    for (i = 0; i < maxblk1>>3; i++)
+    for (i = 0; i < mapsize; i++)
     {
         /* are any 8 blocks used? */
         if (mapbuf[i] != 0)
@@ -500,22 +519,23 @@ struct inode *fdnptr;
 
     blkcount = 0;
     l3tol(blocks,fdnptr->fd_blk,13);
-    for(i=0; i<10; ++i) {
+    
+    /* 10 direct blocks */
+    for(i=0; i<10; ++i) 
         if(blocks[i]) sfmap(blocks[i]);
-    }
 
     /* single indirection */
-    if(mapok(blocks[10]))
+    if(checkrange(blocks[10]))
         if(do_sind(blocks[10]))
             return(1);
 
     /* double indirection */
-    if(mapok(blocks[11]))
+    if(checkrange(blocks[11]))
         if(do_dind(blocks[11]))
             return(1);
 
     /* triple indirection */
-    if(mapok(blocks[12]))
+    if(checkrange(blocks[12]))
         if(do_tind(blocks[12]))
             return(1);
 
@@ -529,25 +549,23 @@ long blkadr;
     long blocks[SMSZ];
     short i;
 
+    /* failed to read */
     if(smap(blkadr))
-   return(1);
-    if(rdblk(blkadr,sindblk)==ERR) {
-   printf(errinmap,fdnno);
-   return(0);
+        return(1);
+
+    if(rdblk(blkadr,sindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
     }
+
     l3tol(blocks,sindblk,SMSZ);
-    if(phase==1) {
-   for(i=0; i<SMSZ; ++i) {
+    for(i=0; i<SMSZ; ++i) 
+    {
        if(blocks[i])
-      if(sfmap1b(blocks[i]))
-          return(1);
-   }
-    } else {
-   for(i=0; i<SMSZ; ++i) {
-       if(blocks[i])
-      sfmap(blocks[i]);
-   }
+           sfmap(blocks[i]);
     }
+
     return(0);
 }
 
@@ -558,18 +576,26 @@ long blkadr;
     long blocks[SMSZ];
     short i;
 
+    /* failed to read */
     if(smap(blkadr))
-   return(1);
-    if(rdblk(blkadr,dindblk)==ERR) {
-   printf(errinmap,fdnno);
-   return(0);
+        return(1);
+
+    if(rdblk(blkadr,dindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
     }
+
     l3tol(blocks,dindblk,SMSZ);
-    for(i=0; i<SMSZ; ++i) {
-   if(mapok(blocks[i]))
-       if(do_sind(blocks[i]))
-      return(1);
+    for(i=0; i<SMSZ; ++i) 
+    {
+        if (checkrange(blocks[i]))
+        {
+            if (do_sind(blocks[i]))
+                return(1);
+        }
     }
+
     return(0);
 }
 
@@ -580,18 +606,26 @@ long blkadr;
     long block;
     short i;
 
+    /* failed to read */
     if(smap(blkadr))
-   return(1);
-    if(rdblk(blkadr,tindblk)==ERR) {
-   printf(errinmap,fdnno);
-   return(0);
+       return(1);
+
+    if(rdblk(blkadr,tindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
     }
-    for(i=0; i<SMSZ; ++i) {
-   l3tol(&block,tindblk+(3*i),1);
-   if(mapok(block))
-       if(do_dind(block))
-      return(1);
+
+    for(i=0; i<SMSZ; ++i) 
+    {
+       l3tol(&block,tindblk+(3*i),1);
+       if (checkrange(block))
+       {
+           if (do_dind(block))
+               return(1);
+       }
     }
+
     return(0);
 }
 
@@ -625,7 +659,7 @@ short twobyte;
     }
 }
 
-mapok(blkadr)
+checkrange(blkadr)
 long blkadr;
 {
     if(blkadr) 
@@ -670,9 +704,27 @@ long blkadr;
             return;
         }
     }
-    if(filetype == S_IFDIR) ++dirblks;
-    else ++regblks;
+
+    if(filetype == S_IFDIR) ++dirblks; else ++regblks;
     if(setbit(blkadr)) set_dup(blkadr);
+
+    /* track runs */
+    if (runptr->end + 1 == blkadr)
+    {
+        /* extend current run */
+        runptr->end = blkadr;
+    }
+    else
+    {
+        /* push new run */
+        if (run_cnt < MAX_RUNS)
+        {
+            /* dont increment first time */
+            if (run_cnt++)
+                runptr++;
+        }
+        runptr->start = runptr->end = blkadr;
+    }
 }
 
 
