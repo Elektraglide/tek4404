@@ -10,7 +10,7 @@
 
 #ifndef unix
 #info Asteronix
-#info Version 1.0
+#info Version 1.1
 #endif
 
 typedef struct
@@ -214,8 +214,8 @@ void flip()
 
 int waitflip()
 {
-  unsigned int currframe;
-  short waiting;
+  register unsigned int currframe;
+  register short waiting;
   
    /* wait for frame flip */
    waiting = 0;
@@ -250,10 +250,11 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 33;
+  frametime += 32;
   framenum++;
 
   signal(sig, sh_timer);
+  /* raises SIGMILLI on timeout */
   ESetAlarm(frametime);
 }
 
@@ -275,7 +276,7 @@ int rand2()
 }
 
 struct POINT shipmodel[4] = {
-    { 0, 8}
+    { 0, 8},
     {-8,-8},
     { 0,-4},
     { 8,-8},
@@ -503,28 +504,36 @@ fixed d360[] = {
 fixed d360end[1];
 int* dir = d360;
 
-void makeboom(sx,sy)
+int makeboom(sx,sy)
 int sx,sy;
 {
-int i, *dir;
+  short i;
+  register int *dir;
+  register bullet* bullptr;
 
-    dir = d360;
-  for(i=0; i<6; i++)
+  dir = d360;
+  bullptr = bullets + numbullets;
+  /* max bullets we *could* do */
+  i = (MAXBULLETS - numbullets);
+  /* bullets we need */
+  if (i > 6) i = 6;
+  /* create them */
+  numbullets += i;
+  while(--i > 0)
   {
-    if (numbullets < MAXBULLETS)
-    {
-		bullets[numbullets].spr.x = INT2FIX(sx);
-		bullets[numbullets].spr.y = INT2FIX(sy);
-        bullets[numbullets].spr.dx = *dir++;
-        bullets[numbullets].spr.dy = *dir++;
-	    bullets[numbullets].spr.oldx[0] =
-	    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
-		bullets[numbullets].spr.state = ALIVE + 25;
- 	    numbullets++;
-        if (dir >= d360end)
-            dir = d360;
- 	}
+    bullptr->spr.x = INT2FIX(sx);
+    bullptr->spr.y = INT2FIX(sy);
+    bullptr->spr.dx = *dir++;
+    bullptr->spr.dy = *dir++;
+    bullptr->spr.oldx[0] =
+    bullptr->spr.oldx[1] = -1;  /* mark as new */
+    bullptr->spr.state = ALIVE + 25;
+    bullptr++;
+    if (dir >= d360end)
+        dir = d360;
   }
+
+  return 0;
 }
 
 void dobullets()
@@ -797,7 +806,7 @@ char *argv[];
     dir = d360;
     numbullets = 0;
     nummediumrocks = 0;
-    numbigrocks = 10;
+    numbigrocks = 8;
 	if (argc > 1)
 		numbigrocks = atoi(argv[1]);
 
@@ -1106,7 +1115,9 @@ char *argv[];
      origin.x = 192;
      origin.y = page.y + font->maps->line;
      StringDrawX(status, &origin, &bb, font);
+#endif
 
+#if 1
      /* show draw time by how long we waited for VBLANK */
      waiting >>= 4;
      bb.srcform = NULL;
