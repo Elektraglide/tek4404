@@ -108,6 +108,7 @@ char **argv;
 	int totalcpu;
  	int openfd;
 	int framenum = 0;
+	short displaymode = 0;
 	struct sgttyb term_settings;
   
 #ifdef __clang__
@@ -182,7 +183,7 @@ while(1)
 	openfd = 0;
 	
 	printf("\033[5;1H");
-	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.\033[K%s\033[0m\n", framenum & 1 ? "QUANTUM.PERSON" : "CMDLINE");
+	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.\033[K%s\033[0m\n", displaymode ? "QUANTUM.PERSON" : "CMDLINE");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
@@ -335,7 +336,7 @@ while(1)
 				/* printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm); */
 
 				/* alternate  between displaying different task info */
-				if (framenum & 1)
+				if (displaymode)
 				{
 					/* scheduling */
 					personality = ntohl(userbl.upersonality);
@@ -450,18 +451,25 @@ while(1)
     /* quit? */
 	{
 	    gtty(fileno(stdin), &term_settings);
-    	if (term_settings.sg_speed & INCHR)
+		if (term_settings.sg_speed & INCHR)
 		{
-		    rc = (int)read(fileno(stdin), buffer, 1);
-			if (rc == 1 && buffer[0] == 'q')
+			rc = (int)read(fileno(stdin), buffer, 1);
+			if (rc == 1)
 			{
-				stty(fileno(stdin), &orig_term_settings);
-				exit(0);
+				if (buffer[0] == 'q')
+				{
+					stty(fileno(stdin), &orig_term_settings);
+					exit(0);
+				}
+				if (buffer[0] == ' ')
+				{
+					displaymode ^= 1;
+				}
 			}
 		}
-	}   
+	}
 
-    printf("\033[2K");	
+	printf("\033[2K");	
 	printf("\033[1;1H");
 	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
 
@@ -473,7 +481,7 @@ while(1)
 	printf("physmem: %dk\n", readkint32(memsize, pmem) / 1024);
 	
 	printf("mempages: %d ", readkint32(mempages, pmem));
-	printf("lbolt %d ", readkint16(lbolt, pmem));
+	printf("lbolt %d ", readkint16(lbolt, pmem)>>8);
 	printf("disk ops:%d ", readkint32(stadsk, pmem));
 	printf("block ops:%d\n", readkint32(stablk, pmem));
 
@@ -500,7 +508,8 @@ netdev *ptr;
   }
 }
 #endif
-	sleep(5);
+
+	sleep(2);
 	
 	/* used for %CPU */
 	totalcpu = putime + pstime;
