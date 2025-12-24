@@ -125,6 +125,8 @@ char odtdut[] = "Output directed to device under test.\n";
 char *mapbuf;    /* map of used blocks */
 int mapsize;
 
+char* framebuffer;
+
 main(argc,argv)
 int argc;
 char *argv[];
@@ -218,6 +220,8 @@ char *argv[];
    /* initialize memory buffer pointer to block map (1-bit per block) */
    mapsize = maxblk1 / 8;
    mapbuf = (char*)malloc(mapsize);
+
+   framebuffer = phys(1);
 
     do_fdns(0); 
 
@@ -359,7 +363,36 @@ fxdbcnt()
     }
 }
 
+/* 4x4 icon */
+void drawblock(i, val)
+int i, val;
+{
+    unsigned char* dst;
+    short y = i / 160;
+    short x = i % 160;
 
+    dst = framebuffer + (y * 4 * 128) + (x / 2);
+    if (x & 1)
+    {
+        dst[128] |= 0x04;
+        if (val)
+        {
+            dst[0]   |= 0x0e;
+            dst[128] |= (val==255) ? 0x0e : 0x0a;
+            dst[256] |= 0x0e;
+        }
+    }
+    else
+    {
+        dst[128] |= 0x40;
+        if (val)
+        {
+            dst[0]   |= 0xe0;
+            dst[128] |= (val == 255) ? 0xe0 : 0xa0;
+            dst[256] |= 0xe0;
+        }
+    }
+}
 
 /******************************************************************
 *  do_fdns(phase)
@@ -390,7 +423,7 @@ short phase_a;
     freefdns = usedfdns = 0;
     blkfdns = chrfdns = dirfdns = regfdns = 0;
 
-    clear_buf();   /* zero out buffer */
+    clear_map();   /* zero out buffer */
 
     dups_cnt = oors_cnt = 0;
 
@@ -399,6 +432,7 @@ short phase_a;
     oorfbks = dupfbks = 0;
     dupblks = oorblks = missbks = 0;
 
+    printf("reading %d file descriptors..\n", sirbuf->sszfdn);
     /* should this use ROOTFDN ? */
     fdnno = 1;
     for(fdnbno=1; fdnbno <= sirbuf->sszfdn; ++fdnbno)
@@ -455,22 +489,7 @@ short phase_a;
             if((filetype==S_IFREG)||(filetype==S_IFDIR)) 
             {
                 /* follow blocks and mark in map */
-
-                runptr = runs;
-                runptr->start = 0;
-                runptr->end = 0;
-                run_cnt = 0;
-                findblks(fdnptr);
-
-                if (run_cnt > 2)
-                {
-                    printf("%d: ", fdnno);
-                    for (i = 0; i < run_cnt; i++)
-                    {
-                        printf("[%d - %d]", runs[i].start, runs[i].end);
-                    }
-                    printf("\n");
-                }
+                mark_in_map(fdnptr);
             }
 
             ++fdnno;
@@ -489,29 +508,19 @@ short phase_a;
         }
     }
 
+    /* clear screen and show map */
+    printf("\033[1H\033[J\033[%dH", mapsize / 480 + 1);
     printf("%d files,  %d directories\n", regfdns, dirfdns);
     printf("%d free Fdns\n", freefdns);
 
-    /* show occupancy map in 8 x 512 byte blocks (4096 bytes) */
-    j = 0;
     for (i = 0; i < mapsize; i++)
     {
-        /* are any 8 blocks used? */
-        if (mapbuf[i] != 0)
-            printf("X");
-        else
-            printf(".");
-
-        if (++j >= 72)
-        {
-            printf("\n");
-            j = 0;
-        }
+        drawblock(i, mapbuf[i]);
     }
 
 }
 
-findblks(fdnptr)
+mark_in_map(fdnptr)
 struct inode *fdnptr;
 {
     long blocks[13];
@@ -519,10 +528,16 @@ struct inode *fdnptr;
 
     blkcount = 0;
     l3tol(blocks,fdnptr->fd_blk,13);
-    
+
+    /* build contiguous runs  */
+    runptr = runs;
+    runptr->start = 0;
+    runptr->end = 0;
+    run_cnt = 0;
+
     /* 10 direct blocks */
     for(i=0; i<10; ++i) 
-        if(blocks[i]) sfmap(blocks[i]);
+        if(blocks[i]) mapblock(blocks[i]);
 
     /* single indirection */
     if(checkrange(blocks[10]))
@@ -539,6 +554,22 @@ struct inode *fdnptr;
         if(do_tind(blocks[12]))
             return(1);
 
+    /* show stats of contiguous runs */
+    if (0)
+    if (run_cnt > 5 && run_cnt < 8)
+    {
+        int j;
+
+        printf("%d: ", fdnno);
+        j = 0;
+        for (i = 0; i < run_cnt; i++)
+        {
+            printf("[%d - %d]", runs[i].start, runs[i].end);
+            j += runs[i].end - runs[i].start + 1;
+        }
+        printf("\nNeeds contiguous %d blocks\n", j);
+    }
+
     return(0);
 }
 
@@ -550,7 +581,7 @@ long blkadr;
     short i;
 
     /* failed to read */
-    if(smap(blkadr))
+    if(mapindirectblock(blkadr))
         return(1);
 
     if(rdblk(blkadr,sindblk)==ERR) 
@@ -563,7 +594,7 @@ long blkadr;
     for(i=0; i<SMSZ; ++i) 
     {
        if(blocks[i])
-           sfmap(blocks[i]);
+           mapblock(blocks[i]);
     }
 
     return(0);
@@ -577,7 +608,7 @@ long blkadr;
     short i;
 
     /* failed to read */
-    if(smap(blkadr))
+    if(mapindirectblock(blkadr))
         return(1);
 
     if(rdblk(blkadr,dindblk)==ERR) 
@@ -607,7 +638,7 @@ long blkadr;
     short i;
 
     /* failed to read */
-    if(smap(blkadr))
+    if(mapindirectblock(blkadr))
        return(1);
 
     if(rdblk(blkadr,tindblk)==ERR) 
@@ -630,6 +661,7 @@ long blkadr;
 }
 
 
+/***************************************************************/
 
 chk_miss()
 {
@@ -673,25 +705,7 @@ long blkadr;
     return(0);
 }
 
-sfmap1b(blkadr)
-long blkadr;
-{
-#ifdef M68000
-    if(badblocks && fdnno == BBFDN && contig_start != 0){
-        if(blkadr < minvld || blkadr >= maxblk1 ||
-           (blkadr > maxvld && blkadr < contig_start)) return(0);
-    }
-    else
-#endif
-    if((blkadr<minvld) || (blkadr>maxvld)) return(0);
-    if(setbit(blkadr)==0) {
-        set_dup(blkadr);
-        if(--udupcnt == 0) return(1);
-    }
-    return(0);
-}
-
-sfmap(blkadr)
+mapblock(blkadr)
 long blkadr;
 {
     ++blkcount;
@@ -728,7 +742,7 @@ long blkadr;
 }
 
 
-smap(blkadr)
+mapindirectblock(blkadr)
 long blkadr;
 {
    if((blkadr<minvld) || (blkadr>maxvld)) {
@@ -740,6 +754,17 @@ long blkadr;
        set_dup(blkadr);
 
    return(0);
+}
+
+/***************************************************************/
+
+clear_map()
+{
+    register int* iptr;
+    register short i = mapsize / 4;
+
+    iptr = (int*)mapbuf;
+    while (i--) *iptr++ = 0;
 }
 
 
@@ -780,6 +805,7 @@ long blkadr;
     }
 }
 
+/***************************************************************/
 
 set_dup(blkadr)
 long blkadr;
@@ -809,6 +835,7 @@ set_oor()
 }
 
 
+/***************************************************************/
 
 rdblk(bkadr,buffer)
 long bkadr;
@@ -878,17 +905,6 @@ long badblk;
         printf("Add to \".badblocks\"\n");
     }
 }
-
-
-clear_buf()
-{
-    register int *iptr;
-    register short i = mapsize / 4;
-
-    iptr = (int *)mapbuf;
-    while(i--) *iptr++ = 0;
-}
-
 
 
 
