@@ -385,6 +385,7 @@ int i, cylsize;
     bitmsk = (0x80) >> (i & 7);
     while (loop > 0)
     {
+        /* FIXME: use a 256 byte lookup */
         while (bitmsk)
         {
             if ((*bytptr & bitmsk))
@@ -400,34 +401,50 @@ int i, cylsize;
 }
 
 
-/* 4x4 icon */
-void drawcylinder(i,val)
-int i,val;
+/* 8x8 icon */
+void drawcylinder(cid,val)
+int cid,val;
 {
     unsigned char* dst;
-    short y = i / 160;
-    short x = i % 160;
+    int y = cid / 80;
+    int x = cid % 80;
 
-    dst = framebuffer + (y * 4 * 128) + (x / 2);
-    if (x & 1)
+    dst = framebuffer + (y * 8 * 128) + x;
+    if (x > 79)
     {
-        dst[128] |= 0x04;
-        if (val)
-        {
-            dst[0]   |= 0x0e;
-            dst[128] |= (val == BLOCKSPERCYLINDER) ? 0x0e : 0x0a;
-            dst[256] |= 0x0e;
-        }
+        printf("x = %d\n", x);
+        return;
+    }
+    if (val >= BLOCKSPERCYLINDER)
+    {
+        dst[0]   |= 0xfe;
+        dst[128] |= 0xfe;
+        dst[256] |= 0xfe;
+        dst[384] |= 0xfe;
+        dst[512] |= 0xfe;
+        dst[640] |= 0xfe;
+        dst[768] |= 0xfe;
+    }
+    else
+    if (val== 0)
+    {
+        dst[0] |= 0xfe;
+        dst[128] |= 0x82;
+        dst[256] |= 0x82;
+        dst[384] |= 0x82;
+        dst[512] |= 0x82;
+        dst[640] |= 0x82;
+        dst[768] |= 0xfe;
     }
     else
     {
-        dst[128] |= 0x40;
-        if (val)
-        {
-            dst[0]   |= 0xe0;
-            dst[128] |= (val == BLOCKSPERCYLINDER) ? 0xe0 : 0xa0;
-            dst[256] |= 0xe0;
-        }
+        dst[0] |= 0xfe;
+        dst[128] |= 0x82;
+        dst[256] |= 0xc2;
+        dst[384] |= 0xe2;
+        dst[512] |= 0xf2;
+        dst[640] |= 0xfa;
+        dst[768] |= 0xfe;
     }
 }
 
@@ -554,7 +571,7 @@ short phase_a;
 
     /* clear screen and show map */
     numcylinders = (mapsize * 8) / BLOCKSPERCYLINDER;
-    printf("\033[1H\033[J\033[%dH", 1 + ((numcylinders / 160) * 4) / 15  + 1);
+    printf("\033[1H\033[J\033[%dH", 1 + ((numcylinders / 80) * 8) / 15  + 1);
     printf("%d files,  %d directories\n", regfdns, dirfdns);
     printf("%d free Fdns  %d cylinders\n", freefdns, numcylinders);
 
@@ -563,6 +580,7 @@ short phase_a;
         printf("%3d ", run_histogram[i]);
     printf("\n");
 
+    /* 8 blocks for each byte in map */
     for (i = 0; i < mapsize * 8; i += BLOCKSPERCYLINDER)
     {
         /* convert block_id to cylinder_id */
@@ -777,13 +795,8 @@ long blkadr;
     if(filetype == S_IFDIR) ++dirblks; else ++regblks;
     if(setbit(blkadr)) set_dup(blkadr);
 
-    /* track runs */
-    if (runptr->end + 1 == blkadr)
-    {
-        /* extend current run */
-        runptr->end = blkadr;
-    }
-    else
+    /* track runs of CYLINDERS */
+    if (runptr->end != blkadr / BLOCKSPERCYLINDER)
     {
         /* push new run */
         if (run_cnt < MAX_RUNS)
@@ -792,7 +805,7 @@ long blkadr;
             if (run_cnt++)
                 runptr++;
         }
-        runptr->start = runptr->end = blkadr;
+        runptr->start = runptr->end = blkadr / BLOCKSPERCYLINDER;
     }
 }
 
