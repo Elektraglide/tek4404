@@ -19,6 +19,11 @@ typedef unsigned short USHORT;
 #define TRUE (1)
 #define FALSE (0)
 
+/* Disk geometry*/
+#define BLOCKSPERTRACK 18
+#define HEADSPERCYLINDER 6
+#define BLOCKSPERCYLINDER (BLOCKSPERTRACK * HEADSPERCYLINDER)
+
 /*******************************************************/
 /*  Following is split into two because compiler won't */
 /*  accept character array of > 32767.  Second value   */
@@ -75,6 +80,9 @@ struct blockrun {
 struct blockrun runs[MAX_RUNS+1];
 struct blockrun* runptr;
 short run_cnt;
+
+#define MAX_HISTOGRAM 18
+short run_histogram[MAX_HISTOGRAM];
 
 char sir_area[512];  /* buffer area for SIR */
 struct sir *sirbuf;
@@ -363,9 +371,38 @@ fxdbcnt()
     }
 }
 
+/* count bits set in run */
+int checkcylinder(i, cylsize)
+int i, cylsize;
+{
+    short val = 0;
+    register short bitmsk;
+    register char* bytptr;
+    register short loop;
+
+    loop = cylsize;
+    bytptr = mapbuf + (i >> 3);
+    bitmsk = (0x80) >> (i & 7);
+    while (loop > 0)
+    {
+        while (bitmsk)
+        {
+            if ((*bytptr & bitmsk))
+                val++;
+            bitmsk >>= 1;
+            loop--;
+        }
+        bytptr++;
+        bitmsk = 0x80;
+    }
+
+    return val;
+}
+
+
 /* 4x4 icon */
-void drawblock(i, val)
-int i, val;
+void drawcylinder(i,val)
+int i,val;
 {
     unsigned char* dst;
     short y = i / 160;
@@ -378,7 +415,7 @@ int i, val;
         if (val)
         {
             dst[0]   |= 0x0e;
-            dst[128] |= (val==255) ? 0x0e : 0x0a;
+            dst[128] |= (val == BLOCKSPERCYLINDER) ? 0x0e : 0x0a;
             dst[256] |= 0x0e;
         }
     }
@@ -388,7 +425,7 @@ int i, val;
         if (val)
         {
             dst[0]   |= 0xe0;
-            dst[128] |= (val == 255) ? 0xe0 : 0xa0;
+            dst[128] |= (val == BLOCKSPERCYLINDER) ? 0xe0 : 0xa0;
             dst[256] |= 0xe0;
         }
     }
@@ -418,19 +455,26 @@ short phase_a;
     short fdnbno;
     long tmp, swapbeg, gfblks();
     int i,j,k;
-    USHORT swapsize;
+    USHORT swapsize,numcylinders;
 
+    /* track FD */
     freefdns = usedfdns = 0;
     blkfdns = chrfdns = dirfdns = regfdns = 0;
 
-    clear_map();   /* zero out buffer */
-
-    dups_cnt = oors_cnt = 0;
-
+    /* track blocks */
     freeblks = 0;
     regblks = dirblks = mapblks = 0;
+
+    clear_map();
+
+    /* track errors */
+    dups_cnt = oors_cnt = 0;
     oorfbks = dupfbks = 0;
     dupblks = oorblks = missbks = 0;
+
+    i = MAX_HISTOGRAM;
+    while (i--)
+        run_histogram[i] = 0;
 
     printf("reading %d file descriptors..\n", sirbuf->sszfdn);
     /* should this use ROOTFDN ? */
@@ -509,13 +553,20 @@ short phase_a;
     }
 
     /* clear screen and show map */
-    printf("\033[1H\033[J\033[%dH", mapsize / 480 + 1);
+    numcylinders = (mapsize * 8) / BLOCKSPERCYLINDER;
+    printf("\033[1H\033[J\033[%dH", 1 + ((numcylinders / 160) * 4) / 15  + 1);
     printf("%d files,  %d directories\n", regfdns, dirfdns);
-    printf("%d free Fdns\n", freefdns);
+    printf("%d free Fdns  %d cylinders\n", freefdns, numcylinders);
 
-    for (i = 0; i < mapsize; i++)
+    printf("runs: ");
+    for (i = 1; i < MAX_HISTOGRAM; i++)
+        printf("%3d ", run_histogram[i]);
+    printf("\n");
+
+    for (i = 0; i < mapsize * 8; i += BLOCKSPERCYLINDER)
     {
-        drawblock(i, mapbuf[i]);
+        /* convert block_id to cylinder_id */
+        drawcylinder(i / BLOCKSPERCYLINDER, checkcylinder(i, BLOCKSPERCYLINDER));
     }
 
 }
@@ -553,6 +604,10 @@ struct inode *fdnptr;
     if(checkrange(blocks[12]))
         if(do_tind(blocks[12]))
             return(1);
+
+    /* histogram */
+    if (run_cnt < MAX_HISTOGRAM)
+        run_histogram[run_cnt]++;
 
     /* show stats of contiguous runs */
     if (0)
