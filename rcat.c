@@ -807,6 +807,7 @@ set missing;
 				}
 
 				write(out_fd, &sym, sizeof(symbolheader));
+				len += sizeof(symbolheader);
 				if (sym.len)
 					write(out_fd, sdata+sizeof(sym), ntohs(sym.len));
 				len += ntohs(sym.len);
