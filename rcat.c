@@ -476,7 +476,7 @@ set missing;
 					  fprintf(stderr, "too many inputs\n");
 					  exit(2);	
 					}
-					if (verbose==2) fprintf(stderr, "added %8.8x %8.8lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
+					if (verbose==2) fprintf(stderr, "added text:%8.8x data:%8.8lx %s\n", ntohl(header.textsize), ntohl(header.datasize), unitname);
 				}
 				close(fd);
 			}
@@ -580,10 +580,12 @@ set missing;
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		lseek(out_fd, ntohl(header->textsize), SEEK_CUR);
+		int rounding = ((ntohl(header->textsize) + 3) & -4) - ntohl(header->textsize);
+		
+		lseek(out_fd, ntohl(header->textsize) + rounding, SEEK_CUR);
 		inputs[i].textoff = ntohl(ph.textsize);
 	
-		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize));
+		ph.textsize = htonl(ntohl(ph.textsize) + ntohl(header->textsize) + rounding);
 	}
 	
 	/* concat data sections (and bss) */
@@ -691,6 +693,7 @@ set missing;
 			int kind = ntohs(rr->kind);
 			int *addend;
 
+			/* referencing which segment? */
 			int addendoffset = 0;
 			switch(kind & 0xf0)
 			{
@@ -818,7 +821,7 @@ set missing;
 	}
 	ph.symbolsize = htonl(len);
 	fprintf(stderr, "%d symbols ", n);
-	if (missing.lastentry)
+	if (missing.lastentry > 0)
 		fprintf(stderr, "*** %d missing symbols (unresolved)", missing.lastentry);
 	fprintf(stderr,"\n");
     
@@ -836,8 +839,14 @@ set missing;
 	for(i=0; i<inputcount; i++)
 	{
 		PH *header = (PH *)inputs[i].content;
-		write(out_fd, inputs[i].content + sizeof(PH), ntohl(header->textsize));
+		int rounding = ((ntohl(header->textsize) + 3) & -4) - ntohl(header->textsize);
+
+		write(out_fd, inputs[i].content + sizeof(PH), ntohl(header->textsize) + rounding);
 	}
+	
+	/* account for rounding */
+	lseek(out_fd, sizeof(PH) + ntohl(ph.datastart), SEEK_SET);
+
 	/* write edited datas (accounting for rounding) */
 	for(i=0; i<inputcount; i++)
 	{
