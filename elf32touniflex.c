@@ -92,6 +92,10 @@ int isdata(Elf32_Shdr *sect)
 
 	return !(sect->sh_flags & htonl(SHF_EXECINSTR)) && (sect->sh_flags & htonl(SHF_ALLOC));
 }
+int isrodata(Elf32_Shdr *sect)
+{
+	return isdata(sect) && !(sect->sh_flags & htonl(SHF_WRITE));
+}
 int isbss(Elf32_Shdr *sect)
 {
 
@@ -627,6 +631,11 @@ int exportlocals = 0;
 			{
 				sym.segment = htons(SEGDATA);
 				typename = "DATA";
+				if (isrodata(&sect[targetsection]))
+				{
+					// rodata is after data
+					sym.offset = htonl(ntohl(sym.offset) + ntohl(sect[dataindex].sh_size));
+				}
 			}
 			else
 			if (isbss(&sect[targetsection]))
