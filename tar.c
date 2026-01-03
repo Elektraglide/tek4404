@@ -131,12 +131,42 @@ char	*getwd();
 char 	*tar_getcwd();
 
 /* missing or differing functionality in Uniflex */
+#define MKNOD_OWNER 0x0007
+#define MKNOD_OTHER 0x0028
+#define MKNOD_DIR 0x0800
 
 int mkdir(path, perms)
 char *path;
 int perms;
 {
- return mknod(path, perms, 0);	
+	char linkpath[256], linkdest[256];
+	char *pcVar1;
+	
+	mknod(path, MKNOD_DIR + MKNOD_OTHER + MKNOD_OWNER, 0);
+	chown(path, 0);
+	chmod(path, perms);
+
+	/* from Ghidra decompile of Tek4404 crdir command */
+	strcpy(linkpath,path);
+	strcat(linkpath,"/.");
+	link(path,linkpath);
+	chown(linkpath, 0);
+	
+	if (path[0] == '/') {
+		strcpy(linkpath,path);
+	}
+	else {
+		strcpy(linkpath,"./");
+		strcat(linkpath,path);
+	}
+	pcVar1 = (char *)strchr(linkpath, '/');
+	if (linkpath == pcVar1) {
+		pcVar1 = pcVar1 + 1;
+	}
+	*pcVar1 = '\0';
+	strcpy(linkdest,path);
+	strcat(linkdest,"/..");
+	link(linkpath,linkdest);
 }
 
 int utimes(path, ptime)
