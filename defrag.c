@@ -1,10 +1,5 @@
-
-#info 68xxx UniFLEX (R) blockcheck
-#info Version 2.07:0; Released October 1, 1985
-#info Copyright (c) 1983, 1984, 1985 by
-#info Technical Systems Consultants, Inc.
-#info All rights reserved.
-#tstmp
+#define long int
+#pragma pack(push, 1)
 
 #include <sys/stat.h>
 #include <sys/signal.h>
@@ -13,6 +8,74 @@
 #include <sys/modes.h>
 #include <sys/sir.h>
 #include <sys/fdn.h>
+
+#ifndef __clang__
+#info 68xxx UniFLEX (R) blockcheck
+#info Version 2.07:0; Released October 1, 1985
+#info Copyright (c) 1983, 1984, 1985 by
+#info Technical Systems Consultants, Inc.
+#info All rights reserved.
+#tstmp
+#define ntohl(A) (A)
+#define ntohs(A) (A)
+#define htonl(A) (A)
+#define htons(A) (A)
+#else
+extern int open();
+extern int read();
+extern int write();
+extern long lseek();
+extern int close();
+extern void exit();
+extern int fstat();
+extern char *malloc();
+extern void free();
+
+#define ntohs(A) ((A>>8) | (A<<8))
+int ntohl(int val)
+{
+    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF ); 
+    return (val << 16) | ((val >> 16) & 0xFFFF);
+}
+
+void _l2tos(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		sindblk += 2;
+	}
+}
+
+void l3tol(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[2];
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		*blocks++ = 0;
+		sindblk += 3;
+	}
+}
+
+void _l4tol(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[3];
+		*blocks++ = sindblk[2];
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		sindblk += 4;
+	}
+}
+
+#endif
 
 typedef unsigned short USHORT;
 #define ERR (-1)
@@ -95,6 +158,8 @@ int numcandidates;
 struct inode candidates[MAX_CANDIDATES];
 
 
+char *devname;
+short fd_sir;
 char sir_area[512];  /* buffer area for SIR */
 struct sir *sirbuf;
 
@@ -111,17 +176,16 @@ char *fbptr;      /* new free block pointer */
 short fbbit;      /* new free block bit value */
 long fbblock;     /* new free block address */
 
-char *devname;
-short fd_sir;
-short filetype;
 long freefdns, usedfdns, blkfdns;
 long chrfdns, dirfdns, regfdns;
 long regblks, dirblks, mapblks;
 long freeblks,oorfbks,dupfbks;
 long dupblks, oorblks, missbks;
+
 long maxvld, minvld, available, *lptr;
 long lastblk, blkcount, block_filesize;
-/*#* following should be unsigned short *#*/
+short sszfdn, filetype;
+
 unsigned short fdnno;
 
 #ifdef DEBUG
@@ -140,167 +204,180 @@ char odtdut[] = "Output directed to device under test.\n";
 
 char* framebuffer;
 
-main(argc,argv)
-int argc;
-char *argv[];
 
+/***************************************************************/
+
+
+void clear_map()
 {
-   long freeblk, volsize, lseek(), l3tol();
-   long fdnsize, swapbeg;
-   long scratch;
-   USHORT swapsize;
-   char *rootname;
-   struct stat statbuf;
-   short rwmode, i, j;
-   USHORT devno, sodevno;
+    register int* iptr;
+    register short i = mapsize / 4;
 
-   if (argc > 1)
-    devname = argv[1];
-
-   sync();        /* update all buffers to disk */
-
-   rwmode = (1) ? O_RDONLY : O_RDWR; 
-   if (((fd_sir=open(devname,rwmode))==ERR)||(fstat(fd_sir,&statbuf)==ERR)) {
-       printf("Can't open device.\n");
-       exit(255);
-   }
-   if ((statbuf.st_mode & S_IFMT) != S_IFBLK) {
-      printf("Not a block device.\n");
-      exit(255);
-   }
-   if(rdblk(SIRADR,sir_area) == ERR) {
-       printf("Can't read System Information Record.\n");
-       exit(255);
-   }
-   sirbuf = sir_area;
-
-   devno = statbuf.st_size & 0xffff;
-
-   /* check stdout not using disk */
-   if(fstat(STD_OUT,&statbuf) == ERR) {
-       fprintf(stderr,"Can't stat std. output.\n");
-       exit(255);
-   }
-   sodevno = statbuf.st_dev;
-   if((statbuf.st_mode & S_IFMT) == S_IFCHR)
-      sodevno = 0xffff; /* any character device is OK */
-   if((statbuf.st_mode & S_IFMT) == S_IFBLK)
-       sodevno = statbuf.st_size & 0xffff;
-
-   if(devno == sodevno) {
-       fprintf(stderr,odtdut);
-       exit(255);
-   }
-
-   /* sanity check disk config */
-   l3tol(&maxvld,sirbuf->ssizfr,1);
-   minvld = sirbuf->sszfdn + 2;
-   available = maxvld-minvld+1L;
-   if(available > MAXBLKS-4L) {
-      printf("Disk too large or bad size in SIR.\n");
-      exit(255);
-   }
-
-   fdnsize = (long)(sirbuf->sszfdn) & 0x0ffffL;
-   if((fdnsize >= maxvld-2L) || (fdnsize > 8192L)) {
-       printf("SIR fdn block count error: %ld\n",fdnsize);
-       exit(255);
-   }
-
-   v_opt = 1;
-   modified = 0;
-   must_newfree = must_sir = 0;
-
-   /* get swap space info */
-   l3tol(&swapbeg, sirbuf->sswpbg, 1);
-   if(swapbeg != 0)
-   {
-        _l2tos(&swapsize, sirbuf->sswpsz, 1);
-        lastblk = swapbeg + swapsize;
-
-        if (maxvld >= swapbeg) {
-            if(v_opt) printf("Data overlaps swap space.\n");
-            exit(255);
-        }
-        if(scratch = swapbeg-maxvld-1)
-            printf("Warning: %ld unassigned blocks between data and swap space.\n",scratch);
-   }
-   else 
-   {
-        lastblk = maxvld +1L;
-   }
-
-   /* initialize memory buffer pointer to block map (1-bit per block) */
-   mapsize = lastblk / 8;
-   mapbuf = (char*)malloc(mapsize);
-
-   framebuffer = phys(1);
-
-    do_fdns(0); 
-
-#if 0
-    fdncheck();
-
-    free_check();
+    iptr = (int*)mapbuf;
+    while (i--) *iptr++ = 0;
+}
 
 
-    printf("\n\nDisk Summary\n\nFiles:\n");
+setbit(blkadr)
+long blkadr;
+{
+    char *bytptr;
+    long blkoff;
+    short bitmsk;
 
-    printf("%8ld total files:\n",regfdns+dirfdns+blkfdns+chrfdns);
-    printf("%8ld regular files\n",regfdns);
+    blkoff = blkadr - minvld;
+    bytptr = mapbuf+(blkoff>>3);
+    bitmsk = (0x80)>>((int)blkoff & 0x7);
+    if((*bytptr & bitmsk) == 0) {
+   *bytptr |= bitmsk;
+   return(0);
+    } else {
+   return(1);
+    }
+}
 
-    printf("%8ld directories\n",dirfdns);
-    printf("%8ld block device files\n",blkfdns);
-    printf("%8ld character device files\n",chrfdns);
 
-    printf("\nBlock usage:\n");
-    printf("%8d blocks reserved for swap space\n",swapsize);
+clrbit(blkadr)
+long blkadr;
+{
+    char *bytptr;
+    long blkoff;
+    short bitmsk;
 
-    printf("%8ld unused blocks\n",freeblks);
-    printf("%8ld total used blocks:\n",regblks+dirblks+mapblks+sirbuf->sszfdn+2);
-    printf("%8ld regular blocks\n",regblks);
-    printf("%8ld directory blocks\n",dirblks);
-    printf("%8ld blocks used for file mapping\n",mapblks);
-    printf("%8u fdn blocks\n",sirbuf->sszfdn);
-    printf("%8d system blocks\n",2);
-
-    printf("\nFdn usage:\n");
-    printf("%8ld busy fdns\n",usedfdns);
-    printf("%8ld free fdns\n",freefdns);
-
-#endif
-
-    free(mapbuf);
-
-    close(fd_sir);
-
+    blkoff = blkadr - minvld;
+    bytptr = mapbuf+(blkoff>>3);
+    bitmsk = (0x80)>>((int)blkoff & 0x7);
+    if((*bytptr & bitmsk)) {
+   *bytptr &= ~bitmsk;
+   return(1);
+    } else {
+   return(0);
+    }
 }
 
 /***************************************************************/
 
-free_check()
+void set_dup(blkadr)
+long blkadr;
 {
-    short no_rebuild;
-    char *badfree;
-
-    no_rebuild = 0;
-    badfree = "Free list bad.\n";
-    if(v_opt) printf("*** Phase 5 - Check free list\n");
-    if(must_newfree) {
-        do_fdns(2);
-        fxdbcnt();
+    ++dupblks;
+    if(dups_cnt == MAX_DUPS) 
+    {
+       printf("Too many duplicate blocks.\n");
+       return;
     }
 
-    if(must_newfree) {
-        if(v_opt) printf("%s",badfree);
-    }
-    do_free();    /* check volume free list */
-    chk_miss();      /* look for missing */
+    dups[dups_cnt].dup_b = blkadr;
+    dups[dups_cnt++].dup_f = fdnno;
 }
 
 
+void set_oor()
+{
+    ++oorblks;
+   printf("Out-of-range block in fdn %u.\n",fdnno);
+    if(oors_cnt == MAX_OORS) 
+    {
+       printf("Too many out-of-range blocks.\n");
+       return;
+    }
+    oors[oors_cnt++] = fdnno;
+}
 
-do_free()
+
+/***************************************************************/
+
+void contin(badblk)
+long badblk;
+{
+    if ((badblk > 2) && (badblk < lastblk))
+    {
+        printf("Add to \".badblocks\"\n");
+    }
+}
+
+
+int rdblk(bkadr,buffer)
+long bkadr;
+char *buffer;
+{
+    if(lseek(fd_sir,bkadr<<9L,0) == bkadr<<9L)
+    {
+			 if (read(fd_sir,buffer,512) == 512)
+			 {
+					return 0;
+			 }
+		}
+
+	 printf(errrdgb,bkadr);
+	 contin(bkadr);
+	 return(ERR);
+}
+
+
+wtblk(bkadr,buffer)
+long bkadr;
+char *buffer;
+{
+    long lseek();
+
+    modified = 1;
+    if((lseek(fd_sir,bkadr<<9L,0) != bkadr<<9L) || (write(fd_sir,buffer,512) != 512)) 
+    {
+       printf("Error writing block %ld.\n",bkadr);
+       contin(bkadr);
+       return(ERR);
+    } 
+    else 
+    {
+        return(0);
+    }
+}
+
+
+/***************************************************************/
+void fxdbcnt()
+{
+    short i, j, k;
+
+    for(i=0; i<dups_cnt; ++i) {
+        k = 0;
+        for(j=i-1; j>=0; --j)
+            if(dups[i].dup_b == dups[j].dup_b) ++k;
+        if(k==0) ++dupblks;
+    }
+}
+
+
+void cnt_miss(cbits,twobyte)
+short cbits;
+short twobyte;
+{
+    short bit;
+
+    for(bit=0; bit<cbits; ++bit) {
+        if((twobyte & (1<<(15-bit)))==0) ++missbks;
+    }
+}
+
+void chk_miss()
+{
+    short *endptr, *iptr, xtra;
+
+    xtra = available%16L;
+    endptr = mapbuf+((available-xtra)>>3L);
+    for(iptr=mapbuf; iptr<endptr; ++iptr) {
+        if(*iptr != (~0)) {
+            cnt_miss(16,*iptr);
+        }
+    }
+    if(xtra) {
+        cnt_miss(xtra,*endptr);
+    }
+}
+
+
+void do_free()
 {
     char buffer[512];
     char *bptr;
@@ -330,49 +407,16 @@ do_free()
     }
 }
 
-long do_frbk(count,blkptr)
-short count;
-char *blkptr;
-{
-    long blkadrs[FBPER];
-
-    l3tol(blkadrs,blkptr,count);
-    for(--count ; count>=0; --count) {
-        if((blkadrs[count]>=minvld)&&(blkadrs[count]<=maxvld)) {
-            ++freeblks;
-            if(setbit(blkadrs[count])) {
-                if(v_opt)
-                    printf("Block %ld duplicated in free list.\n",blkadrs[count]);
-                ++dupfbks;
-            }
-        }
-        else {
-            if(blkadrs[count] || count) ++oorfbks;
-        }
-    }
-    return(blkadrs[0]);
-}
 
 
-reset()
+
+void reset()
 {
     short i;
 
     udupcnt = 0;
     for(i=dups_cnt-1; i>=0; --i) {
         if(clrbit(dups[i].dup_b)) ++udupcnt;
-    }
-}
-
-fxdbcnt()
-{
-    short i, j, k;
-
-    for(i=0; i<dups_cnt; ++i) {
-        k = 0;
-        for(j=i-1; j>=0; --j)
-            if(dups[i].dup_b == dups[j].dup_b) ++k;
-        if(k==0) ++dupblks;
     }
 }
 
@@ -515,8 +559,212 @@ int cid,val;
 }
 
 
+/***************************************************************/
 
-do_fdns(phase_a)
+checkrange(blkadr)
+long blkadr;
+{
+    if(blkadr) 
+    {
+       if(blkadr<=maxvld)
+           return(1);
+       else
+          set_oor();
+    }
+
+    return(0);
+}
+
+void mapblock(blkadr)
+long blkadr;
+{
+    register short i,cid;
+
+    ++blkcount;
+    if((blkadr<minvld) || (blkadr>maxvld)) {
+        if(badblocks && (fdnno == BBFDN)) {
+            if((blkadr<3) || (blkadr>=lastblk)) set_oor();
+            return;
+        } else {
+            set_oor();
+            return;
+        }
+    }
+
+    if (mappingmode == 0)
+    {
+        if (filetype == S_IFDIR) ++dirblks; else ++regblks;
+        if (setbit(blkadr))
+            set_dup(blkadr);
+    }
+
+    /* track block use */
+    if (currfdlayout.numblocks < 16384)
+    {
+        currfdlayout.blocks[currfdlayout.numblocks++] = blkadr;
+    }
+
+    /* track used CYLINDERS */
+    cid = blkadr / BLOCKSPERCYLINDER;
+    i = currfdlayout.numcylinders;
+    while (i--)
+    {
+        /* already in list */
+        if (currfdlayout.cid[i] == cid)
+            return;
+    }
+
+    /* add it if space */
+    if (currfdlayout.numcylinders < MAX_CYLINDERSET)
+    {
+        currfdlayout.cid[currfdlayout.numcylinders++] = cid;
+    }
+}
+
+
+mapindirectblock(blkadr)
+long blkadr;
+{
+    if ((blkadr < minvld) || (blkadr > maxvld)) {
+        set_oor();
+        return(ERR);
+    }
+    if (mappingmode == 0)
+    {
+        ++mapblks;
+        if (setbit(blkadr))
+            set_dup(blkadr);
+    }
+
+   return(0);
+}
+
+do_sind(blkadr)
+long blkadr;
+{
+    char sindblk[512];
+    long blocks[SMSZ];
+    short i;
+
+    /* failed to read */
+    if(mapindirectblock(blkadr))
+        return(1);
+
+    if(rdblk(blkadr,sindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
+    }
+
+    l3tol(blocks,sindblk,SMSZ);
+    for(i=0; i<SMSZ; ++i) 
+    {
+       if(blocks[i])
+           mapblock(blocks[i]);
+    }
+
+    return(0);
+}
+
+do_dind(blkadr)
+long blkadr;
+{
+    char dindblk[512];
+    long blocks[SMSZ];
+    short i;
+
+    /* failed to read */
+    if(mapindirectblock(blkadr))
+        return(1);
+
+    if(rdblk(blkadr,dindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
+    }
+
+    l3tol(blocks,dindblk,SMSZ);
+    for(i=0; i<SMSZ; ++i) 
+    {
+        if (checkrange(blocks[i]))
+        {
+            if (do_sind(blocks[i]))
+                return(1);
+        }
+    }
+
+    return(0);
+}
+
+do_tind(blkadr)
+long blkadr;
+{
+    char tindblk[512];
+    long block;
+    short i;
+
+    /* failed to read */
+    if(mapindirectblock(blkadr))
+       return(1);
+
+    if(rdblk(blkadr,tindblk)==ERR) 
+    {
+       printf(errinmap,fdnno);
+       return(0);
+    }
+
+    for(i=0; i<SMSZ; ++i) 
+    {
+       l3tol(&block,tindblk+(3*i),1);
+       if (checkrange(block))
+       {
+           if (do_dind(block))
+               return(1);
+       }
+    }
+
+    return(0);
+}
+
+
+mark_in_map(fdnptr)
+struct inode *fdnptr;
+{
+    long blocks[13];
+    register int i;
+
+    blkcount = 0;
+    l3tol(blocks,fdnptr->fd_blk,13);
+
+    /* track which cylinders are used */
+    currfdlayout.numcylinders = 0;
+    currfdlayout.numblocks = 0;
+
+    /* 10 direct blocks */
+    for(i=0; i<10; ++i) 
+        if(blocks[i]) mapblock(blocks[i]);
+
+    /* single indirection */
+    if(checkrange(blocks[10]))
+        if(do_sind(blocks[10]))
+            return(1);
+
+    /* double indirection */
+    if(checkrange(blocks[11]))
+        if(do_dind(blocks[11]))
+            return(1);
+
+    /* triple indirection */
+    if(checkrange(blocks[12]))
+        if(do_tind(blocks[12]))
+            return(1);
+
+    return(0);
+}
+
+
+
+void do_fdns(phase_a)
 short phase_a;
 {
     char fdnbuf[512];
@@ -543,14 +791,14 @@ short phase_a;
     mappingmode = 0;
     clear_map();
 
-    printf("reading %d file descriptors blocks..\n", sirbuf->sszfdn);
+    printf("reading %d file descriptors blocks for disk: %s\n", sszfdn,sirbuf->sfname);
 
     /* gather inode of each candidate */
     numcandidates = 0;
 
     /* should this use ROOTFDN ? */
     fdnno = 1;
-    for (fdnbno = 1; fdnbno <= sirbuf->sszfdn; ++fdnbno)
+    for (fdnbno = 1; fdnbno <= sszfdn; ++fdnbno)
     {
         /* read a block of 8 inodes */
         if (rdblk((long)fdnbno + 1L, fdnbuf) == ERR)
@@ -756,358 +1004,55 @@ short phase_a;
 
 }
 
-mark_in_map(fdnptr)
-struct inode *fdnptr;
+void free_check()
 {
-    long blocks[13];
-    register int i;
+    short no_rebuild;
+    char *badfree;
 
-    blkcount = 0;
-    l3tol(blocks,fdnptr->fd_blk,13);
+    no_rebuild = 0;
+    badfree = "Free list bad.\n";
+    if(v_opt) printf("*** Phase 5 - Check free list\n");
+    if(must_newfree) {
+        do_fdns(2);
+        fxdbcnt();
+    }
 
-    /* track which cylinders are used */
-    currfdlayout.numcylinders = 0;
-    currfdlayout.numblocks = 0;
-
-    /* 10 direct blocks */
-    for(i=0; i<10; ++i) 
-        if(blocks[i]) mapblock(blocks[i]);
-
-    /* single indirection */
-    if(checkrange(blocks[10]))
-        if(do_sind(blocks[10]))
-            return(1);
-
-    /* double indirection */
-    if(checkrange(blocks[11]))
-        if(do_dind(blocks[11]))
-            return(1);
-
-    /* triple indirection */
-    if(checkrange(blocks[12]))
-        if(do_tind(blocks[12]))
-            return(1);
-
-    return(0);
+    if(must_newfree) {
+        if(v_opt) printf("%s",badfree);
+    }
+    do_free();    /* check volume free list */
+    chk_miss();      /* look for missing */
 }
 
-do_sind(blkadr)
-long blkadr;
+
+long do_frbk(count,blkptr)
+short count;
+char *blkptr;
 {
-    char sindblk[512];
-    long blocks[SMSZ];
-    short i;
+    long blkadrs[FBPER];
 
-    /* failed to read */
-    if(mapindirectblock(blkadr))
-        return(1);
-
-    if(rdblk(blkadr,sindblk)==ERR) 
-    {
-       printf(errinmap,fdnno);
-       return(0);
-    }
-
-    l3tol(blocks,sindblk,SMSZ);
-    for(i=0; i<SMSZ; ++i) 
-    {
-       if(blocks[i])
-           mapblock(blocks[i]);
-    }
-
-    return(0);
-}
-
-do_dind(blkadr)
-long blkadr;
-{
-    char dindblk[512];
-    long blocks[SMSZ];
-    short i;
-
-    /* failed to read */
-    if(mapindirectblock(blkadr))
-        return(1);
-
-    if(rdblk(blkadr,dindblk)==ERR) 
-    {
-       printf(errinmap,fdnno);
-       return(0);
-    }
-
-    l3tol(blocks,dindblk,SMSZ);
-    for(i=0; i<SMSZ; ++i) 
-    {
-        if (checkrange(blocks[i]))
-        {
-            if (do_sind(blocks[i]))
-                return(1);
+    l3tol(blkadrs,blkptr,count);
+    for(--count ; count>=0; --count) {
+        if((blkadrs[count]>=minvld)&&(blkadrs[count]<=maxvld)) {
+            ++freeblks;
+            if(setbit(blkadrs[count])) {
+                if(v_opt)
+                    printf("Block %ld duplicated in free list.\n",blkadrs[count]);
+                ++dupfbks;
+            }
+        }
+        else {
+            if(blkadrs[count] || count) ++oorfbks;
         }
     }
-
-    return(0);
-}
-
-do_tind(blkadr)
-long blkadr;
-{
-    char tindblk[512];
-    long block;
-    short i;
-
-    /* failed to read */
-    if(mapindirectblock(blkadr))
-       return(1);
-
-    if(rdblk(blkadr,tindblk)==ERR) 
-    {
-       printf(errinmap,fdnno);
-       return(0);
-    }
-
-    for(i=0; i<SMSZ; ++i) 
-    {
-       l3tol(&block,tindblk+(3*i),1);
-       if (checkrange(block))
-       {
-           if (do_dind(block))
-               return(1);
-       }
-    }
-
-    return(0);
+    return(blkadrs[0]);
 }
 
 
 /***************************************************************/
 
-chk_miss()
-{
-    short *endptr, *iptr, xtra;
 
-    xtra = available%16L;
-    endptr = mapbuf+((available-xtra)>>3L);
-    for(iptr=mapbuf; iptr<endptr; ++iptr) {
-        if(*iptr != (~0)) {
-            cnt_miss(16,*iptr);
-        }
-    }
-    if(xtra) {
-        cnt_miss(xtra,*endptr);
-    }
-}
-
-
-cnt_miss(cbits,twobyte)
-short cbits;
-short twobyte;
-{
-    short bit;
-
-    for(bit=0; bit<cbits; ++bit) {
-        if((twobyte & (1<<(15-bit)))==0) ++missbks;
-    }
-}
-
-checkrange(blkadr)
-long blkadr;
-{
-    if(blkadr) 
-    {
-       if(blkadr<=maxvld)
-           return(1);
-       else
-          set_oor();
-    }
-
-    return(0);
-}
-
-void mapblock(blkadr)
-long blkadr;
-{
-    register short i,cid;
-
-    ++blkcount;
-    if((blkadr<minvld) || (blkadr>maxvld)) {
-        if(badblocks && (fdnno == BBFDN)) {
-            if((blkadr<3) || (blkadr>=lastblk)) set_oor();
-            return;
-        } else {
-            set_oor();
-            return;
-        }
-    }
-
-    if (mappingmode == 0)
-    {
-        if (filetype == S_IFDIR) ++dirblks; else ++regblks;
-        if (setbit(blkadr))
-            set_dup(blkadr);
-    }
-
-    /* track block use */
-    if (currfdlayout.numblocks < 16384)
-    {
-        currfdlayout.blocks[currfdlayout.numblocks++] = blkadr;
-    }
-
-    /* track used CYLINDERS */
-    cid = blkadr / BLOCKSPERCYLINDER;
-    i = currfdlayout.numcylinders;
-    while (i--)
-    {
-        /* already in list */
-        if (currfdlayout.cid[i] == cid)
-            return;
-    }
-
-    /* add it if space */
-    if (currfdlayout.numcylinders < MAX_CYLINDERSET)
-    {
-        currfdlayout.cid[currfdlayout.numcylinders++] = cid;
-    }
-}
-
-
-mapindirectblock(blkadr)
-long blkadr;
-{
-    if ((blkadr < minvld) || (blkadr > maxvld)) {
-        set_oor();
-        return(ERR);
-    }
-    if (mappingmode == 0)
-    {
-        ++mapblks;
-        if (setbit(blkadr))
-            set_dup(blkadr);
-    }
-
-   return(0);
-}
-
-/***************************************************************/
-
-clear_map()
-{
-    register int* iptr;
-    register short i = mapsize / 4;
-
-    iptr = (int*)mapbuf;
-    while (i--) *iptr++ = 0;
-}
-
-
-setbit(blkadr)
-long blkadr;
-{
-    char *bytptr;
-    long blkoff;
-    short bitmsk;
-
-    blkoff = blkadr - minvld;
-    bytptr = mapbuf+(blkoff>>3);
-    bitmsk = (0x80)>>((int)blkoff & 0x7);
-    if((*bytptr & bitmsk) == 0) {
-   *bytptr |= bitmsk;
-   return(0);
-    } else {
-   return(1);
-    }
-}
-
-
-clrbit(blkadr)
-long blkadr;
-{
-    char *bytptr;
-    long blkoff;
-    short bitmsk;
-
-    blkoff = blkadr - minvld;
-    bytptr = mapbuf+(blkoff>>3);
-    bitmsk = (0x80)>>((int)blkoff & 0x7);
-    if((*bytptr & bitmsk)) {
-   *bytptr &= ~bitmsk;
-   return(1);
-    } else {
-   return(0);
-    }
-}
-
-/***************************************************************/
-
-set_dup(blkadr)
-long blkadr;
-{
-    ++dupblks;
-    if(dups_cnt == MAX_DUPS) 
-    {
-       printf("Too many duplicate blocks.\n");
-       return;
-    }
-
-    dups[dups_cnt].dup_b = blkadr;
-    dups[dups_cnt++].dup_f = fdnno;
-}
-
-
-set_oor()
-{
-    ++oorblks;
-   printf("Out-of-range block in fdn %u.\n",fdnno);
-    if(oors_cnt == MAX_OORS) 
-    {
-       printf("Too many out-of-range blocks.\n");
-       return;
-    }
-    oors[oors_cnt++] = fdnno;
-}
-
-
-/***************************************************************/
-
-rdblk(bkadr,buffer)
-long bkadr;
-char *buffer;
-{
-    long lseek();
-
-    if((lseek(fd_sir,bkadr<<9L,0) != bkadr<<9L) || (read(fd_sir,buffer,512) != 512)) 
-    {
-       printf(errrdgb,bkadr);
-       contin(bkadr);
-       return(ERR);
-    } 
-    else 
-    {
-        return(0);
-    }
-}
-
-
-wtblk(bkadr,buffer)
-long bkadr;
-char *buffer;
-{
-    long lseek();
-
-    modified = 1;
-    if((lseek(fd_sir,bkadr<<9L,0) != bkadr<<9L) || (write(fd_sir,buffer,512) != 512)) 
-    {
-       printf("Error writing block %ld.\n",bkadr);
-       contin(bkadr);
-       return(ERR);
-    } 
-    else 
-    {
-        return(0);
-    }
-}
-
-
-rdfdn(fdn,buffer)
+int rdfdn(fdn,buffer)
 USHORT fdn;
 char *buffer;
 {
@@ -1128,18 +1073,7 @@ char *buffer;
 
 
 
-contin(badblk)
-long badblk;
-{
-    if ((badblk > 2) && (badblk < lastblk))
-    {
-        printf("Add to \".badblocks\"\n");
-    }
-}
-
-
-
-init_gfb()
+void init_gfb()
 {
     fbptr = mapbuf+(available>>3);
     fbbit = available & 0x7;
@@ -1194,6 +1128,23 @@ struct mapstr *map_ptr;
   map_ptr->mtype = *(map_ptr->mapb);
   map_ptr->nxtblk = 0;
   return(0);
+}
+
+
+rdmapb(buffer,bkadr)
+char *buffer;
+long bkadr;
+{
+   long lseek();
+
+   if((lseek(fd_sir,bkadr<<9L,0) != bkadr<<9L) || (read(fd_sir,buffer,SMSZ*3) != SMSZ*3))  
+   {
+      printf(errrdgb,bkadr);
+      contin(bkadr);
+      return(ERR);
+   } 
+   else
+      return(0);
 }
 
 
@@ -1257,19 +1208,153 @@ struct mapstr *map_ptr;
 }
 
 
+main(argc,argv)
+int argc;
+char *argv[];
 
-rdmapb(buffer,bkadr)
-char *buffer;
-long bkadr;
 {
-   long lseek();
+   long freeblk, volsize, lseek();
+   long fdnsize, swapbeg;
+   long scratch;
+   USHORT swapsize;
+   char *rootname;
+   struct stat statbuf;
+   short rwmode, i, j;
+   USHORT devno, sodevno;
 
-   if((lseek(fd_sir,bkadr<<9L,0) != bkadr<<9L) || (read(fd_sir,buffer,SMSZ*3) != SMSZ*3))  
+#ifdef __clang__
+#define phys(A)	malloc(128 * 480);
+	devname = "/Users/adambillyard/projects/tek4404/mame/1304_image.raw";
+#else
+   if (argc > 1)
+    devname = argv[1];
+   sync();        /* update all buffers to disk */
+#endif
+
+   rwmode = (1) ? O_RDONLY : O_RDWR;
+   fd_sir = open(devname,rwmode);
+   if (fd_sir == ERR)
+	 {
+       printf("Can't open device.\n");
+       exit(255);
+   }
+#ifndef __clang__
+   fstat(fd_sir,&statbuf);
+   
+   if ((statbuf.st_mode & S_IFMT) != S_IFBLK) {
+      printf("Not a block device.\n");
+      exit(255);
+   }
+#endif
+
+   if(rdblk(SIRADR,sir_area) == ERR) {
+       printf("Can't read System Information Record.\n");
+       exit(255);
+   }
+   sirbuf = sir_area;
+
+#ifndef __clang__
+   devno = statbuf.st_size & 0xffff;
+
+   /* check stdout not using disk */
+   if(fstat(STD_OUT,&statbuf) == ERR) {
+       fprintf(stderr,"Can't stat std. output.\n");
+       exit(255);
+   }
+   sodevno = statbuf.st_dev;
+   if((statbuf.st_mode & S_IFMT) == S_IFCHR)
+      sodevno = 0xffff; /* any character device is OK */
+   if((statbuf.st_mode & S_IFMT) == S_IFBLK)
+       sodevno = statbuf.st_size & 0xffff;
+
+   if(devno == sodevno) {
+       fprintf(stderr,odtdut);
+       exit(255);
+   }
+#endif
+
+   /* sanity check disk config */
+   l3tol(&maxvld,sirbuf->ssizfr,1);
+   _l2tos(&sszfdn, &sirbuf->sszfdn, 1);
+   minvld = sszfdn + 2;
+   available = maxvld-minvld+1L;
+   if(available > MAXBLKS-4L) {
+      printf("Disk too large or bad size in SIR.\n");
+      exit(255);
+   }
+
+   fdnsize = (long)(sszfdn) & 0x0ffffL;
+   if((fdnsize >= maxvld-2L) || (fdnsize > 8192L)) {
+       printf("SIR fdn block count error: %ld\n",fdnsize);
+       exit(255);
+   }
+
+   v_opt = 1;
+   modified = 0;
+   must_newfree = must_sir = 0;
+
+   /* get swap space info */
+   l3tol(&swapbeg, sirbuf->sswpbg, 1);
+   if(swapbeg != 0)
    {
-      printf(errrdgb,bkadr);
-      contin(bkadr);
-      return(ERR);
-   } 
-   else
-      return(0);
+        _l2tos(&swapsize, sirbuf->sswpsz, 1);
+        lastblk = swapbeg + swapsize;
+
+        if (maxvld >= swapbeg) {
+            if(v_opt) printf("Data overlaps swap space.\n");
+            exit(255);
+        }
+        if(scratch = swapbeg-maxvld-1)
+            printf("Warning: %ld unassigned blocks between data and swap space.\n",scratch);
+   }
+   else 
+   {
+        lastblk = maxvld +1L;
+   }
+
+   /* initialize memory buffer pointer to block map (1-bit per block) */
+   mapsize = lastblk / 8;
+   mapbuf = (char*)malloc(mapsize);
+
+   framebuffer = phys(1);
+
+    do_fdns(0); 
+
+#if 0
+    fdncheck();
+
+    free_check();
+
+
+    printf("\n\nDisk Summary\n\nFiles:\n");
+
+    printf("%8ld total files:\n",regfdns+dirfdns+blkfdns+chrfdns);
+    printf("%8ld regular files\n",regfdns);
+
+    printf("%8ld directories\n",dirfdns);
+    printf("%8ld block device files\n",blkfdns);
+    printf("%8ld character device files\n",chrfdns);
+
+    printf("\nBlock usage:\n");
+    printf("%8d blocks reserved for swap space\n",swapsize);
+
+    printf("%8ld unused blocks\n",freeblks);
+    printf("%8ld total used blocks:\n",regblks+dirblks+mapblks+sirbuf->sszfdn+2);
+    printf("%8ld regular blocks\n",regblks);
+    printf("%8ld directory blocks\n",dirblks);
+    printf("%8ld blocks used for file mapping\n",mapblks);
+    printf("%8u fdn blocks\n",sirbuf->sszfdn);
+    printf("%8d system blocks\n",2);
+
+    printf("\nFdn usage:\n");
+    printf("%8ld busy fdns\n",usedfdns);
+    printf("%8ld free fdns\n",freefdns);
+
+#endif
+
+    free(mapbuf);
+
+    close(fd_sir);
+
 }
+
