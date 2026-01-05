@@ -115,19 +115,25 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 
 		// lookup symbol
 		int symtype = ELF32_ST_TYPE(symbols[symindex].st_info);
+		char *symbolname = strtab + ntohl(symbols[symindex].st_name);
 		
 		if (rtype == R_68K_32)
 		{
+			targetsection = ntohs(symbols[symindex].st_shndx);
 			if (symtype == STT_SECTION)
 			{
-				targetsection = ntohs(symbols[symindex].st_shndx);
 
 				// rodata offsets need to be adjusted because they are relative to data (we dont have rodata in Uniflex)
 				if (targetsection == rodataindex)
 				{
 					rarray[i].r_addend = htonl(ntohl(rarray[i].r_addend) + dataoffset);
-					//if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
+					if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
 				}
+			}
+			else
+			if (symtype != STT_NOTYPE)
+			{
+				fprintf(stderr, "symtype: %d, %s\n", symtype, symbolname);
 			}
 		}
 		else
@@ -148,10 +154,14 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 	}
 
 	// map to Uniflex section code
-	int instsegment = 1;
+	int instsegment = 0;
 	if (istext(&sect[relocsection])) instsegment = 1;
 	if (isdata(&sect[relocsection])) instsegment = 2;
-
+	if (instsegment == 0)
+	{
+		fprintf(stderr,"error: unknown segment\n");
+	}
+	
 	for(i=0; i<numrecords; i++)
 	{
 		Elf32_Rela elfreloc;
@@ -176,6 +186,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 		else
 		if (rtype == R_68K_32)
 		{
+			// assume external
 			rel.kind = htons(0x8000 + instsegment);
 
 			if (symtype == STT_SECTION)
@@ -199,6 +210,10 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 					symbolname = "TEXT";
 					rel.kind = htons(0x0040 + instsegment);
 				}
+				else
+				{
+					fprintf(stderr,"failed to classify section %d\n", targetsection);
+				}
 				
 			}
 			else
@@ -219,6 +234,7 @@ int emitreloc(int ph_fd, Elf32_Rela *rarray, int numrecords, Elf32_Sym *symbols,
 
 					if (S != 0)
 					{
+						// means the offset is wrong as we expect 0x0000000 ready to be filled in..
 						fprintf(stderr, "%s: applying addend with non-zero S: %08x\n", basename(outputname), ntohl(S));
 					}
 
@@ -312,6 +328,9 @@ int exportlocals = 0;
 		if (istext(&sect[i]))
 			typename = "TEXT";
 		else
+		if (isrodata(&sect[i]))
+			typename = "RODATA";
+		else
 		if (isdata(&sect[i]))
 			typename = "DATA";
 		else
@@ -398,7 +417,6 @@ int exportlocals = 0;
 	if (reladataindex > 0)
 		n += ntohl(sect[reladataindex].sh_size) / ntohl(sect[reladataindex].sh_entsize);
 
-	// FIXME:  is this even a thing?  or is it .data.rel.ro?  And is it EVER emitted for static linking?
 	int relarodataindex = findnamedsect(".rela.rodata", sect, ntohs(eh.e_shnum));
 	int relarodatasect = relarodataindex > 0 ? ntohl(sect[relarodataindex].sh_info) : -1;
 	if (relarodataindex > 0)
@@ -541,6 +559,11 @@ int exportlocals = 0;
 		dataoffset = 0;
 		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
 		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size)+dataoffset);
+#if 0
+		// FIXME: do we reloc rodata.str with .rela.rodata?
+		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
+		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodatastringindex, ntohl(sect[textindex].sh_size)+dataoffset);
+#endif
 		free(rarray);
 	}
 
