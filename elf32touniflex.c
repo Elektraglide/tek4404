@@ -457,14 +457,6 @@ int exportlocals = 0;
 		i = ntohl(sect[dataindex].sh_size);
 		datacpy(ph_fd, fd, i);
 	}
-	if (rodataindex > 0)
-	{
-		crp = lseek(ph_fd, 0, SEEK_CUR);
-		if (verbose) fprintf(stderr, "rodata section at %08llx\n", crp);
-		lseek(fd, ntohl(sect[rodataindex].sh_offset), SEEK_SET);
-		i = ntohl(sect[rodataindex].sh_size);
-		datacpy(ph_fd, fd, i);
-	}
 	if (rodatastringindex > 0)
 	{
 		crp = lseek(ph_fd, 0, SEEK_CUR);
@@ -473,7 +465,15 @@ int exportlocals = 0;
 		i = ntohl(sect[rodatastringindex].sh_size);
 		datacpy(ph_fd, fd, i);
 	}
-	
+		if (rodataindex > 0)
+	{
+		crp = lseek(ph_fd, 0, SEEK_CUR);
+		if (verbose) fprintf(stderr, "rodata section at %08llx\n", crp);
+		lseek(fd, ntohl(sect[rodataindex].sh_offset), SEEK_SET);
+		i = ntohl(sect[rodataindex].sh_size);
+		datacpy(ph_fd, fd, i);
+	}
+
 	// we need all symbols to index into
 	lseek(fd, ntohl(sect[symindex].sh_offset), SEEK_SET);
 	Elf32_Sym *symbols = (Elf32_Sym *)malloc(ntohl(sect[symindex].sh_size));
