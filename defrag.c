@@ -153,7 +153,7 @@ struct fdlayout {
 
 struct fdlayout currfdlayout;
 
-#define MAX_CANDIDATES 256
+#define MAX_CANDIDATES 4096
 int numcandidates;
 struct inode candidates[MAX_CANDIDATES];
 
@@ -183,7 +183,7 @@ long freeblks,oorfbks,dupfbks;
 long dupblks, oorblks, missbks;
 
 long maxvld, minvld, available, *lptr;
-long lastblk, blkcount, block_filesize;
+long lastblk, blkcount;
 short sszfdn, filetype;
 
 unsigned short fdnno;
@@ -204,7 +204,75 @@ char odtdut[] = "Output directed to device under test.\n";
 
 char* framebuffer;
 
+struct bmpheader {
 
+  short bfType;
+  int bfSize;
+  short  bfReserved1;
+  short  bfReserved2;
+  int bfOffBits;
+
+  int biSize;
+  int  biWidth;
+  int  biHeight;
+  short  biPlanes;
+  short  biBitCount;
+  int biCompression;
+  int biSizeImage;
+  int  biXPelsPerMeter;
+  int  biYPelsPerMeter;
+  int biClrUsed;
+  int biClrImportant;
+
+  int palette[2];
+};
+
+#define STRIDE 1024/8
+void dumpframebuffer()
+{
+struct bmpheader header;
+FILE *fp;
+FILE *output;
+char *fb;
+int i,x,y;
+int width = 640;
+int height = 480;
+
+  output = fopen("/Users/adambillyard/defrag.bmp", "w");
+
+  /* write an image header */		
+  header.bfType = (0x4d42);
+  header.bfSize = (14+40+2*4+(width/8)*height);
+  header. bfReserved1 = 0;
+  header. bfReserved2 = 0;
+  header.bfOffBits = (14 + 40 );
+
+  header.biSize = (40);
+  header.biWidth = (width);
+  header.biHeight = (-height);	/* flipped */
+  header.biPlanes = (1);
+  header.biBitCount = (1);
+  header.biCompression = 0;
+  header.biSizeImage = 0;
+  header.biXPelsPerMeter = 0;
+  header.biYPelsPerMeter = 0;
+
+  header.biClrUsed = (2);
+  header.biClrImportant = 0;
+  /* must use palette */
+  header.palette[0] = 0xffffffff;	/* white bg */
+  header.palette[1] = 0xff000000;	/* black fg */
+  fwrite(&header, sizeof(header), 1, output);
+
+  fb = framebuffer;
+  for (y=0; y<height; y++)
+  {
+    fwrite(fb, width/8, 1, output);
+    fb += STRIDE;
+  }
+  
+  fclose(output);
+}
 /***************************************************************/
 
 
@@ -424,7 +492,7 @@ int findcontiguous(blockcount)
 int blockcount;
 {
     char* bytptr, *bytend;
-    short i,j;
+    short j;
     short numblock8 = (blockcount + 7) >> 3;
     int newaddr = 0;
 
@@ -444,11 +512,14 @@ int blockcount;
         }
         if (j == -1)
         {
-            newaddr = (bytptr - mapbuf) * 8;
+					unsigned short i;
+					
+						/* NB offset map 'address' to first valid block minvld */
+            newaddr = minvld + (bytptr - mapbuf) * 8;
 
             /* can we pack to last alocation? */
             i = bytptr[j];
-            while ((i & 1) == 0)
+            while (i && (i & 1) == 0)
             {
                 newaddr--;
                 i >>= 1;
@@ -498,8 +569,11 @@ int val;
 {
     unsigned char* dst;
     unsigned short abit;
-    int y = blkaddr / 640;
-    int x = blkaddr % 640;
+    int x,y;
+
+		blkaddr -= minvld;
+    y = blkaddr / 640;
+    x = blkaddr % 640;
 
     y += 100;
     dst = framebuffer + (y * 128);
@@ -517,6 +591,9 @@ int cid,val;
     unsigned char* dst;
     int y = cid / 80;
     int x = cid % 80;
+
+		if (y > 12)
+			printf("y = %d\n", y);
 
     dst = framebuffer + (y * 8 * 128) + x;
     if (x > 79)
@@ -596,6 +673,10 @@ long blkadr;
         if (filetype == S_IFDIR) ++dirblks; else ++regblks;
         if (setbit(blkadr))
             set_dup(blkadr);
+            
+            
+				drawmap(blkadr, 1);
+				dumpframebuffer();
     }
 
     /* track block use */
@@ -814,7 +895,6 @@ short phase_a;
         {
             /* cache some info of current FD */
             _l4tol(&real_filesize, fdnptr->fd_siz, 1);
-            block_filesize = (real_filesize + 511L) >> 9;
             filetype = fdnptr->fd_mod & S_IFMT;
             currfdlayout.filetype = filetype;
             currfdlayout.real_filesize = real_filesize;
@@ -856,11 +936,32 @@ short phase_a;
                 /* should we keep this cylinderset? */
                 if (filetype == S_IFREG)
                 {
-                    /* best case cylinder requirement */
+										short minc, maxc;
+										short needsmoving = 0;
+										
+										/* best case cylinder requirement */
                     k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
 
                     /* inefficient cylinder use? */
-                    if (currfdlayout.numcylinders - k > 3)
+                    needsmoving |= (currfdlayout.numcylinders - k > 3);
+
+										/* spaced out cylinder use? find range */
+										minc = currfdlayout.numcylinders + 1;
+										maxc = 0;
+										for (j = 0; j < currfdlayout.numcylinders; j++)
+										{
+												if (currfdlayout.cid[j] < minc) minc = currfdlayout.cid[j];
+												if (currfdlayout.cid[j] > maxc) maxc = currfdlayout.cid[j];
+										}
+
+										needsmoving |= ((minc + currfdlayout.numcylinders + 2) < (maxc - minc));
+
+#if 1
+										/* is read-only or executable => fixed length file */
+										needsmoving = (fdnptr->fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
+										needsmoving |= !(fdnptr->fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
+#endif
+                    if (needsmoving)
                     {
                         /* keep track of inode for later */
                         if (numcandidates < MAX_CANDIDATES)
@@ -881,7 +982,7 @@ short phase_a;
     if (swapbeg != 0)
     {
         _l2tos(&swapsize, sirbuf->sswpsz, 1);
-        printf("%d block for swap\n", swapsize);
+        printf("%d blocks for swap\n", swapsize);
         for (i = 0; i < swapsize; i++)
         {
             setbit(swapbeg + i);
@@ -889,15 +990,13 @@ short phase_a;
     }
 
     /* draw whole map; 8 blocks for each byte in map */
-    printf("\033[1H\033[J");
-    printf("\033[22;32r\n");
+    printf("\033[1;32r\033[1H\033[J\n");
     for (i = 0; i < mapsize * 8; i += BLOCKSPERCYLINDER)
     {
         /* convert block_id to cylinder_id */
         drawcylinder(i / BLOCKSPERCYLINDER, countbits(i, BLOCKSPERCYLINDER));
     }
 
-#if 0
     for (i = 0; i < mapsize * 8; i++)
     {
         char* bytptr;
@@ -907,101 +1006,66 @@ short phase_a;
         blkoff = i;
         bytptr = mapbuf + (blkoff >> 3);
         bitmsk = (0x80) >> ((int)blkoff & 0x7);
-        drawmap(i, *bytptr & bitmsk);
+        drawmap(minvld + i, *bytptr & bitmsk);
     }
-#endif
+
+		dumpframebuffer();
+		
     /* show stats beneath map */
-    i = mapsize * 8 / BLOCKSPERCYLINDER;
-    j = 1 + ((i / 80) * 8) / 15 + 1;
+    i  = (mapsize * 8 / BLOCKSPERCYLINDER) / 80 * 8;
+    i += (mapsize * 8 / 640);
+    j = 1 + (i / 15);
     printf("\033[%dH", j + 1);
     printf("%d files,  %d directories\n", regfdns, dirfdns);
     printf("%d free Fdns  %d cylinders\n", freefdns, i);
-    printf("\033[%d;32r", j + 2 + 1);
-
-    getchar();
+    printf("\033[%d;32r", j + 1);
 
     /* find candidates to move and find space */
+while(1)
+{
     for(i=0; i< numcandidates; i++)
     {
         short minc, maxc;
-        short needsmoving = 0;
-        long filesize;
+				int newaddr;
 
         /* gather block info but no map updating */
         mappingmode = 1;
+        regblks = dirblks = 0;
         mark_in_map(&candidates[i]);
 
         _l4tol(&currfdlayout.real_filesize, candidates[i].fd_siz, 1);
 
-        /* how many *should* it use? */
-        k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
+				/* find a contiguous set of blocks */
+				newaddr = findcontiguous(currfdlayout.numblocks);
+				if (newaddr)
+				{
+						printf("%3d: moving %d bytes to block [%d - %d]\n", i, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
 
-        /* inefficient cylinder use? */
-        if (currfdlayout.numcylinders - k > 2)
-        {
-            needsmoving = 1;
-            if (v_opt)
-                printf("%3d: occupancy: should use %d, currently using %d for %d bytes\n", i, k, currfdlayout.numcylinders, currfdlayout.real_filesize);
-        }
+						/* free up current blocks */
+						for (j = 0; j < currfdlayout.numblocks; j++)
+						{
+								clrbit(currfdlayout.blocks[j]);
+								drawcylinder(currfdlayout.blocks[j] / BLOCKSPERCYLINDER, countbits(currfdlayout.blocks[j], BLOCKSPERCYLINDER));
+								drawmap(currfdlayout.blocks[j], 0);
 
-        /* spaced out cylinder use? */
-        minc = currfdlayout.numcylinders + 1;
-        maxc = 0;
-        if (j > 1)
-        {
-            /* find range */
-            for (j = 0; j < currfdlayout.numcylinders; j++)
-            {
-                if (currfdlayout.cid[j] < minc) minc = currfdlayout.cid[j];
-                if (currfdlayout.cid[j] > maxc) maxc = currfdlayout.cid[j];
-            }
+						}
+						dumpframebuffer();
 
-            if ((minc + currfdlayout.numcylinders + 2) < (maxc - minc))
-            {
-                needsmoving = 2;
+						/* allocate new blocks */
+						for (j = 0; j < currfdlayout.numblocks; j++)
+						{
+								if (setbit(newaddr + j))
+										fprintf(stderr, "findcontiguous wrong\n");
+								drawcylinder((newaddr + j) / BLOCKSPERCYLINDER, countbits(newaddr + j, BLOCKSPERCYLINDER));
+								drawmap(newaddr + j, 1);
+						}
 
-                if (v_opt)
-                {
-                    printf("%3d:   spacing: ", i);
-                    for (j = 0; j < currfdlayout.numcylinders; j++)
-                        printf("%d ", currfdlayout.cid[j]);
-                    printf("\n");
-                }
-            }
-        }
-
-        if (needsmoving)
-        {
-            int newaddr;
-
-            /* find a contiguous set of blocks */
-            newaddr = findcontiguous(currfdlayout.numblocks);
-            if (newaddr)
-            {
-                printf("%3d: moving %d bytes to block [%d - %d]\n", i, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
-
-                /* free up current blocks */
-                for (j = 0; j < currfdlayout.numblocks; j++)
-                {
-                    clrbit(currfdlayout.blocks[j] + minvld);
-                    drawcylinder(currfdlayout.blocks[j] / BLOCKSPERCYLINDER, countbits(currfdlayout.blocks[j], BLOCKSPERCYLINDER));
-                    drawmap(currfdlayout.blocks[j], 0);
-
-                }
-
-                /* allocate new blocks */
-                for (j = 0; j < block_filesize; j++)
-                {
-                    if (setbit(newaddr + j + minvld))
-                        fprintf(stderr, "findcontiguous wrong\n");
-                    drawcylinder(newaddr + j / BLOCKSPERCYLINDER, countbits(newaddr + j, BLOCKSPERCYLINDER));
-                    drawmap(newaddr + j, 1);
-                }
-            }
-        }
-
+						dumpframebuffer();
+				}
     }
-
+    i = i;
+    break;
+}
 }
 
 void free_check()
