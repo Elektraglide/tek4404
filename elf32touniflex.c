@@ -127,7 +127,7 @@ void fixup_rodata_offset(Elf32_Rela *rarray, int n, Elf32_Sym *symbols, int roda
 				if (targetsection == rodataindex)
 				{
 					rarray[i].r_addend = htonl(ntohl(rarray[i].r_addend) + dataoffset);
-					if (verbose) fprintf(stderr, "%08x: fixing rodata addend\n", ntohl(rarray[i].r_offset));
+					if (verbose) fprintf(stderr, "%08x: fixing rodata(%d) addend\n", ntohl(rarray[i].r_offset),rodataindex);
 				}
 			}
 			else
@@ -498,9 +498,9 @@ int exportlocals = 0;
 		
 		int dataoffset = 0;
 		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
-		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
 		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		if (rodatastringindex > 0) dataoffset += ntohl(sect[rodatastringindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
 		
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
@@ -523,15 +523,16 @@ int exportlocals = 0;
 		
 		int dataoffset = 0;
 		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
-		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
 		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		if (rodatastringindex > 0) dataoffset += ntohl(sect[rodatastringindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
 		
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
 
-		len += emitreloc(ph_fd, rarray, n, symbols, sect, dataindex, ntohl(sect[textindex].sh_size));
-		
+		dataoffset = 0;
+		if (textindex > 0) dataoffset += ntohl(sect[textindex].sh_size);
+		len += emitreloc(ph_fd, rarray, n, symbols, sect, dataindex, dataoffset);
 		free(rarray);
 	}
 
@@ -549,21 +550,18 @@ int exportlocals = 0;
 		
 		int dataoffset = 0;
 		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
-		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
-		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
 		fixup_rodata_offset(rarray, n, symbols, rodatastringindex, dataoffset);
+		if (rodatastringindex > 0) dataoffset += ntohl(sect[rodatastringindex].sh_size);
+		fixup_rodata_offset(rarray, n, symbols, rodataindex, dataoffset);
 		
 		qsort(rarray, n, sizeof(Elf32_Rela), relacompare);
 		reloccount += n;
 
 		dataoffset = 0;
+		if (textindex > 0) dataoffset += ntohl(sect[textindex].sh_size);
 		if (dataindex > 0) dataoffset += ntohl(sect[dataindex].sh_size);
-		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, ntohl(sect[textindex].sh_size)+dataoffset);
-#if 0
-		// FIXME: do we reloc rodata.str with .rela.rodata?
-		if (rodataindex > 0) dataoffset += ntohl(sect[rodataindex].sh_size);
-		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodatastringindex, ntohl(sect[textindex].sh_size)+dataoffset);
-#endif
+		len += emitreloc(ph_fd, rarray, n, symbols, sect, rodataindex, dataoffset);
+
 		free(rarray);
 	}
 
@@ -656,7 +654,7 @@ int exportlocals = 0;
 				typename = "DATA";
 				if (isrodata(&sect[targetsection]))
 				{
-					// rodata is after data
+					// rodata is after data; how do we know rodata or rodata.str1?
 					sym.offset = htonl(ntohl(sym.offset) + ntohl(sect[dataindex].sh_size));
 				}
 			}
