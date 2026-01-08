@@ -9,74 +9,6 @@
 #include <sys/sir.h>
 #include <sys/fdn.h>
 
-#ifndef __clang__
-#info 68xxx UniFLEX (R) blockcheck
-#info Version 2.07:0; Released October 1, 1985
-#info Copyright (c) 1983, 1984, 1985 by
-#info Technical Systems Consultants, Inc.
-#info All rights reserved.
-#tstmp
-#define ntohl(A) (A)
-#define ntohs(A) (A)
-#define htonl(A) (A)
-#define htons(A) (A)
-#else
-extern int open();
-extern int read();
-extern int write();
-extern long lseek();
-extern int close();
-extern void exit();
-extern int fstat();
-extern char *malloc();
-extern void free();
-
-#define ntohs(A) ((A>>8) | (A<<8))
-int ntohl(int val)
-{
-    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF ); 
-    return (val << 16) | ((val >> 16) & 0xFFFF);
-}
-
-void _l2tos(char *blocks,char *sindblk,int count)
-{
-	while(count--)
-	{
-		// BE to LE
-		*blocks++ = sindblk[1];
-		*blocks++ = sindblk[0];
-		sindblk += 2;
-	}
-}
-
-void l3tol(char *blocks,char *sindblk,int count)
-{
-	while(count--)
-	{
-		// BE to LE
-		*blocks++ = sindblk[2];
-		*blocks++ = sindblk[1];
-		*blocks++ = sindblk[0];
-		*blocks++ = 0;
-		sindblk += 3;
-	}
-}
-
-void _l4tol(char *blocks,char *sindblk,int count)
-{
-	while(count--)
-	{
-		// BE to LE
-		*blocks++ = sindblk[3];
-		*blocks++ = sindblk[2];
-		*blocks++ = sindblk[1];
-		*blocks++ = sindblk[0];
-		sindblk += 4;
-	}
-}
-
-#endif
-
 typedef unsigned short USHORT;
 #define ERR (-1)
 #define TRUE (1)
@@ -109,6 +41,11 @@ typedef unsigned short USHORT;
 #define BGDMSZ SMSZ+FMSZ   /* size of map up to begin of s.i. */
 #define BGTMSZ DMSZ+SMSZ+FMSZ /* size of map up to begin of t.i. */
 
+struct dirblk {
+	USHORT d_ino;
+	char d_name[14];
+};
+
 #define MAX_DUPS 60 /* max number of dups in table */
 #define MAX_OORS 40 /* max out of ranges in table */
 #define MAX_SIZE_ERRS 20 /* max size errors in table */
@@ -136,9 +73,19 @@ short udupcnt;    /* unique dups count */
 struct mapstr badmap;
 short badblocks;     /* ".badblocks" exists flag */
 
-short mappingmode;
+typedef enum {
+	BUILDMAP=0,
+	BUILDDIR,
+	BUILDFILE
+} mapmode;
+
+mapmode mappingmode;
 char* mapbuf;    /* map of used blocks */
 int mapsize;
+
+#define MAX_DIRENTRY 4096
+int numdentries = 0;
+struct dirblk direntry[MAX_DIRENTRY];
 
 #define MAX_CYLINDERSET 64
 struct fdlayout {
@@ -203,6 +150,64 @@ char errrdgb[] = "Error reading block %ld.\n";
 char odtdut[] = "Output directed to device under test.\n";
 
 char* framebuffer;
+
+#ifndef __clang__
+#info 68xxx UniFLEX (R) blockcheck
+#info Version 2.07:0; Released October 1, 1985
+#info Copyright (c) 1983, 1984, 1985 by
+#info Technical Systems Consultants, Inc.
+#info All rights reserved.
+#tstmp
+#define ntohl(A) (A)
+#define htonl(A) (A)
+#define htons(A) (A)
+#else
+extern int open();
+extern int read();
+extern int write();
+extern long lseek();
+extern int close();
+extern void exit();
+extern int fstat();
+extern char *malloc();
+extern void free();
+
+void _l2tos(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		sindblk += 2;
+	}
+}
+
+void l3tol(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[2];
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		*blocks++ = 0;
+		sindblk += 3;
+	}
+}
+
+void _l4tol(char *blocks,char *sindblk,int count)
+{
+	while(count--)
+	{
+		// BE to LE
+		*blocks++ = sindblk[3];
+		*blocks++ = sindblk[2];
+		*blocks++ = sindblk[1];
+		*blocks++ = sindblk[0];
+		sindblk += 4;
+	}
+}
 
 struct bmpheader {
 
@@ -273,6 +278,8 @@ int height = 480;
   
   fclose(output);
 }
+#endif
+
 /***************************************************************/
 
 
@@ -563,17 +570,16 @@ int i, runlength;
 }
 
 /* 1x1 */
-void drawmap(blkaddr, val)
-int blkaddr;
+void drawmap(mindex, val)
+int mindex;
 int val;
 {
     unsigned char* dst;
     unsigned short abit;
     int x,y;
 
-		blkaddr -= minvld;
-    y = blkaddr / 640;
-    x = blkaddr % 640;
+    y = mindex / 640;
+    x = mindex % 640;
 
     y += 100;
     dst = framebuffer + (y * 128);
@@ -668,16 +674,49 @@ long blkadr;
         }
     }
 
-    if (mappingmode == 0)
+    if (mappingmode == BUILDMAP)
     {
         if (filetype == S_IFDIR) ++dirblks; else ++regblks;
         if (setbit(blkadr))
             set_dup(blkadr);
-            
-            
-				drawmap(blkadr, 1);
-				dumpframebuffer();
     }
+    else
+		if (mappingmode == BUILDDIR)
+		{
+        if (filetype == S_IFDIR)
+        {
+					struct dirblk buffer[32];
+					struct dirblk *dptr = buffer;
+					
+					rdblk(blkadr,buffer);
+					for (i=0; i<32; i++)
+					{
+						if (numdentries < MAX_DIRENTRY)
+						{
+#ifdef __clang__
+							USHORT ino;
+							_l2tos(&ino, &dptr->d_ino, 1);
+							dptr->d_ino = ino;
+#endif
+						if (dptr->d_ino == 0 || dptr->d_ino > 10000)	/* ?? **/
+							break;
+
+
+							direntry[numdentries++] = *dptr;
+							/* long filename handling */
+							if (dptr->d_name[0] & 0x80)
+							{
+								printf("%d: [%4d] %c%.13s", fdnno, dptr->d_ino, dptr->d_name[0] & 0x7f, dptr->d_name+1);
+								dptr++; i++;
+								printf("%c%s\n",dptr->d_name[0] & 0x7f,dptr->d_name+1);
+							}
+							else
+								printf("%d: [%4d] %.14s\n", fdnno, dptr->d_ino, dptr->d_name);
+						}
+						dptr++;
+					}
+				}
+		}
 
     /* track block use */
     if (currfdlayout.numblocks < 16384)
@@ -710,7 +749,7 @@ long blkadr;
         set_oor();
         return(ERR);
     }
-    if (mappingmode == 0)
+    if (mappingmode == BUILDMAP)
     {
         ++mapblks;
         if (setbit(blkadr))
@@ -843,7 +882,19 @@ struct inode *fdnptr;
     return(0);
 }
 
+char *lookupname(fdn)
+int fdn;
+{
+	short i;
+	
+	for(i=0; i<numdentries; i++)
+	{
+		if (direntry[i].d_ino == fdn)
+			return direntry[i].d_name;
+	}
 
+	return "???";
+}
 
 void do_fdns(phase_a)
 short phase_a;
@@ -868,8 +919,39 @@ short phase_a;
     oorfbks = dupfbks = 0;
     dupblks = oorblks = missbks = 0;
 
+		/* cache dir entries */
+		numdentries = 0;
+    mappingmode = BUILDDIR;
+    fdnno = 1;
+    for (fdnbno = 1; fdnbno <= sszfdn; ++fdnbno)
+    {
+        /* read a block of 8 inodes */
+        if (rdblk((long)fdnbno + 1L, fdnbuf) == ERR)
+        {
+            printf("Fdns %u-%u skipped.\n", fdnno, fdnno + 7);
+            fdnno += 8;
+            continue;
+        }
+
+        /* walk inodes */
+        fdnptr = (struct inode*)fdnbuf;
+        for (fdnptr = fdnbuf; fdnptr < fdnbuf + 512; ++fdnptr)
+        {
+            filetype = fdnptr->fd_mod & S_IFMT;
+            currfdlayout.filetype = filetype;
+						if (filetype == S_IFDIR)
+						{
+							/* what is parent */
+							
+							mark_in_map(fdnptr);
+						}
+
+						++fdnno;
+				}
+		}
+
     /* gather stats as we descend tree */
-    mappingmode = 0;
+    mappingmode = BUILDMAP;
     clear_map();
 
     printf("reading %d file descriptors blocks for disk: %s\n", sszfdn,sirbuf->sfname);
@@ -939,6 +1021,9 @@ short phase_a;
 										short minc, maxc;
 										short needsmoving = 0;
 										
+								/* lookup name */
+								printf("examining %s\r", lookupname(usedfdns));
+								
 										/* best case cylinder requirement */
                     k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
 
@@ -1006,7 +1091,7 @@ short phase_a;
         blkoff = i;
         bytptr = mapbuf + (blkoff >> 3);
         bitmsk = (0x80) >> ((int)blkoff & 0x7);
-        drawmap(minvld + i, *bytptr & bitmsk);
+        drawmap(i, *bytptr & bitmsk);
     }
 
 		dumpframebuffer();
@@ -1021,15 +1106,13 @@ short phase_a;
     printf("\033[%d;32r", j + 1);
 
     /* find candidates to move and find space */
-while(1)
-{
     for(i=0; i< numcandidates; i++)
     {
         short minc, maxc;
 				int newaddr;
 
         /* gather block info but no map updating */
-        mappingmode = 1;
+        mappingmode = BUILDFILE;
         regblks = dirblks = 0;
         mark_in_map(&candidates[i]);
 
@@ -1044,28 +1127,24 @@ while(1)
 						/* free up current blocks */
 						for (j = 0; j < currfdlayout.numblocks; j++)
 						{
+								int mindex = currfdlayout.blocks[j] - minvld;
 								clrbit(currfdlayout.blocks[j]);
-								drawcylinder(currfdlayout.blocks[j] / BLOCKSPERCYLINDER, countbits(currfdlayout.blocks[j], BLOCKSPERCYLINDER));
-								drawmap(currfdlayout.blocks[j], 0);
-
+								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
+								drawmap(mindex, 0);
 						}
-						dumpframebuffer();
 
 						/* allocate new blocks */
 						for (j = 0; j < currfdlayout.numblocks; j++)
 						{
+								int mindex = (newaddr + j) - minvld;
 								if (setbit(newaddr + j))
 										fprintf(stderr, "findcontiguous wrong\n");
-								drawcylinder((newaddr + j) / BLOCKSPERCYLINDER, countbits(newaddr + j, BLOCKSPERCYLINDER));
-								drawmap(newaddr + j, 1);
+								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
+								drawmap(mindex, 1);
 						}
 
-						dumpframebuffer();
 				}
     }
-    i = i;
-    break;
-}
 }
 
 void free_check()
