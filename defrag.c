@@ -1,5 +1,8 @@
+#ifdef __clang__
+/* long assumes 32-bit.. */
 #define long int
 #pragma pack(push, 1)
+#endif
 
 #include <sys/stat.h>
 #include <sys/signal.h>
@@ -32,6 +35,7 @@ typedef unsigned short USHORT;
 #define BBFDN 2
 #define SIRADR 1L /* physical block address of SIR */
 #define STD_OUT 1 /* fd number of standard output */
+
 #define INITSK 1  /* task id number for "init" */
 #define ALL -1    /* number for int to all tasks */
 
@@ -708,8 +712,8 @@ char *pathname;
 				long blocks[13];
 	
 				/* just read direct blocks */
-				l3tol(blocks,buffer[fdi].fd_blk,10);
-				for(j=0;j<10;j++)
+				l3tol(blocks,buffer[fdi].fd_blk,FMSZ);
+				for(j=0;j<FMSZ;j++)
 				{
 					if (blocks[j])
 					{
@@ -1020,7 +1024,7 @@ struct inode *fdnptr;
     currfdlayout.numblocks = 0;
 
     /* 10 direct blocks */
-    for(i=0; i<10; ++i) 
+    for(i=0; i<FMSZ; ++i) 
         if(blocks[i]) mapblock(blocks[i]);
 
     /* single indirection */
