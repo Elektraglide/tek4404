@@ -42,9 +42,19 @@ typedef unsigned short USHORT;
 #define BGTMSZ DMSZ+SMSZ+FMSZ /* size of map up to begin of t.i. */
 
 struct dirblk {
-	USHORT d_ino;
+	USHORT d_fdn;
 	char d_name[14];
 };
+
+struct dirpath {
+	USHORT fdn;
+	USHORT d_parentfdn;
+	char	d_path[64];		/* FIXME: should be packed into string array */
+};
+#define MAX_DIRENTRY 2048
+int numdentries = 0;
+struct dirpath dircache[MAX_DIRENTRY];
+
 
 #define MAX_DUPS 60 /* max number of dups in table */
 #define MAX_OORS 40 /* max out of ranges in table */
@@ -82,10 +92,6 @@ typedef enum {
 mapmode mappingmode;
 char* mapbuf;    /* map of used blocks */
 int mapsize;
-
-#define MAX_DIRENTRY 4096
-int numdentries = 0;
-struct dirblk direntry[MAX_DIRENTRY];
 
 #define MAX_CYLINDERSET 64
 struct fdlayout {
@@ -133,7 +139,7 @@ long maxvld, minvld, available, *lptr;
 long lastblk, blkcount;
 short sszfdn, filetype;
 
-unsigned short fdnno;
+USHORT fdnno;
 
 #ifdef DEBUG
 char fdnchk[] = "fdncheck";
@@ -158,10 +164,12 @@ char* framebuffer;
 #info Technical Systems Consultants, Inc.
 #info All rights reserved.
 #tstmp
-#define ntohl(A) (A)
-#define htonl(A) (A)
 #define htons(A) (A)
+#define ntohs(A) (A)
 #else
+#define htons(A) ((A>>8) | (A<<8))
+#define ntohs(A) ((A>>8) | (A<<8))
+
 extern int open();
 extern int read();
 extern int write();
@@ -171,6 +179,8 @@ extern void exit();
 extern int fstat();
 extern char *malloc();
 extern void free();
+extern char *strcpy();
+extern char *strcat();
 
 void _l2tos(char *blocks,char *sindblk,int count)
 {
@@ -410,6 +420,26 @@ char *buffer;
 }
 
 
+int rdfdn(fdn,buffer)
+USHORT fdn;
+char *buffer;
+{
+    long offset, lseek();
+
+    offset = ((((fdn-1L)>>3L)+2L)<<9L) + (((fdn-1)&0x7)<<6L);
+    if((lseek(fd_sir,offset,0) != offset) || (read(fd_sir,buffer,FDNSIZ) != FDNSIZ)) 
+    {
+       printf("Error reading fdn %u in block %u.\n",fdn,((fdn-1)>>3)+2);
+       contin(((fdn-1)>>3)+2);
+       return(ERR);
+    } 
+    else 
+    {
+    return(0);
+    }
+}
+
+
 /***************************************************************/
 void fxdbcnt()
 {
@@ -643,6 +673,95 @@ int cid,val;
 
 
 /***************************************************************/
+int find_parentname(fdn, targetfdn, pathname)
+USHORT fdn;
+USHORT targetfdn;
+char *pathname;
+{
+		struct inode buffer[FDNPB];
+		struct inode* fdnptr = buffer;
+    long blkadr;
+		short i,j,fdi;
+		char subpath[32];
+		
+		/* self */
+		if (1 == targetfdn)
+		{
+			return 0;
+		}
+
+#if 0
+		/* get containing inode address */
+    blkadr = ((((fdn-1)>>3L)+2L));
+		rdblk(blkadr, buffer);
+		
+		/* we know the parent dir is at ((fdn-1)&0x7) */
+		//for(fdi=0; fdi<8; fdi++)
+		fdi = ((fdn-1)&0x7);
+#endif
+
+		rdfdn(fdn, buffer);
+		fdi = 0;
+		{
+			if ((buffer[fdi].fd_mod & S_IFMT) == S_IFDIR)
+			{
+				long blocks[13];
+	
+				/* just read direct blocks */
+				l3tol(blocks,buffer[fdi].fd_blk,10);
+				for(j=0;j<10;j++)
+				{
+					if (blocks[j])
+					{
+						struct dirblk dentries[32];
+						
+						/* read 32 dir entries */
+						rdblk(blocks[j], dentries);
+						for (i=0; i<32; i++)
+						{
+							dentries[i].d_fdn = ntohs(dentries[i].d_fdn);
+
+							if (dentries[i].d_fdn == 0)
+								continue;
+
+							if (dentries[i].d_name[0] == '.' && dentries[i].d_name[1] == '.')
+							{
+								if (fdn != 1)
+									find_parentname(dentries[i].d_fdn, fdn, pathname);
+								else
+								{
+									subpath[0] = '/';	/* root */
+									subpath[1] = '\0';
+								}
+							}
+							else
+							if (dentries[i].d_fdn == targetfdn)
+							{
+									/* long filename handling */
+									if (dentries[i].d_name[0] & 0x80)
+									{
+										sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
+										i++;
+										sprintf(subpath, "%c%s/", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
+									}
+									else
+									{
+										sprintf(subpath, "%.14s/", dentries[i].d_name);
+									}
+									
+									j = 20;	/* break out loop too */
+									break;
+							}
+							
+					  }
+				  }
+				}
+			}
+		}
+
+		strcat(pathname, subpath);
+		return 0;
+}
 
 checkrange(blkadr)
 long blkadr;
@@ -676,7 +795,48 @@ long blkadr;
 
     if (mappingmode == BUILDMAP)
     {
-        if (filetype == S_IFDIR) ++dirblks; else ++regblks;
+        if (filetype == S_IFDIR)
+        {
+					struct dirblk dentries[32];
+					struct dirblk *dptr = dentries;
+					
+					rdblk(blkadr,dentries);
+					for (i=0; i<32; i++,dptr++)
+					{
+						if (numdentries < MAX_DIRENTRY)
+						{
+							/* convert to host format */
+							dptr->d_fdn = ntohs(dentries[i].d_fdn);
+
+							if (dptr->d_fdn == 0)
+								continue;
+
+							/* find parent directory */
+							if (dptr->d_name[0] == '.' && dptr->d_name[1] == '.')
+							{
+								char path[128];
+								dircache[numdentries].fdn = fdnno;
+								dircache[numdentries].d_parentfdn = dptr->d_fdn;
+
+								path[0] = '/';
+								path[1] = '\0';
+								find_parentname(dircache[numdentries].d_parentfdn, fdnno, path);
+								printf("pathname=%s\n", path);
+							
+								numdentries++;
+							}
+
+						}
+					}
+
+					++dirblks;
+				}
+				else
+				{
+				 ++regblks;
+
+				}
+
         if (setbit(blkadr))
             set_dup(blkadr);
     }
@@ -685,35 +845,34 @@ long blkadr;
 		{
         if (filetype == S_IFDIR)
         {
-					struct dirblk buffer[32];
-					struct dirblk *dptr = buffer;
+					struct dirblk dentries[32];
+					struct dirblk *dptr = dentries;
 					
-					rdblk(blkadr,buffer);
-					for (i=0; i<32; i++)
+					rdblk(blkadr,dentries);
+					for (i=0; i<32; i++,dptr++)
 					{
 						if (numdentries < MAX_DIRENTRY)
 						{
-#ifdef __clang__
-							USHORT ino;
-							_l2tos(&ino, &dptr->d_ino, 1);
-							dptr->d_ino = ino;
-#endif
-						if (dptr->d_ino == 0 || dptr->d_ino > 10000)	/* ?? **/
-							break;
+							/* convert to host format */
+							dptr->d_fdn = ntohs(dentries[i].d_fdn);
 
+							if (dptr->d_fdn == 0)
+								continue;
 
-							direntry[numdentries++] = *dptr;
-							/* long filename handling */
-							if (dptr->d_name[0] & 0x80)
+							/* find parent directory */
+							if (dptr->d_name[0] == '.' && dptr->d_name[1] == '.')
 							{
-								printf("%d: [%4d] %c%.13s", fdnno, dptr->d_ino, dptr->d_name[0] & 0x7f, dptr->d_name+1);
-								dptr++; i++;
-								printf("%c%s\n",dptr->d_name[0] & 0x7f,dptr->d_name+1);
+								dircache[numdentries].fdn = fdnno;
+								dircache[numdentries].d_parentfdn = dptr->d_fdn;
+								dircache[numdentries].d_path[0] = '/';
+								dircache[numdentries].d_path[1] = '\0';
+								find_parentname(dircache[numdentries].d_parentfdn, fdnno, dircache[numdentries].d_path);
+								printf("pathname=%s\n",dircache[numdentries].d_path);
+
+								numdentries++;
 							}
-							else
-								printf("%d: [%4d] %.14s\n", fdnno, dptr->d_ino, dptr->d_name);
+
 						}
-						dptr++;
 					}
 				}
 		}
@@ -882,20 +1041,6 @@ struct inode *fdnptr;
     return(0);
 }
 
-char *lookupname(fdn)
-int fdn;
-{
-	short i;
-	
-	for(i=0; i<numdentries; i++)
-	{
-		if (direntry[i].d_ino == fdn)
-			return direntry[i].d_name;
-	}
-
-	return "???";
-}
-
 void do_fdns(phase_a)
 short phase_a;
 {
@@ -919,8 +1064,9 @@ short phase_a;
     oorfbks = dupfbks = 0;
     dupblks = oorblks = missbks = 0;
 
-		/* cache dir entries */
 		numdentries = 0;
+#if 0
+		/* cache dir entries */
     mappingmode = BUILDDIR;
     fdnno = 1;
     for (fdnbno = 1; fdnbno <= sszfdn; ++fdnbno)
@@ -949,6 +1095,7 @@ short phase_a;
 						++fdnno;
 				}
 		}
+#endif
 
     /* gather stats as we descend tree */
     mappingmode = BUILDMAP;
@@ -1021,9 +1168,6 @@ short phase_a;
 										short minc, maxc;
 										short needsmoving = 0;
 										
-								/* lookup name */
-								printf("examining %s\r", lookupname(usedfdns));
-								
 										/* best case cylinder requirement */
                     k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
 
@@ -1052,6 +1196,17 @@ short phase_a;
                         if (numcandidates < MAX_CANDIDATES)
                         {
                             candidates[numcandidates++] = *fdnptr;
+                            for (j = 0; j < numdentries; j++)
+                            {
+															if (dircache[numdentries].fdn == fdnno)
+															{
+																char path[128];
+																
+																find_parentname(dircache[numdentries].d_parentfdn, fdnno, path);
+																printf("pathname = %s\n", path);
+															}
+                            }
+                            
                         }
                     }
                 }
@@ -1193,27 +1348,6 @@ char *blkptr;
 
 
 /***************************************************************/
-
-
-int rdfdn(fdn,buffer)
-USHORT fdn;
-char *buffer;
-{
-    long offset, lseek();
-
-    offset = ((((fdn-1L)>>3L)+2L)<<9L) + (((fdn-1)&0x7)<<6L);
-    if((lseek(fd_sir,offset,0) != offset) || (read(fd_sir,buffer,FDNSIZ) != FDNSIZ)) 
-    {
-       printf("Error reading fdn %u in block %u.\n",fdn,((fdn-1)>>3)+2);
-       contin(((fdn-1)>>3)+2);
-       return(ERR);
-    } 
-    else 
-    {
-    return(0);
-    }
-}
-
 
 
 void init_gfb()
