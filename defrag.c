@@ -89,7 +89,6 @@ short badblocks;     /* ".badblocks" exists flag */
 
 typedef enum {
 	BUILDMAP=0,
-	BUILDDIR,
 	BUILDFILE
 } mapmode;
 
@@ -185,6 +184,7 @@ extern char *malloc();
 extern void free();
 extern char *strcpy();
 extern char *strcat();
+extern int strlen();
 
 void _l2tos(char *blocks,char *sindblk,int count)
 {
@@ -799,108 +799,34 @@ long blkadr;
 
     if (mappingmode == BUILDMAP)
     {
-        if (filetype == S_IFDIR)
-        {
-					struct dirblk dentries[32];
-					struct dirblk *dptr = dentries;
-					
-					rdblk(blkadr,dentries);
-					for (i=0; i<32; i++,dptr++)
-					{
-						if (numdentries < MAX_DIRENTRY)
-						{
-							/* convert to host format */
-							dptr->d_fdn = ntohs(dentries[i].d_fdn);
+			if (filetype == S_IFDIR) ++dirblks; else  ++regblks;
 
-							if (dptr->d_fdn == 0)
-								continue;
-
-							/* find parent directory */
-							if (dptr->d_name[0] == '.' && dptr->d_name[1] == '.')
-							{
-								char path[128];
-								dircache[numdentries].fdn = fdnno;
-								dircache[numdentries].d_parentfdn = dptr->d_fdn;
-
-								path[0] = '/';
-								path[1] = '\0';
-								find_parentname(dircache[numdentries].d_parentfdn, fdnno, path);
-								printf("pathname=%s\n", path);
-							
-								numdentries++;
-							}
-
-						}
-					}
-
-					++dirblks;
-				}
-				else
-				{
-				 ++regblks;
-
-				}
-
-        if (setbit(blkadr))
-            set_dup(blkadr);
-    }
-    else
-		if (mappingmode == BUILDDIR)
-		{
-        if (filetype == S_IFDIR)
-        {
-					struct dirblk dentries[32];
-					struct dirblk *dptr = dentries;
-					
-					rdblk(blkadr,dentries);
-					for (i=0; i<32; i++,dptr++)
-					{
-						if (numdentries < MAX_DIRENTRY)
-						{
-							/* convert to host format */
-							dptr->d_fdn = ntohs(dentries[i].d_fdn);
-
-							if (dptr->d_fdn == 0)
-								continue;
-
-							/* find parent directory */
-							if (dptr->d_name[0] == '.' && dptr->d_name[1] == '.')
-							{
-								dircache[numdentries].fdn = fdnno;
-								dircache[numdentries].d_parentfdn = dptr->d_fdn;
-								dircache[numdentries].d_path[0] = '/';
-								dircache[numdentries].d_path[1] = '\0';
-								find_parentname(dircache[numdentries].d_parentfdn, fdnno, dircache[numdentries].d_path);
-								printf("pathname=%s\n",dircache[numdentries].d_path);
-
-								numdentries++;
-							}
-
-						}
-					}
-				}
+			if (setbit(blkadr))
+					set_dup(blkadr);
 		}
+		else
+		{
+			/* track block use */
+			if (currfdlayout.numblocks < 16384)
+			{
+					currfdlayout.blocks[currfdlayout.numblocks++] = blkadr;
+			}
 
-    /* track block use */
-    if (currfdlayout.numblocks < 16384)
-    {
-        currfdlayout.blocks[currfdlayout.numblocks++] = blkadr;
-    }
+			/* track used CYLINDERS */
+			cid = blkadr / BLOCKSPERCYLINDER;
+			i = currfdlayout.numcylinders;
+			while (i--)
+			{
+					/* already in list */
+					if (currfdlayout.cid[i] == cid)
+							return;
+			}
 
-    /* track used CYLINDERS */
-    cid = blkadr / BLOCKSPERCYLINDER;
-    i = currfdlayout.numcylinders;
-    while (i--)
-    {
-        /* already in list */
-        if (currfdlayout.cid[i] == cid)
-            return;
-    }
-
-    /* add it if space */
-    if (currfdlayout.numcylinders < MAX_CYLINDERSET)
-    {
-        currfdlayout.cid[currfdlayout.numcylinders++] = cid;
+			/* else add it if space */
+			if (currfdlayout.numcylinders < MAX_CYLINDERSET)
+			{
+					currfdlayout.cid[currfdlayout.numcylinders++] = cid;
+			}
     }
 }
 
@@ -918,6 +844,14 @@ long blkadr;
         if (setbit(blkadr))
             set_dup(blkadr);
     }
+		else
+		{
+			/* track block use */
+			if (currfdlayout.numblocks < 16384)
+			{
+					currfdlayout.blocks[currfdlayout.numblocks++] = blkadr;
+			}
+		}
 
    return(0);
 }
@@ -1045,11 +979,143 @@ struct inode *fdnptr;
     return(0);
 }
 
+void enum_files(fdnptr, fullpath)
+struct inode *fdnptr;
+char *fullpath;
+{
+	long blocks[13];
+	int i,j,k;
+	char subpath[128];
+	char apath[128];
+	
+	/* just read direct blocks */
+	l3tol(blocks,fdnptr->fd_blk,FMSZ);
+	for(j=0;j<FMSZ;j++)
+	{
+		if (blocks[j])
+		{
+			struct dirblk dentries[32];
+			int len;
+			
+			len = strlen(fullpath);
+			
+			/* read 32 dir entries */
+			rdblk(blocks[j], dentries);
+			for (i=0; i<32; i++)
+			{
+				struct inode currfdn;
+				long real_filesize;
+				
+				if (dentries[i].d_fdn == 0)
+					continue;
+
+				if (dentries[i].d_name[0] == '.' && dentries[i].d_name[1] == '\0')
+					continue;
+					
+				if (dentries[i].d_name[0] == '.' && dentries[i].d_name[1] == '.')
+					continue;
+					
+				dentries[i].d_fdn = ntohs(dentries[i].d_fdn);
+
+				/* get entry fdn (can be double incremented for long filenames) */
+				rdfdn(dentries[i].d_fdn, &currfdn);
+
+#if 0
+				/* ignore linked files */
+				if (currfdn.fd_cnt > 3)
+					continue;
+#endif
+
+				/* ignore other types */
+				if ((currfdn.fd_mod & S_IFMT) != S_IFDIR && (currfdn.fd_mod & S_IFMT) != S_IFREG)
+					continue;
+
+				/* cache some info */
+				_l4tol(&real_filesize, currfdn.fd_siz, 1);
+				currfdlayout.filetype = currfdn.fd_mod & S_IFMT;
+				currfdlayout.real_filesize = real_filesize;
+				
+				/* long filename handling */
+				if (dentries[i].d_name[0] & 0x80)
+				{
+					sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
+					i++;
+					/* FIXME: is it ALWAYS 14 if a long filename? */
+					sprintf(subpath+14, "%c%s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
+				}
+				else
+				{
+					sprintf(subpath, "%.14s", dentries[i].d_name);
+				}
+
+				/* follow blocks and mark in map */
+				mark_in_map(&currfdn);
+
+				printf("%5d blocks: %s%s\033[0J\033[1G\n", currfdlayout.numblocks, fullpath, subpath);
+
+				if ((currfdn.fd_mod & S_IFMT) == S_IFDIR)
+				{
+					++dirfdns;
+
+					/* recurse on subdir */
+					strcat(fullpath, subpath);
+					strcat(fullpath, "/");
+					enum_files(&currfdn, fullpath);
+					fullpath[len] = '\0';
+				}
+				else
+				if ((currfdn.fd_mod & S_IFMT) == S_IFREG)
+				{
+					short minc, maxc;
+					short needsmoving = 0;
+
+					++regfdns;
+
+					/* best case cylinder requirement */
+					k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
+
+					/* inefficient cylinder use? */
+					needsmoving |= (currfdlayout.numcylinders - k > 3);
+
+					/* spaced out cylinder use? find range */
+					minc = currfdlayout.numcylinders + 1;
+					maxc = 0;
+					for (k = 0; k < currfdlayout.numcylinders; k++)
+					{
+							if (currfdlayout.cid[k] < minc) minc = currfdlayout.cid[k];
+							if (currfdlayout.cid[k] > maxc) maxc = currfdlayout.cid[k];
+					}
+
+					needsmoving |= ((minc + currfdlayout.numcylinders + 2) < (maxc - minc));
+
+					/* is read-only or executable => fixed length file */
+					needsmoving = (currfdn.fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
+					needsmoving |= !(currfdn.fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
+
+					if (needsmoving && real_filesize > 16384)
+					{
+							/* keep track of inode for later */
+							if (numcandidates < MAX_CANDIDATES)
+							{
+									/* FIXME: save filepath too? */
+									candidates[numcandidates++] = currfdn;
+							}
+					}
+				}
+			}
+		}
+	}
+
+}
+
 void do_fdns(phase_a)
 short phase_a;
 {
-    char fdnbuf[512];
+    struct inode fdnbuf[FDNPB];
     struct inode* fdnptr;
+
+		char fullpath[256];
+    struct inode afdn;
     short fdnbno;
     long real_filesize, swapbeg, gfblks();
     int i, j, k;
@@ -1068,47 +1134,10 @@ short phase_a;
     oorfbks = dupfbks = 0;
     dupblks = oorblks = missbks = 0;
 
-		numdentries = 0;
-#if 0
-		/* cache dir entries */
-    mappingmode = BUILDDIR;
-    fdnno = 1;
-    for (fdnbno = 1; fdnbno <= sszfdn; ++fdnbno)
-    {
-        /* read a block of 8 inodes */
-        if (rdblk((long)fdnbno + 1L, fdnbuf) == ERR)
-        {
-            printf("Fdns %u-%u skipped.\n", fdnno, fdnno + 7);
-            fdnno += 8;
-            continue;
-        }
-
-        /* walk inodes */
-        fdnptr = (struct inode*)fdnbuf;
-        for (fdnptr = fdnbuf; fdnptr < fdnbuf + 512; ++fdnptr)
-        {
-            filetype = fdnptr->fd_mod & S_IFMT;
-            currfdlayout.filetype = filetype;
-						if (filetype == S_IFDIR)
-						{
-							/* what is parent */
-							
-							mark_in_map(fdnptr);
-						}
-
-						++fdnno;
-				}
-		}
-#endif
-
-    /* gather stats as we descend tree */
-    mappingmode = BUILDMAP;
-    clear_map();
-
     printf("reading %d file descriptors blocks for disk: %s\n", sszfdn,sirbuf->sfname);
 
-    /* gather inode of each candidate */
-    numcandidates = 0;
+		mappingmode = BUILDMAP;
+    clear_map();
 
     /* should this use ROOTFDN ? */
     fdnno = 1;
@@ -1117,14 +1146,13 @@ short phase_a;
         /* read a block of 8 inodes */
         if (rdblk((long)fdnbno + 1L, fdnbuf) == ERR)
         {
-            printf("Fdns %u-%u skipped.\n", fdnno, fdnno + 7);
-            fdnno += 8;
+            printf("Fdns %u-%u skipped.\n", fdnno, fdnno + FDNPB - 1);
+            fdnno += FDNPB;
             continue;
         }
 
         /* walk inodes */
-        fdnptr = (struct inode*)fdnbuf;
-        for (fdnptr = fdnbuf; fdnptr < fdnbuf + 512; ++fdnptr)
+        for (fdnptr = fdnbuf; fdnptr < fdnbuf + FDNPB; ++fdnptr)
         {
             /* cache some info of current FD */
             _l4tol(&real_filesize, fdnptr->fd_siz, 1);
@@ -1165,61 +1193,27 @@ short phase_a;
             {
                 /* follow blocks and mark in map */
                 mark_in_map(fdnptr);
-
-                /* should we keep this cylinderset? */
-                if (filetype == S_IFREG)
-                {
-										short minc, maxc;
-										short needsmoving = 0;
-										
-										/* best case cylinder requirement */
-                    k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
-
-                    /* inefficient cylinder use? */
-                    needsmoving |= (currfdlayout.numcylinders - k > 3);
-
-										/* spaced out cylinder use? find range */
-										minc = currfdlayout.numcylinders + 1;
-										maxc = 0;
-										for (j = 0; j < currfdlayout.numcylinders; j++)
-										{
-												if (currfdlayout.cid[j] < minc) minc = currfdlayout.cid[j];
-												if (currfdlayout.cid[j] > maxc) maxc = currfdlayout.cid[j];
-										}
-
-										needsmoving |= ((minc + currfdlayout.numcylinders + 2) < (maxc - minc));
-
-#if 1
-										/* is read-only or executable => fixed length file */
-										needsmoving = (fdnptr->fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
-										needsmoving |= !(fdnptr->fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
-#endif
-                    if (needsmoving)
-                    {
-                        /* keep track of inode for later */
-                        if (numcandidates < MAX_CANDIDATES)
-                        {
-                            candidates[numcandidates++] = *fdnptr;
-                            for (j = 0; j < numdentries; j++)
-                            {
-															if (dircache[numdentries].fdn == fdnno)
-															{
-																char path[128];
-																
-																find_parentname(dircache[numdentries].d_parentfdn, fdnno, path);
-																printf("pathname = %s\n", path);
-															}
-                            }
-                            
-                        }
-                    }
-                }
             }
+				}
+		}
 
-            ++fdnno;
-        }
-    }
-    printf("read %d descriptors, found %d candidates\n", usedfdns, numcandidates);
+		/* stop if FS not valid */
+		if (dups_cnt || oors_cnt)
+		{
+			printf("disk corrupt: run diskrepair\n");
+			exit(-1);
+		}
+
+
+    /* gather inode of each candidate */
+		mappingmode = BUILDFILE;
+    numcandidates = 0;
+		fullpath[0] = '/';
+		fullpath[1] = '\0';
+		rdfdn(ROOTFDN, &afdn);
+		enum_files(&afdn, fullpath);
+
+    printf("checked %d files in %d directories; found %d candidates\n", regfdns, dirfdns, numcandidates);
 
     /* mark swap as used too */
     l3tol(&swapbeg, sirbuf->sswpbg, 1);
@@ -1505,7 +1499,7 @@ char *argv[];
 
 #ifdef __clang__
 #define phys(A)	malloc(128 * 480);
-	devname = "/Users/adambillyard/projects/tek4404/mame/1304_image.raw";
+	devname = "/Users/adambillyard/projects/tek4404/mame/bar.chd";
 #else
    if (argc > 1)
     devname = argv[1];
