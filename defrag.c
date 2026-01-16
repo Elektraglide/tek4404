@@ -109,9 +109,13 @@ struct fdlayout {
 
 struct fdlayout currfdlayout;
 
-#define MAX_CANDIDATES 4096
+#define MAX_CANDIDATES 256
+struct candidate {
+	struct inode inode;
+	char filepath[128];
+};
 int numcandidates;
-struct inode candidates[MAX_CANDIDATES];
+struct candidate candidates[MAX_CANDIDATES];
 
 
 char *devname;
@@ -1066,7 +1070,7 @@ char *fullpath;
 				else
 				if ((currfdn.fd_mod & S_IFMT) == S_IFREG)
 				{
-					short minc, maxc;
+					short minc, maxc,fixedsize;
 					short needsmoving = 0;
 
 					++regfdns;
@@ -1074,11 +1078,12 @@ char *fullpath;
 					/* best case cylinder requirement */
 					k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
 
-					/* inefficient cylinder use? */
-					needsmoving |= (currfdlayout.numcylinders - k > 3);
+					/* inefficient cylinder use: using >5 cylinders over expected for filesize  */
+					needsmoving |= (currfdlayout.numcylinders - k > 5);
 
 					/* spaced out cylinder use? find range */
-					minc = currfdlayout.numcylinders + 1;
+					/* FIXME: we should sort and look for gaps in cylinder usage */
+					minc = mapsize * 8 / BLOCKSPERCYLINDER;
 					maxc = 0;
 					for (k = 0; k < currfdlayout.numcylinders; k++)
 					{
@@ -1086,19 +1091,21 @@ char *fullpath;
 							if (currfdlayout.cid[k] > maxc) maxc = currfdlayout.cid[k];
 					}
 
-					needsmoving |= ((minc + currfdlayout.numcylinders + 2) < (maxc - minc));
+					/* spaced out use: using range >5 cylinders over minimum */
+					needsmoving |= ((minc + currfdlayout.numcylinders + 5) < (maxc - minc));
 
 					/* is read-only or executable => fixed length file */
-					needsmoving = (currfdn.fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
-					needsmoving |= !(currfdn.fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
+					fixedsize = (currfdn.fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
+					fixedsize |= !(currfdn.fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
 
-					if (needsmoving && real_filesize > 16384)
+					if (fixedsize && needsmoving && real_filesize > 16384)
 					{
 							/* keep track of inode for later */
 							if (numcandidates < MAX_CANDIDATES)
 							{
-									/* FIXME: save filepath too? */
-									candidates[numcandidates++] = currfdn;
+									strcpy(candidates[numcandidates].filepath, fullpath);
+									strcat(candidates[numcandidates].filepath, subpath);
+									candidates[numcandidates++].inode = currfdn;
 							}
 					}
 				}
@@ -1267,15 +1274,15 @@ short phase_a;
         /* gather block info but no map updating */
         mappingmode = BUILDFILE;
         regblks = dirblks = 0;
-        mark_in_map(&candidates[i]);
+        mark_in_map(&candidates[i].inode);
 
-        _l4tol(&currfdlayout.real_filesize, candidates[i].fd_siz, 1);
+        _l4tol(&currfdlayout.real_filesize, candidates[i].inode.fd_siz, 1);
 
 				/* find a contiguous set of blocks */
 				newaddr = findcontiguous(currfdlayout.numblocks);
 				if (newaddr)
 				{
-						printf("%3d: moving %d bytes to block [%d - %d]\n", i, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
+						printf("%s: moving %d bytes to block [%d - %d]\n", candidates[i].filepath, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
 
 						/* free up current blocks */
 						for (j = 0; j < currfdlayout.numblocks; j++)
@@ -1285,7 +1292,8 @@ short phase_a;
 								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
 								drawmap(mindex, 0);
 						}
-
+	dumpframebuffer();
+	
 						/* allocate new blocks */
 						for (j = 0; j < currfdlayout.numblocks; j++)
 						{
@@ -1295,7 +1303,8 @@ short phase_a;
 								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
 								drawmap(mindex, 1);
 						}
-
+	dumpframebuffer();
+	
 				}
     }
 }
