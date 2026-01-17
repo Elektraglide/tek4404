@@ -1070,7 +1070,7 @@ char *fullpath;
 				else
 				if ((currfdn.fd_mod & S_IFMT) == S_IFREG)
 				{
-					short minc, maxc,fixedsize;
+					short minc, maxc, maxcylseek, fixedsize;
 					short needsmoving = 0;
 
 					++regfdns;
@@ -1085,15 +1085,25 @@ char *fullpath;
 					/* FIXME: we should sort and look for gaps in cylinder usage */
 					minc = mapsize * 8 / BLOCKSPERCYLINDER;
 					maxc = 0;
+					maxcylseek = 0;
 					for (k = 0; k < currfdlayout.numcylinders; k++)
 					{
+							if (k > 0)
+							{
+								short diff = currfdlayout.cid[k] - currfdlayout.cid[k-1];
+								if (diff < 0) diff = -diff;
+								if (diff > maxcylseek) maxcylseek = diff;
+							}
 							if (currfdlayout.cid[k] < minc) minc = currfdlayout.cid[k];
 							if (currfdlayout.cid[k] > maxc) maxc = currfdlayout.cid[k];
 					}
 
 					/* spaced out use: using range >5 cylinders over minimum */
-					needsmoving |= ((minc + currfdlayout.numcylinders + 5) < (maxc - minc));
-
+					//needsmoving |= ((minc + currfdlayout.numcylinders + 5) < (maxc - minc));
+					
+					/* seeking to cylinders far apart */
+					needsmoving |= maxcylseek > 4;
+					
 					/* is read-only or executable => fixed length file */
 					fixedsize = (currfdn.fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
 					fixedsize |= !(currfdn.fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
