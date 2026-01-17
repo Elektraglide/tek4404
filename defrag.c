@@ -1125,18 +1125,138 @@ char *fullpath;
 
 }
 
-void do_fdns(phase_a)
+void do_defrag(phase_a)
 short phase_a;
 {
-    struct inode fdnbuf[FDNPB];
-    struct inode* fdnptr;
-
 		char fullpath[256];
     struct inode afdn;
     short fdnbno;
     long real_filesize, swapbeg, gfblks();
     int i, j, k;
     USHORT swapsize;
+
+    /* track FD */
+    freefdns = usedfdns = 0;
+    blkfdns = chrfdns = dirfdns = regfdns = 0;
+
+    /* track blocks */
+    freeblks = 0;
+    regblks = dirblks = mapblks = 0;
+
+    /* track errors */
+    dups_cnt = oors_cnt = 0;
+    oorfbks = dupfbks = 0;
+    dupblks = oorblks = missbks = 0;
+
+    /* walk whole filesystem to find candidates */
+		mappingmode = BUILDFILE;
+    numcandidates = 0;
+		fullpath[0] = '/';
+		fullpath[1] = '\0';
+		rdfdn(ROOTFDN, &afdn);
+		enum_files(&afdn, fullpath);
+
+    printf("checked %d files in %d directories; found %d candidates\n", regfdns, dirfdns, numcandidates);
+
+    /* mark swap as used too */
+    l3tol(&swapbeg, sirbuf->sswpbg, 1);
+    if (swapbeg != 0)
+    {
+        _l2tos(&swapsize, sirbuf->sswpsz, 1);
+        printf("%d blocks for swap\n", swapsize);
+        for (i = 0; i < swapsize; i++)
+        {
+            setbit(swapbeg + i);
+        }
+    }
+
+    /* draw whole map; 8 blocks for each byte in map */
+    printf("\033[1;32r\033[1H\033[J\n");
+    for (i = 0; i < mapsize * 8; i += BLOCKSPERCYLINDER)
+    {
+        /* convert block_id to cylinder_id */
+        drawcylinder(i / BLOCKSPERCYLINDER, countbits(i, BLOCKSPERCYLINDER));
+    }
+
+    for (i = 0; i < mapsize * 8; i++)
+    {
+        char* bytptr;
+        long blkoff;
+        short bitmsk;
+
+        blkoff = i;
+        bytptr = mapbuf + (blkoff >> 3);
+        bitmsk = (0x80) >> ((int)blkoff & 0x7);
+        drawmap(i, *bytptr & bitmsk);
+    }
+
+    /* show stats beneath map */
+    i  = (mapsize * 8 / BLOCKSPERCYLINDER) / 80 * 8;
+    i += (mapsize * 8 / 640);
+    j = 1 + (i / 15);
+    printf("\033[%dH", j + 1);
+    printf("%d files,  %d directories\n", regfdns, dirfdns);
+    printf("%d free Fdns  %d cylinders\n", freefdns, i);
+    printf("\033[%d;32r", j + 1);
+
+    /* find candidates to move and find space */
+    for(i=0; i< numcandidates; i++)
+    {
+        short minc, maxc;
+				int newaddr;
+
+        /* gather block info but no map updating */
+        mappingmode = BUILDFILE;
+        regblks = dirblks = 0;
+        mark_in_map(&candidates[i].inode);
+
+        _l4tol(&currfdlayout.real_filesize, candidates[i].inode.fd_siz, 1);
+
+				/* find a contiguous set of blocks */
+				newaddr = findcontiguous(currfdlayout.numblocks);
+				if (newaddr)
+				{
+						printf("%s: moving %d bytes to block [%d - %d]\n", candidates[i].filepath, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
+
+						/* free up current blocks */
+						for (j = 0; j < currfdlayout.numblocks; j++)
+						{
+								int mindex = currfdlayout.blocks[j] - minvld;
+								clrbit(currfdlayout.blocks[j]);
+								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
+								drawmap(mindex, 0);
+						}
+	
+#ifdef __clang__
+		dumpframebuffer();
+#endif
+
+						/* allocate new blocks */
+						for (j = 0; j < currfdlayout.numblocks; j++)
+						{
+								int mindex = (newaddr + j) - minvld;
+								if (setbit(newaddr + j))
+										fprintf(stderr, "findcontiguous wrong\n");
+								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
+								drawmap(mindex, 1);
+						}
+
+#ifdef __clang__
+		dumpframebuffer();
+#endif
+				}
+    }
+    
+    printf("Done\n");
+    
+}
+
+int builds_fdns_map()
+{
+    struct inode fdnbuf[FDNPB];
+    struct inode* fdnptr;
+    short fdnbno;
+    long real_filesize, swapbeg, gfblks();
 
     /* track FD */
     freefdns = usedfdns = 0;
@@ -1213,130 +1333,9 @@ short phase_a;
             }
 				}
 		}
-
-		/* stop if FS not valid */
-		if (dups_cnt || oors_cnt)
-		{
-			printf("disk corrupt: run diskrepair\n");
-			exit(-1);
-		}
-
-
-    /* gather inode of each candidate */
-		mappingmode = BUILDFILE;
-    numcandidates = 0;
-		fullpath[0] = '/';
-		fullpath[1] = '\0';
-		rdfdn(ROOTFDN, &afdn);
-		enum_files(&afdn, fullpath);
-
-    printf("checked %d files in %d directories; found %d candidates\n", regfdns, dirfdns, numcandidates);
-
-    /* mark swap as used too */
-    l3tol(&swapbeg, sirbuf->sswpbg, 1);
-    if (swapbeg != 0)
-    {
-        _l2tos(&swapsize, sirbuf->sswpsz, 1);
-        printf("%d blocks for swap\n", swapsize);
-        for (i = 0; i < swapsize; i++)
-        {
-            setbit(swapbeg + i);
-        }
-    }
-
-    /* draw whole map; 8 blocks for each byte in map */
-    printf("\033[1;32r\033[1H\033[J\n");
-    for (i = 0; i < mapsize * 8; i += BLOCKSPERCYLINDER)
-    {
-        /* convert block_id to cylinder_id */
-        drawcylinder(i / BLOCKSPERCYLINDER, countbits(i, BLOCKSPERCYLINDER));
-    }
-
-    for (i = 0; i < mapsize * 8; i++)
-    {
-        char* bytptr;
-        long blkoff;
-        short bitmsk;
-
-        blkoff = i;
-        bytptr = mapbuf + (blkoff >> 3);
-        bitmsk = (0x80) >> ((int)blkoff & 0x7);
-        drawmap(i, *bytptr & bitmsk);
-    }
-
-		dumpframebuffer();
 		
-    /* show stats beneath map */
-    i  = (mapsize * 8 / BLOCKSPERCYLINDER) / 80 * 8;
-    i += (mapsize * 8 / 640);
-    j = 1 + (i / 15);
-    printf("\033[%dH", j + 1);
-    printf("%d files,  %d directories\n", regfdns, dirfdns);
-    printf("%d free Fdns  %d cylinders\n", freefdns, i);
-    printf("\033[%d;32r", j + 1);
-
-    /* find candidates to move and find space */
-    for(i=0; i< numcandidates; i++)
-    {
-        short minc, maxc;
-				int newaddr;
-
-        /* gather block info but no map updating */
-        mappingmode = BUILDFILE;
-        regblks = dirblks = 0;
-        mark_in_map(&candidates[i].inode);
-
-        _l4tol(&currfdlayout.real_filesize, candidates[i].inode.fd_siz, 1);
-
-				/* find a contiguous set of blocks */
-				newaddr = findcontiguous(currfdlayout.numblocks);
-				if (newaddr)
-				{
-						printf("%s: moving %d bytes to block [%d - %d]\n", candidates[i].filepath, currfdlayout.real_filesize, newaddr, newaddr + currfdlayout.numblocks - 1);
-
-						/* free up current blocks */
-						for (j = 0; j < currfdlayout.numblocks; j++)
-						{
-								int mindex = currfdlayout.blocks[j] - minvld;
-								clrbit(currfdlayout.blocks[j]);
-								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
-								drawmap(mindex, 0);
-						}
-	dumpframebuffer();
-	
-						/* allocate new blocks */
-						for (j = 0; j < currfdlayout.numblocks; j++)
-						{
-								int mindex = (newaddr + j) - minvld;
-								if (setbit(newaddr + j))
-										fprintf(stderr, "findcontiguous wrong\n");
-								drawcylinder(mindex / BLOCKSPERCYLINDER, countbits(mindex, BLOCKSPERCYLINDER));
-								drawmap(mindex, 1);
-						}
-	dumpframebuffer();
-	
-				}
-    }
-}
-
-void free_check()
-{
-    short no_rebuild;
-    char *badfree;
-
-    no_rebuild = 0;
-    badfree = "Free list bad.\n";
-    if(v_opt) printf("*** Phase 5 - Check free list\n");
-    if(must_newfree) {
-        do_fdns(2);
-        fxdbcnt();
-    }
-
-    if(must_newfree) {
-        if(v_opt) printf("%s",badfree);
-    }
-    do_free();    /* check volume free list */
-    chk_miss();      /* look for missing */
+		/*  */
+		return (dups_cnt || oors_cnt);
 }
 
 
@@ -1612,8 +1611,12 @@ char *argv[];
 
    framebuffer = phys(1);
 
-    do_fdns(0); 
-
+		/* ensure we have non-corrupt disk */
+		if (builds_fdns_map() == 0)
+		{
+			do_defrag(0);
+		}
+		
 #if 0
     fdncheck();
 
