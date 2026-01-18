@@ -65,7 +65,7 @@ struct dirpath dircache[MAX_DIRENTRY];
 #define MAX_SIZE_ERRS 20 /* max size errors in table */
 
 struct mapstr {
-    char mapb[3*SMSZ];
+    unsigned char mapb[3*SMSZ];
     long indrct[3];
     USHORT nxtblk;
     long msize;
@@ -112,6 +112,7 @@ struct fdlayout currfdlayout;
 #define MAX_CANDIDATES 256
 struct candidate {
 	struct inode inode;
+	USHORT fdn;
 	char filepath[128];
 };
 int numcandidates;
@@ -120,7 +121,7 @@ struct candidate candidates[MAX_CANDIDATES];
 
 char *devname;
 short fd_sir;
-char sir_area[512];  /* buffer area for SIR */
+unsigned char sir_area[512];  /* buffer area for SIR */
 struct sir *sirbuf;
 
 short v_opt;      /* verbose option */
@@ -132,7 +133,7 @@ short must_frfdn; /* must fix free fdn count */
 short must_fix;      /* disk is bad - needs fix */
 short must_newfree;  /* must run newfree flag */
 
-char *fbptr;      /* new free block pointer */
+unsigned char *fbptr;      /* new free block pointer */
 short fbbit;      /* new free block bit value */
 long fbblock;     /* new free block address */
 
@@ -162,7 +163,7 @@ char cntcll[] = "Can't call \"%s\".\n";
 char errrdgb[] = "Error reading block %ld.\n";
 char odtdut[] = "Output directed to device under test.\n";
 
-char* framebuffer;
+unsigned char* framebuffer;
 
 #ifndef __clang__
 #info 68xxx UniFLEX (R) blockcheck
@@ -176,7 +177,8 @@ char* framebuffer;
 #else
 #define htons(A) ((A>>8) | (A<<8))
 #define ntohs(A) ((A>>8) | (A<<8))
-
+#define phys(A)	malloc(128 * 480);
+void sync() {}
 extern int open();
 extern int read();
 extern int write();
@@ -190,7 +192,7 @@ extern char *strcpy();
 extern char *strcat();
 extern int strlen();
 
-void _l2tos(char *blocks,char *sindblk,int count)
+void _l2tos(unsigned char *blocks,char *sindblk,int count)
 {
 	while(count--)
 	{
@@ -201,28 +203,34 @@ void _l2tos(char *blocks,char *sindblk,int count)
 	}
 }
 
-void l3tol(char *blocks,char *sindblk,int count)
+void ltol3(unsigned char *dst, long *blocks, int count)
+{
+	while(count--)
+	{
+		// LE to BE
+		*dst++ = (*blocks>>16);
+		*dst++ = (*blocks>>8);
+		*dst++ = (*blocks>>0);
+		blocks++;
+	}
+}
+
+void l3tol(long *blocks,unsigned char *sindblk,int count)
 {
 	while(count--)
 	{
 		// BE to LE
-		*blocks++ = sindblk[2];
-		*blocks++ = sindblk[1];
-		*blocks++ = sindblk[0];
-		*blocks++ = 0;
+		*blocks++ = ((unsigned)sindblk[0]<<16) | ((unsigned)sindblk[1]<<8) | ((unsigned)sindblk[2]<<0);
 		sindblk += 3;
 	}
 }
 
-void _l4tol(char *blocks,char *sindblk,int count)
+void _l4tol(long *blocks,unsigned char *sindblk,int count)
 {
 	while(count--)
 	{
 		// BE to LE
-		*blocks++ = sindblk[3];
-		*blocks++ = sindblk[2];
-		*blocks++ = sindblk[1];
-		*blocks++ = sindblk[0];
+		*blocks++ = ((unsigned)sindblk[0]<<24) | ((unsigned)sindblk[1]<<16) | ((unsigned)sindblk[2]<<8) | ((unsigned)sindblk[3]<<0);
 		sindblk += 4;
 	}
 }
@@ -256,7 +264,7 @@ void dumpframebuffer()
 struct bmpheader header;
 FILE *fp;
 FILE *output;
-char *fb;
+unsigned char *fb;
 int i,x,y;
 int width = 640;
 int height = 480;
@@ -314,7 +322,7 @@ void clear_map()
 setbit(blkadr)
 long blkadr;
 {
-    char *bytptr;
+    unsigned char *bytptr;
     long blkoff;
     short bitmsk;
 
@@ -333,7 +341,7 @@ long blkadr;
 clrbit(blkadr)
 long blkadr;
 {
-    char *bytptr;
+    unsigned char *bytptr;
     long blkoff;
     short bitmsk;
 
@@ -392,7 +400,7 @@ long badblk;
 
 int rdblk(bkadr,buffer)
 long bkadr;
-char *buffer;
+unsigned char *buffer;
 {
     if(lseek(fd_sir,bkadr<<9L,0) == bkadr<<9L)
     {
@@ -410,7 +418,7 @@ char *buffer;
 
 wtblk(bkadr,buffer)
 long bkadr;
-char *buffer;
+unsigned char *buffer;
 {
     long lseek();
 
@@ -430,7 +438,7 @@ char *buffer;
 
 int rdfdn(fdn,buffer)
 USHORT fdn;
-char *buffer;
+struct inode *buffer;
 {
     long offset, lseek();
 
@@ -533,13 +541,13 @@ void reset()
     }
 }
 
-int findcontiguous(blockcount)
+long findcontiguous(blockcount)
 int blockcount;
 {
     char* bytptr, *bytend;
     short j;
     short numblock8 = (blockcount + 7) >> 3;
-    int newaddr = 0;
+    long newaddr = 0;
 
     bytptr = mapbuf;
     bytend = bytptr + mapsize;
@@ -809,6 +817,7 @@ long blkadr;
 					set_dup(blkadr);
 		}
 		else
+    if (mappingmode == BUILDFILE)
 		{
 			/* track block use */
 			if (currfdlayout.numblocks < 16384)
@@ -849,6 +858,7 @@ long blkadr;
             set_dup(blkadr);
     }
 		else
+    if (mappingmode == BUILDFILE)
 		{
 			/* track block use */
 			if (currfdlayout.numblocks < 16384)
@@ -863,7 +873,7 @@ long blkadr;
 do_sind(blkadr)
 long blkadr;
 {
-    char sindblk[512];
+    unsigned char sindblk[512];
     long blocks[SMSZ];
     short i;
 
@@ -890,7 +900,7 @@ long blkadr;
 do_dind(blkadr)
 long blkadr;
 {
-    char dindblk[512];
+    unsigned char dindblk[512];
     long blocks[SMSZ];
     short i;
 
@@ -917,10 +927,10 @@ long blkadr;
     return(0);
 }
 
-do_tind(blkadr)
+int do_tind(blkadr)
 long blkadr;
 {
-    char tindblk[512];
+    unsigned char tindblk[512];
     long block;
     short i;
 
@@ -948,14 +958,14 @@ long blkadr;
 }
 
 
-mark_in_map(fdnptr)
+int mark_in_map(fdnptr)
 struct inode *fdnptr;
 {
     long blocks[13];
     register int i;
 
     blkcount = 0;
-    l3tol(blocks,fdnptr->fd_blk,13);
+    l3tol(blocks,(unsigned char *)fdnptr->fd_blk,13);
 
     /* track which cylinders are used */
     currfdlayout.numcylinders = 0;
@@ -993,7 +1003,7 @@ char *fullpath;
 	char apath[128];
 	
 	/* just read direct blocks */
-	l3tol(blocks,fdnptr->fd_blk,FMSZ);
+	l3tol(blocks,(unsigned char *)fdnptr->fd_blk,FMSZ);
 	for(j=0;j<FMSZ;j++)
 	{
 		if (blocks[j])
@@ -1004,7 +1014,7 @@ char *fullpath;
 			len = strlen(fullpath);
 			
 			/* read 32 dir entries */
-			rdblk(blocks[j], dentries);
+			rdblk(blocks[j], (unsigned char *)dentries);
 			for (i=0; i<32; i++)
 			{
 				struct inode currfdn;
@@ -1019,9 +1029,10 @@ char *fullpath;
 				if (dentries[i].d_name[0] == '.' && dentries[i].d_name[1] == '.')
 					continue;
 					
+				/* keep it in host endian */
 				dentries[i].d_fdn = ntohs(dentries[i].d_fdn);
 
-				/* get entry fdn (can be double incremented for long filenames) */
+				/* get entry fdn (before potential double incremented for long filenames) */
 				rdfdn(dentries[i].d_fdn, &currfdn);
 
 #if 0
@@ -1035,21 +1046,18 @@ char *fullpath;
 					continue;
 
 				/* cache some info */
-				_l4tol(&real_filesize, currfdn.fd_siz, 1);
+				_l4tol(&real_filesize, (unsigned char *)currfdn.fd_siz, 1);
 				currfdlayout.filetype = currfdn.fd_mod & S_IFMT;
 				currfdlayout.real_filesize = real_filesize;
 				
 				/* long filename handling */
+				sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
 				if (dentries[i].d_name[0] & 0x80)
 				{
-					sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
 					i++;
 					/* FIXME: is it ALWAYS 14 if a long filename? */
-					sprintf(subpath+14, "%c%s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
-				}
-				else
-				{
-					sprintf(subpath, "%.14s", dentries[i].d_name);
+					/* FIXME: can this be arbitrarily long? */
+					sprintf(subpath+14, "%c%.13s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
 				}
 
 				/* follow blocks and mark in map */
@@ -1115,7 +1123,9 @@ char *fullpath;
 							{
 									strcpy(candidates[numcandidates].filepath, fullpath);
 									strcat(candidates[numcandidates].filepath, subpath);
-									candidates[numcandidates++].inode = currfdn;
+									candidates[numcandidates].fdn = dentries[i].d_fdn;
+									candidates[numcandidates].inode = currfdn;	/* we can fetch this later.. */
+									numcandidates++;
 							}
 					}
 				}
@@ -1244,6 +1254,19 @@ short phase_a;
 #ifdef __clang__
 		dumpframebuffer();
 #endif
+
+						/* copy blocks to new location */
+						for (j = 0; j < currfdlayout.numblocks; j++)
+						{
+								char buffer[512];
+
+								rdblk(currfdlayout.blocks[i], buffer);
+								wtblk(newaddr + j, buffer);
+						}
+
+						sync();
+						
+						/* update FD blocks */
 				}
     }
     
@@ -1412,7 +1435,7 @@ opnfbks(fdn,map_ptr)
 unsigned fdn;
 struct mapstr *map_ptr;
 {
-  if(rdfdn(fdn,map_ptr->mapb) == ERR)
+  if(rdfdn(fdn, map_ptr->mapb) == ERR)
     return(ERR);
   l3tol(map_ptr->indrct, map_ptr->mapb+9+(FMSZ*3), 3);
 
@@ -1516,13 +1539,16 @@ char *argv[];
    USHORT devno, sodevno;
 
 #ifdef __clang__
-#define phys(A)	malloc(128 * 480);
-	devname = "/Users/adambillyard/projects/tek4404/mame/bar.chd";
+		devname = "/Users/adambillyard/projects/tek4404/mame/bar.chd";
 #else
-   if (argc > 1)
-    devname = argv[1];
-   sync();        /* update all buffers to disk */
+		devname = "/dev/disk"
 #endif
+
+		if (argc > 1)
+			devname = argv[1];
+
+		/* update all buffers to disk */
+		sync();
 
    rwmode = (1) ? O_RDONLY : O_RDWR;
    fd_sir = open(devname,rwmode);
