@@ -1054,10 +1054,14 @@ char *fullpath;
 				sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
 				if (dentries[i].d_name[0] & 0x80)
 				{
-					i++;
-					/* FIXME: is it ALWAYS 14 if a long filename? */
-					/* FIXME: can this be arbitrarily long? */
-					sprintf(subpath+14, "%c%.13s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
+					char *append = subpath;
+					
+					do
+					{
+						append += sizeof(dentries[0].d_name);
+						i++;
+						sprintf(append, "%c%.13s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
+					} while (dentries[i].d_name[0] & 0x80 && dentries[i].d_fdn == 0);
 				}
 
 				/* follow blocks and mark in map */
