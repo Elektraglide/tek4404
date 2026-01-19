@@ -45,19 +45,11 @@ typedef unsigned short USHORT;
 #define BGDMSZ SMSZ+FMSZ   /* size of map up to begin of s.i. */
 #define BGTMSZ DMSZ+SMSZ+FMSZ /* size of map up to begin of t.i. */
 
+/* S_IFDIR block table, 32 per block */
 struct dirblk {
 	USHORT d_fdn;
 	char d_name[14];
 };
-
-struct dirpath {
-	USHORT fdn;
-	USHORT d_parentfdn;
-	char	d_path[64];		/* FIXME: should be packed into string array */
-};
-#define MAX_DIRENTRY 2048
-int numdentries = 0;
-struct dirpath dircache[MAX_DIRENTRY];
 
 
 #define MAX_DUPS 60 /* max number of dups in table */
@@ -689,95 +681,6 @@ int cid,val;
 
 
 /***************************************************************/
-int find_parentname(fdn, targetfdn, pathname)
-USHORT fdn;
-USHORT targetfdn;
-char *pathname;
-{
-		struct inode buffer[FDNPB];
-		struct inode* fdnptr = buffer;
-    long blkadr;
-		short i,j,fdi;
-		char subpath[32];
-		
-		/* self */
-		if (1 == targetfdn)
-		{
-			return 0;
-		}
-
-#if 0
-		/* get containing inode address */
-    blkadr = ((((fdn-1)>>3L)+2L));
-		rdblk(blkadr, buffer);
-		
-		/* we know the parent dir is at ((fdn-1)&0x7) */
-		//for(fdi=0; fdi<8; fdi++)
-		fdi = ((fdn-1)&0x7);
-#endif
-
-		rdfdn(fdn, buffer);
-		fdi = 0;
-		{
-			if ((buffer[fdi].fd_mod & S_IFMT) == S_IFDIR)
-			{
-				long blocks[13];
-	
-				/* just read direct blocks */
-				l3tol(blocks,buffer[fdi].fd_blk,FMSZ);
-				for(j=0;j<FMSZ;j++)
-				{
-					if (blocks[j])
-					{
-						struct dirblk dentries[32];
-						
-						/* read 32 dir entries */
-						rdblk(blocks[j], dentries);
-						for (i=0; i<32; i++)
-						{
-							dentries[i].d_fdn = ntohs(dentries[i].d_fdn);
-
-							if (dentries[i].d_fdn == 0)
-								continue;
-
-							if (dentries[i].d_name[0] == '.' && dentries[i].d_name[1] == '.')
-							{
-								if (fdn != 1)
-									find_parentname(dentries[i].d_fdn, fdn, pathname);
-								else
-								{
-									subpath[0] = '/';	/* root */
-									subpath[1] = '\0';
-								}
-							}
-							else
-							if (dentries[i].d_fdn == targetfdn)
-							{
-									/* long filename handling */
-									if (dentries[i].d_name[0] & 0x80)
-									{
-										sprintf(subpath, "%c%.13s", dentries[i].d_name[0] & 0x7f, dentries[i].d_name+1);
-										i++;
-										sprintf(subpath, "%c%s/", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
-									}
-									else
-									{
-										sprintf(subpath, "%.14s/", dentries[i].d_name);
-									}
-									
-									j = 20;	/* break out loop too */
-									break;
-							}
-							
-					  }
-				  }
-				}
-			}
-		}
-
-		strcat(pathname, subpath);
-		return 0;
-}
 
 checkrange(blkadr)
 long blkadr;
@@ -997,7 +900,7 @@ void enum_files(fdnptr, fullpath)
 struct inode *fdnptr;
 char *fullpath;
 {
-	long blocks[13];
+	long blocks[FMSZ];
 	int i,j,k;
 	char subpath[128];
 	char apath[128];
