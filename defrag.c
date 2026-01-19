@@ -834,7 +834,7 @@ int do_tind(blkadr)
 long blkadr;
 {
     unsigned char tindblk[512];
-    long block;
+    long blocks[SMSZ];
     short i;
 
     /* failed to read */
@@ -847,12 +847,12 @@ long blkadr;
        return(0);
     }
 
+    l3tol(blocks,tindblk,SMSZ);
     for(i=0; i<SMSZ; ++i) 
     {
-       l3tol(&block,tindblk+(3*i),1);
-       if (checkrange(block))
+       if (checkrange(blocks[i]))
        {
-           if (do_dind(block))
+           if (do_dind(blocks[i]))
                return(1);
        }
     }
