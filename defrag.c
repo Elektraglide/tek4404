@@ -864,11 +864,11 @@ long blkadr;
 int mark_in_map(fdnptr)
 struct inode *fdnptr;
 {
-    long blocks[13];
+    long blocks[FMSZ+3];
     register int i;
 
     blkcount = 0;
-    l3tol(blocks,(unsigned char *)fdnptr->fd_blk,13);
+    l3tol(blocks,(unsigned char *)fdnptr->fd_blk, FMSZ+3);
 
     /* track which cylinders are used */
     currfdlayout.numcylinders = 0;
