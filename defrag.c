@@ -895,6 +895,22 @@ struct inode *fdnptr;
 
     return(0);
 }
+char *perms(prm)
+char prm;
+{
+static char buff[8];
+
+	buff[0] = prm & S_ISUID ? 's' : '-';
+	buff[1] = prm & S_IREAD ? 'r' : '-';
+	buff[2] = prm & S_IWRITE ? 'w' : '-';
+	buff[3] = prm & S_IEXEC ? 'x' : '-';
+	buff[4] = prm & S_IOREAD ? 'r' : '-';
+	buff[5] = prm & S_IOWRITE ? 'w' : '-';
+ 	buff[6] = prm & S_IOEXEC ? 'x' : '-';
+	buff[7] = '\0';
+	
+	return buff;
+}
 
 void enum_files(fdnptr, fullpath)
 struct inode *fdnptr;
@@ -903,7 +919,6 @@ char *fullpath;
 	long blocks[FMSZ];
 	int i,j,k;
 	char subpath[128];
-	char apath[128];
 	
 	/* just read direct blocks */
 	l3tol(blocks,(unsigned char *)fdnptr->fd_blk,FMSZ);
@@ -912,9 +927,9 @@ char *fullpath;
 		if (blocks[j])
 		{
 			struct dirblk dentries[32];
-			int len;
+			int originallen;
 			
-			len = strlen(fullpath);
+			originallen = strlen(fullpath);
 			
 			/* read 32 dir entries */
 			rdblk(blocks[j], (unsigned char *)dentries);
@@ -964,37 +979,34 @@ char *fullpath;
 						append += sizeof(dentries[0].d_name);
 						i++;
 						sprintf(append, "%c%.13s", dentries[i].d_name[0] & 0x7f,dentries[i].d_name+1);
-					} while (dentries[i].d_name[0] & 0x80 && dentries[i].d_fdn == 0);
+					} while ((dentries[i].d_name[0] & 0x80) && dentries[i].d_fdn == 0);
 				}
 
 				/* follow blocks and mark in map */
 				mark_in_map(&currfdn);
 
-				printf("%5d blocks: %s%s\033[0J\033[1G\n", currfdlayout.numblocks, fullpath, subpath);
+				printf("%5d %7s %s%s\033[0J\033[1G\n", currfdlayout.numblocks, perms(currfdn.fd_prm), fullpath, subpath);
 
 				if ((currfdn.fd_mod & S_IFMT) == S_IFDIR)
 				{
-					++dirfdns;
-
 					/* recurse on subdir */
 					strcat(fullpath, subpath);
 					strcat(fullpath, "/");
 					enum_files(&currfdn, fullpath);
-					fullpath[len] = '\0';
+					/* truncate back to original length */
+					fullpath[originallen] = '\0';
 				}
 				else
 				if ((currfdn.fd_mod & S_IFMT) == S_IFREG)
 				{
-					short minc, maxc, maxcylseek, fixedsize;
+					short minc, maxc, maxcylseek, fixedsize, bestcylcount;
 					short needsmoving = 0;
 
-					++regfdns;
-
 					/* best case cylinder requirement */
-					k = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
+					bestcylcount = (currfdlayout.real_filesize + (BLOCKSPERCYLINDER << 9) - 1) / (BLOCKSPERCYLINDER << 9);
 
-					/* inefficient cylinder use: using >5 cylinders over expected for filesize  */
-					needsmoving |= (currfdlayout.numcylinders - k > 5);
+					/* inefficient cylinder use: using >5 cylinders more than expected for filesize  */
+					needsmoving |= (currfdlayout.numcylinders - bestcylcount > 5);
 
 					/* spaced out cylinder use? find range */
 					/* FIXME: we should sort and look for gaps in cylinder usage */
@@ -1003,12 +1015,14 @@ char *fullpath;
 					maxcylseek = 0;
 					for (k = 0; k < currfdlayout.numcylinders; k++)
 					{
+							/* track largest gap between cylinders */
 							if (k > 0)
 							{
 								short diff = currfdlayout.cid[k] - currfdlayout.cid[k-1];
 								if (diff < 0) diff = -diff;
 								if (diff > maxcylseek) maxcylseek = diff;
 							}
+							/* track min/max cylinder use */
 							if (currfdlayout.cid[k] < minc) minc = currfdlayout.cid[k];
 							if (currfdlayout.cid[k] > maxc) maxc = currfdlayout.cid[k];
 					}
@@ -1019,7 +1033,7 @@ char *fullpath;
 					/* seeking to cylinders far apart */
 					needsmoving |= maxcylseek > 4;
 					
-					/* is read-only or executable => fixed length file */
+					/* is executable or read-only => fixed length file */
 					fixedsize = (currfdn.fd_prm &S_IPRM) & (S_IEXEC | S_IOEXEC);
 					fixedsize |= !(currfdn.fd_prm &S_IPRM) & (S_IWRITE | S_IOWRITE);
 
@@ -1051,19 +1065,6 @@ short phase_a;
     long real_filesize, swapbeg, gfblks();
     int i, j, k;
     USHORT swapsize;
-
-    /* track FD */
-    freefdns = usedfdns = 0;
-    blkfdns = chrfdns = dirfdns = regfdns = 0;
-
-    /* track blocks */
-    freeblks = 0;
-    regblks = dirblks = mapblks = 0;
-
-    /* track errors */
-    dups_cnt = oors_cnt = 0;
-    oorfbks = dupfbks = 0;
-    dupblks = oorblks = missbks = 0;
 
     /* walk whole filesystem to find candidates */
 		mappingmode = BUILDFILE;
@@ -1108,15 +1109,15 @@ short phase_a;
     }
 
     /* show stats beneath map */
-    i  = (mapsize * 8 / BLOCKSPERCYLINDER) / 80 * 8;
-    i += (mapsize * 8 / 640);
+    i  = (mapsize * 8 / BLOCKSPERCYLINDER) / 80 * 8;	/* cylinder map */
+    i += (mapsize * 8 / 640);													/* block map */
     j = 1 + (i / 15);
     printf("\033[%dH", j + 1);
     printf("%d files,  %d directories\n", regfdns, dirfdns);
     printf("%d free Fdns  %d cylinders\n", freefdns, i);
     printf("\033[%d;32r", j + 1);
 
-    /* find candidates to move and find space */
+    /* find space and move each candidate */
     for(i=0; i< numcandidates; i++)
     {
         short minc, maxc;
