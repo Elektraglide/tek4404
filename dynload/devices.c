@@ -115,7 +115,7 @@ int majmin;
   struct task *atask;
   char tmp[8];
      
-  kprint("cd_open\n");
+/*  kprint("cd_open\n");  */
 
   /* make ascii device major.minor */
   kitoa(devname, (majmin >> 8));
@@ -127,7 +127,7 @@ cd_close(userblk,majmin)
 struct userbl *userblk;
 int majmin;
 {
-  kprint("cd_close\n");
+/*  kprint("cd_close\n");  */
 }
 static unsigned long newrnd = 291964;
 cd_read(userblk,majmin)
@@ -248,9 +248,6 @@ CDfuncs *chrdev;
   chrdev->write = cd_write;
   chrdev->special = cd_special;
 
-  kprinthex("char device is major(0x",CDMAJOR, 2);
-  kprint(")\n");  
-  
   return(CDMAJOR);
 }
  
