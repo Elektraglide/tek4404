@@ -18,12 +18,10 @@ waitbutton(msg)
 char *msg;
 {
   struct POINT origin;
-  char buffer[64];
 
      origin.x = 250;
      origin.y = 16;
-     sprintf(buffer, "wait %s", msg);
-     StringDraw(buffer, &origin);
+     StringDraw(msg, &origin);
 
      while (GetButtons());
 }
@@ -67,31 +65,17 @@ int n;
         waiting++;
 }
 
-#define BSIZE 42
+#define BSIZE 40
 #define BX (640 - BSIZE*8)/2
 #define BY (480 - BSIZE*8)/2
 
 /* more external arrows => easier.. */
 #define NUMEDGERS 20
 
-#define FIRST 0x80
-#define LAST 0x40
-#define CORNER 0x20
-
-#define CL  255
-#define N   0
-#define E   1
-#define S   2
-#define W   3
-
-#define NW  (N + (W<<2))
-#define NE  (N + (E<<2))
-#define SE  (S + (E<<2))
-#define SW  (S + (W<<2))
-#define EN  (E + (N<<2))
-#define ES  (E + (S<<2))
-#define WS  (W + (S<<2))
-#define WN  (W + (N<<2))
+typedef int packedxy;
+#define PACKXY(X,Y) (Y*BSIZE+X)
+#define UNPACKX(XY) (XY % BSIZE)
+#define UNPACKY(XY) (XY / BSIZE)
 
 struct FORM* corners[16];
 struct FORM* straights[4];
@@ -163,10 +147,23 @@ buildblocks()
 unsigned char board[BSIZE][BSIZE];
 int deltamove[4][2] = { {0,-1},{1,0},{0,1},{-1,0} };
 
+#define FIRST 0x80
+#define LAST 0x40
+#define CORNER 0x20
+
+#define CL  255
+#define N   0
+#define E   1
+#define S   2
+#define W   3
+
+#define ISCLEAR(X,Y) (board[Y][X] == CL)
+#define ISUSED(X,Y) ((board[Y][X] & 0x10) != 0x10)
+
 void drawcell(x, y)
 short x, y;
 {
-    if (board[y][x] != CL)
+    if (ISUSED(x,y))
     {
         if (board[y][x] & CORNER)
         {
@@ -257,7 +254,7 @@ short x, y, tile;
     short nx, ny, newtile;
 
     len = 0;
-    while ((board[y][x] == CL))
+    while (ISCLEAR(x,y))
     {
         /*
         printf("%d,%d dir=%d dx=%d dy=%d len=%d  \015", x, y, tile, deltamove[tile&15][0], deltamove[tile&15][1], len);
@@ -272,7 +269,7 @@ short x, y, tile;
         ny = y + deltamove[tile][1];
 
         /* is it blocked? or too long? */
-        if (isoob(nx,ny) || (board[ny][nx] != CL) || (len > 4 && ((rand() & 31) < 8)))
+        if (isoob(nx,ny) || (ISUSED(nx,ny)) || (len > 4 && ((rand() & 31) < 8)))
         {
             short newtile;
 
@@ -287,7 +284,7 @@ short x, y, tile;
             nx = x + deltamove[newtile][0];
             ny = y + deltamove[newtile][1];
 
-            if (isoob(nx, ny) || (board[ny][nx] != CL))
+            if (isoob(nx, ny) || (ISUSED(nx,ny)))
             {
                 break;
             }
@@ -302,7 +299,7 @@ short x, y, tile;
         }
 
         /* chance early out */
-        if (len > 4 && (len > (rand() & 255)))
+        if (len > 8 && (len > (rand() & 255)))
             break;
 
         /* move to next */
@@ -318,11 +315,61 @@ short x, y, tile;
     /* never create runts */
     if (len == 0)
         board[y][x] = CL;
+
+#ifdef DEBUG
+    drawlevel();
+    while (GetButtons() == 0);
+    waitbutton("xxx");
+#endif
+}
+
+packedxy chooseneighbour(x, y)
+short x, y;
+{
+    short tile, nx, ny, r;
+
+    /* ensure we have at least 1 move */
+    tile = rand() & 3;
+    for (r = 0; r < 4; r++)
+    {
+        nx = x + deltamove[tile][0];
+        ny = y + deltamove[tile][1];
+        if (ISCLEAR(nx,ny))
+            break;
+        tile++;
+        tile &= 3;
+    }
+
+    if (r < 4)
+        return PACKXY(nx,ny);
+    else
+        return -1;
+}
+
+int choosedirection(x, y)
+short x, y;
+{
+    short tile, nx, ny, r;
+
+    /* ensure we have at least 1 move */
+    tile = rand() & 3;
+    for (r = 0; r < 4; r++)
+    {
+        nx = x + deltamove[tile][0];
+        ny = y + deltamove[tile][1];
+        if (ISCLEAR(nx,ny))
+            break;
+        tile++;
+        tile &= 3;
+    }
+
+    return tile;
 }
 
 void
 buildlevel()
 {
+    packedxy xy;
     short x, y, r, tile;
     short len;
     short nx, ny;
@@ -335,6 +382,14 @@ buildlevel()
         {
             board[y][x] = CL;
         }
+    }
+
+    /* mask out playfield */
+    for (x = 0; x < BSIZE; x++)
+    {
+        /* fail ISCLEAR pass ISUSED */
+        board[BSIZE/2][x] = 0x10;
+        board[x][BSIZE / 2] = 0x10;
     }
 
     edgers = NUMEDGERS;
@@ -368,31 +423,41 @@ buildlevel()
                 break;
             }
 
-        } while (board[y][x] != CL);
+        } while (ISUSED(x,y));
 
         /* grow it */
         growarrow(x, y, tile);
+
+        /* try grafting another onto tail */
+        xy = findtail(x, y);
+        if (xy > 0)
+        {
+            nx = UNPACKX(xy);
+            ny = UNPACKY(xy);
+            xy = chooseneighbour(nx, ny);
+            if (xy > 0)
+            {
+                x = UNPACKX(xy);
+                y = UNPACKY(xy);
+                tile = choosedirection(x, y);
+                growarrow(x, y, tile);
+            }
+        }
     }
 
     for (y = 0; y < BSIZE; y++)
     {
         for (x = 0; x < BSIZE; x++)
         {
-            if (board[y][x] == CL)
+            if (ISCLEAR(x,y))
             {
-                /* ensure we have at least 1 move */
-                tile = rand() & 3;
-                for (r=0; r<4; r++)
+                xy = chooseneighbour(x, y);
+                if (xy > 0)
                 {
-                    nx = x + deltamove[tile][0];
-                    ny = y + deltamove[tile][1];
-                    if (board[ny][nx] == CL)
-                        break;
-                    tile++;
-                    tile &= 3;
+                    nx = UNPACKX(xy);
+                    ny = UNPACKY(xy);
+                    growarrow(nx,ny, tile);
                 }
-                if (r<4)
-                    growarrow(x, y, tile);
             }
         }
     }
@@ -403,7 +468,7 @@ int istip(x, y)
 short x, y;
 {
 
-    return (board[y][x] & FIRST);
+    return (!isoob(x,y) && (board[y][x] & FIRST));
 }
 
 int canmove(x, y)
@@ -422,7 +487,7 @@ short x, y;
         if (isoob(x, y))
             break;
 
-        if (board[y][x] != CL)
+        if (ISUSED(x,y))
             return 0;
     }
 
@@ -430,7 +495,7 @@ short x, y;
     return 1;
 }
 
-int findtail(x, y)
+packedxy findtail(x, y)
 short x, y;
 {
     short len;
@@ -444,8 +509,8 @@ short x, y;
 
         /* follow direction and handle corners */
         tile = board[y][x];
-        if ((tile & LAST) || (tile == CL))
-            return y * BSIZE + x;
+        if ((tile & LAST) || ISCLEAR(x,y))
+            return PACKXY(x,y);
  
          if (tile & CORNER)
              tile >>= 2;
@@ -456,8 +521,8 @@ short x, y;
         ny = y + deltamove[tile][1];
 
         /* last known good */
-        if (board[ny][nx] == CL)
-            return y * BSIZE + x;
+        if (ISCLEAR(nx,ny))
+            return PACKXY(x, y);
 
         x = nx;
         y = ny;
@@ -469,8 +534,9 @@ short x, y;
 void retire(x, y)
 short x, y;
 {
+    packedxy xy;
     short tile = board[y][x] & 3;
-    short nx, ny, xy;
+    short nx, ny;
     short lx, ly;
 
     lx = ly = -1;
@@ -508,8 +574,8 @@ short x, y;
         xy = findtail(x, y);
         if (xy > 0)
         {
-            lx = xy % BSIZE;
-            ly = xy / BSIZE;
+            lx = UNPACKX(xy);
+            ly = UNPACKY(xy);
             bb.srcform = &BlackMask;
             bb.srcpoint.x = 0;
             bb.srcpoint.y = 0;
@@ -566,11 +632,7 @@ char *argv[];
 
     screen = InitGraphics(FALSE);
     font = FontOpen("/fonts/PellucidaSans-Serif36.font");
-   fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
-      font->maps->fixed,font->maps->maxw, 
-      font->maps->line, font->maps->baseline);
 
-    printf("starting alarm\n");
     ESetSignal();
     frametime = EGetTime() + 500;
     framenum = 0;
@@ -607,6 +669,7 @@ char *argv[];
    /* animate it */
    while(1)
    {
+       char msg[32];
        short x, y;
 
        GetMPosition(&origin);
@@ -645,8 +708,6 @@ char *argv[];
 
        if (GetButtons() & M_LEFT)
        {
-           char msg[32];
-
            if (istip(x, y))
            {
                if (canmove(x, y))
@@ -663,14 +724,14 @@ char *argv[];
                printf("*** NOT TIP\015");
            }
 
-           sprintf(msg, "cell %d,%d 0x%2.2x  ", x, y, board[y][x]);
            waitbutton(msg);
        }
 
-
-
-
-
+       waitframes(1);
+       sprintf(msg, "cell[%d,%d 0x%2.2x]    ", x, y, board[y][x] );
+       origin.x = 250;
+       origin.y = 16;
+       StringDraw(msg, &origin);
    }
 
 }
