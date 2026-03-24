@@ -65,9 +65,11 @@ int n;
         waiting++;
 }
 
-#define BSIZE 40
-#define BX (640 - BSIZE*8)/2
-#define BY (480 - BSIZE*8)/2
+/* set by args */
+int BSIZE;
+
+#define BX ((640 - BSIZE*8)/2)
+#define BY ((450 - BSIZE*8)/2)
 
 /* more external arrows => easier.. */
 #define NUMEDGERS 20
@@ -144,7 +146,9 @@ buildblocks()
     }
 }
 
-unsigned char board[BSIZE][BSIZE];
+#define MAXBOARD 64
+
+unsigned char board[MAXBOARD * MAXBOARD];
 int deltamove[4][2] = { {0,-1},{1,0},{0,1},{-1,0} };
 
 #define FIRST 0x80
@@ -157,31 +161,31 @@ int deltamove[4][2] = { {0,-1},{1,0},{0,1},{-1,0} };
 #define S   2
 #define W   3
 
-#define ISCLEAR(X,Y) (board[Y][X] == CL)
-#define ISUSED(X,Y) ((board[Y][X] & 0x10) != 0x10)
+#define ISCLEAR(X,Y) (board[Y*64+X] == CL)
+#define ISUSED(X,Y) ((board[Y*64+X] & 0x10) != 0x10)
 
 void drawcell(x, y)
 short x, y;
 {
     if (ISUSED(x,y))
     {
-        if (board[y][x] & CORNER)
+        if (board[y*64+x] & CORNER)
         {
-            bb.srcform = corners[board[y][x] & 15];
+            bb.srcform = corners[board[y * 64 + x] & 15];
         }
         else
-        if (board[y][x] & FIRST)
+        if (board[y * 64 + x] & FIRST)
         {
-            bb.srcform = tips[board[y][x] & 3];
+            bb.srcform = tips[board[y * 64 + x] & 3];
         }
         else
         {
-            bb.srcform = straights[board[y][x] & 3];
+            bb.srcform = straights[board[y * 64 + x] & 3];
         }
 
 #if 0
         /* mark last */
-        bb.halftoneform = (board[y][x] & LAST) ? &GrayMask : &BlackMask;
+        bb.halftoneform = (board[y * 64 + x] & LAST) ? &GrayMask : &BlackMask;
 #endif
 
         bb.srcpoint.x = 0;
@@ -259,10 +263,10 @@ short x, y, tile;
         /*
         printf("%d,%d dir=%d dx=%d dy=%d len=%d  \015", x, y, tile, deltamove[tile&15][0], deltamove[tile&15][1], len);
        */
-        board[y][x] = tile;
+        board[y * 64 + x] = tile;
         /* mark first cell */
         if (len == 0)
-            board[y][x] |= FIRST;
+            board[y * 64 + x] |= FIRST;
 
         /* next move */
         nx = x + deltamove[tile][0];
@@ -290,10 +294,10 @@ short x, y, tile;
             }
 
             /* make a corner and encode next direction */
-            board[y][x] = CORNER | tile + (newtile << 2);
+            board[y * 64 + x] = CORNER | tile + (newtile << 2);
 
             if (len == 0)
-                board[y][x] = FIRST | newtile;
+                board[y * 64 + x] = FIRST | newtile;
 
             tile = newtile;
         }
@@ -310,11 +314,11 @@ short x, y, tile;
     }
 
     /* mark last tile */
-    board[y][x] |= LAST;
+    board[y * 64 + x] |= LAST;
 
     /* never create runts */
     if (len == 0)
-        board[y][x] = CL;
+        board[y * 64 + x] = CL;
 
 #ifdef DEBUG
     drawlevel();
@@ -389,7 +393,7 @@ buildlevel()
     {
         for (x = 0; x < BSIZE; x++)
         {
-            board[y][x] = CL;
+            board[y * 64 + x] = CL;
         }
     }
 #if 0
@@ -397,8 +401,8 @@ buildlevel()
     for (x = 0; x < BSIZE; x++)
     {
         /* fail ISCLEAR pass ISUSED */
-        board[BSIZE/2][x] = 0x10;
-        board[x][BSIZE / 2] = 0x10;
+        board[BSIZE/2 * 64 + x] = 0x10;
+        board[x * 64 + BSIZE/2] = 0x10;
     }
 #endif
 
@@ -502,13 +506,13 @@ int istip(x, y)
 short x, y;
 {
 
-    return (!isoob(x,y) && (board[y][x] & FIRST));
+    return (!isoob(x,y) && (board[y * 64 + x] & FIRST));
 }
 
 int canmove(x, y)
 short x, y;
 {
-    short tile = board[y][x] & 3;
+    short tile = board[y * 64 + x] & 3;
     short i;
 
     /* keep moving in same direction until board edge */
@@ -542,7 +546,7 @@ short x, y;
         short newtile;
 
         /* follow direction and handle corners */
-        tile = board[y][x];
+        tile = board[y * 64 + x];
         if (tile & FIRST)
             return PACKXY(x, y);
 
@@ -572,7 +576,7 @@ short x, y;
         short newtile;
 
         /* follow direction and handle corners */
-        tile = board[y][x];
+        tile = board[y * 64 + x];
         if ((tile & LAST) || ISCLEAR(x,y))
             return PACKXY(x,y);
  
@@ -599,7 +603,7 @@ void retire(x, y)
 short x, y;
 {
     packedxy xy;
-    short tile = board[y][x] & 3;
+    short tile = board[y * 64 + x] & 3;
     short nx, ny;
     short lx, ly;
 
@@ -650,7 +654,7 @@ short x, y;
             bb.rule = bbnS;
             BitBlt(&bb);
 
-            board[ly][lx] = CL;
+            board[ly * 64 + lx] = CL;
         }
 
         waitframes(2);
@@ -688,6 +692,14 @@ char *argv[];
     struct RECT r;
     short oldx, oldy;
 
+    BSIZE = 32;
+    for (i = 1; i < argc; i++)
+    {
+        BSIZE = atol(argv[i]);
+    }
+    if (BSIZE > MAXBOARD)
+        exit(-1);
+    
     printf("\033[30;33r\033[1H");
 
     SaveDisplayState(&ds);
@@ -801,7 +813,7 @@ char *argv[];
        }
 
        waitframes(1);
-       sprintf(msg, "cell[%d,%d 0x%2.2x]    ", x, y, board[y][x] );
+       sprintf(msg, "cell[%d,%d 0x%2.2x]    ", x, y, board[y * BSIZE + x] );
        origin.x = 250;
        origin.y = 16;
        StringDraw(msg, &origin);
