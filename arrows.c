@@ -318,7 +318,6 @@ short x, y, tile;
 
 #ifdef DEBUG
     drawlevel();
-    while (GetButtons() == 0);
     waitbutton("xxx");
 #endif
 }
@@ -346,11 +345,20 @@ short x, y;
         return -1;
 }
 
-int choosedirection(x, y)
-short x, y;
+int choosedirection(x, y, tx, ty)
+short x, y, tx, ty;
 {
     short tile, nx, ny, r;
 
+#if 1
+    /* choose direction pointing at tx,ty*/
+    nx = tx - x;
+    ny = ty - y;
+    if (nx == 0)
+        tile = (ny > 0) ? S : N;
+    if (ny == 0)
+        tile = (nx > 0) ? E : W;
+#else
     /* ensure we have at least 1 move */
     tile = rand() & 3;
     for (r = 0; r < 4; r++)
@@ -362,6 +370,7 @@ short x, y;
         tile++;
         tile &= 3;
     }
+#endif
 
     return tile;
 }
@@ -383,7 +392,7 @@ buildlevel()
             board[y][x] = CL;
         }
     }
-
+#if 0
     /* mask out playfield */
     for (x = 0; x < BSIZE; x++)
     {
@@ -391,6 +400,7 @@ buildlevel()
         board[BSIZE/2][x] = 0x10;
         board[x][BSIZE / 2] = 0x10;
     }
+#endif
 
     edgers = NUMEDGERS;
     while (edgers--)
@@ -439,8 +449,25 @@ buildlevel()
             {
                 x = UNPACKX(xy);
                 y = UNPACKY(xy);
-                tile = choosedirection(x, y);
+                tile = choosedirection(x, y, nx,ny);
                 growarrow(x, y, tile);
+
+                /* try grafting another onto tail */
+                xy = findtail(x, y);
+                if (xy > 0)
+                {
+                    nx = UNPACKX(xy);
+                    ny = UNPACKY(xy);
+                    xy = chooseneighbour(nx, ny);
+                    if (xy > 0)
+                    {
+                        x = UNPACKX(xy);
+                        y = UNPACKY(xy);
+                        tile = choosedirection(x, y, nx, ny);
+                        growarrow(x, y, tile);
+                    }
+                }
+
             }
         }
     }
@@ -451,13 +478,20 @@ buildlevel()
         {
             if (ISCLEAR(x,y))
             {
-                xy = chooseneighbour(x, y);
-                if (xy > 0)
+
+                /* ensure we have at least 1 move */
+                tile = rand() & 3;
+                for (r = 0; r < 4; r++)
                 {
-                    nx = UNPACKX(xy);
-                    ny = UNPACKY(xy);
-                    growarrow(nx,ny, tile);
+                    nx = x + deltamove[tile][0];
+                    ny = y + deltamove[tile][1];
+                    if (ISCLEAR(nx, ny))
+                        break;
+                    tile++;
+                    tile &= 3;
                 }
+
+                growarrow(x, y, tile);
             }
         }
     }
@@ -493,6 +527,36 @@ short x, y;
 
     /* has clear path */
     return 1;
+}
+
+packedxy findhead(x, y)
+short x, y;
+{
+    short len;
+
+    len = 256;
+    while (--len > 0)
+    {
+        short nx, ny;
+        short tile;
+        short newtile;
+
+        /* follow direction and handle corners */
+        tile = board[y][x];
+        if (tile & FIRST)
+            return PACKXY(x, y);
+
+        tile &= 3;
+
+        /* get to previous tile */
+        nx = x - deltamove[tile][0];
+        ny = y - deltamove[tile][1];
+
+        x = nx;
+        y = ny;
+    }
+    printf("find: FAIL\015");
+    return -1;
 }
 
 packedxy findtail(x, y)
@@ -589,10 +653,10 @@ short x, y;
             board[ly][lx] = CL;
         }
 
-        waitframes(1);
+        waitframes(2);
     }
 
-    /* cleaning up */
+    /* cleaning up until offscreen */
     do
     {
         /* NB reverse direction */
@@ -609,7 +673,8 @@ short x, y;
         bb.rule = bbnS;
         BitBlt(&bb);
 
-        waitframes(1);
+        waitframes(2);
+
     } while (bb.destrect.x > 0 && bb.destrect.y > 0 && bb.destrect.x < 640 && bb.destrect.y < 480);
 
 }
@@ -676,6 +741,7 @@ char *argv[];
        x = (origin.x - BX) / 8;
        y = (origin.y - BY) / 8;
 
+       /* redraw cursor */
        if (x != oldx || y != oldy)
        {
            /* remove old */
@@ -708,11 +774,18 @@ char *argv[];
 
        if (GetButtons() & M_LEFT)
        {
+           packedxy xy;
+
+           xy = findhead(x, y);
+           x = UNPACKX(xy);
+           y = UNPACKY(xy);
+
            if (istip(x, y))
            {
                if (canmove(x, y))
                {
                    retire(x, y);
+                   oldx = oldy = -1;
                }
                else
                {
