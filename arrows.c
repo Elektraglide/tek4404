@@ -202,7 +202,7 @@ short x, y, l;
 {
     short r;
 
-    for (r = 0; r <= l; r++)
+    for (r = 0; r < l; r++)
     {
         drawcell(x+r, y);
     }
@@ -213,7 +213,7 @@ short x, y, l;
 {
     short r;
 
-    for (r = 0; r <= l; r++)
+    for (r = 0; r < l; r++)
     {
         drawcell(x, y+r);
     }
@@ -223,15 +223,15 @@ void drawlevel()
 {
     short x, y, r;
 
-    x = (BSIZE / 2) - 1;
+    x = (BSIZE / 2);
     y = (BSIZE / 2);
     for (r = 1; r < BSIZE / 2; r++)
     {
-        drawhline(x - r, y - r, r + r);
-        drawhline(x - r, y + r, r + r);
+        drawhline(x - 1 - r, y - r, r + r + 1);
+        drawhline(x - 1 - r, y + r, r + r + 2);
 
-        drawvline(x - r, y - r, r + r);
-        drawvline(x + r, y - r, r + r);
+        drawvline(x - 1 - r, y - 1 - r, r + r + 1);
+        drawvline(x + r, y - 1 - r, r + r + 2);
     }
 
     for (y = 0; y < BSIZE; y++)
