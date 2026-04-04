@@ -363,6 +363,14 @@ char *typename;
   // write text (starts after header)
   n = lseek(elf_fd, 0, SEEK_CUR);
   lseek(fd, 0x000 + 0x40, SEEK_SET);
+
+	// if its demand-loaded, it will be on 512 byte boundary
+	if (ph.magic[1] & 0x20)
+	{
+		fprintf(stderr,"demand-loaded (.text)\n");
+		lseek(fd, 512, SEEK_SET);
+	}
+	
   i = ntohl(ph.textsize);
   fprintf(stderr,"wrote %d bytes at %d (.text)\n", i, n);
   while ((i > 0) && (n = read(fd, buffer,  min(i,sizeof(buffer)) )) > 0)
