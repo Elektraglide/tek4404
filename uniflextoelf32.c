@@ -99,8 +99,17 @@ char *typename;
   fprintf(stderr, "relocsize = %08x\n", ntohs(ph.relocsize));
   fprintf(stderr, "minpage = %d maxpage = %d stack = %d\n", ntohs(ph.minpage),ntohs(ph.maxpage),ntohs(ph.stacksize));
 
+	// header size differs
+	uint32_t headersize = 0x40;
+	if (ph.magic[1] & 0x20)
+	{
+		fprintf(stderr,"demand-loaded (.text)\n");
+		headersize = 0x200;
+	}
+  fprintf(stderr, "headersize = %04x\n", headersize);
+
   /* datastart offset from header */
-  i =  ntohl(ph.datastart) + 0x40;
+  i =  ntohl(ph.datastart) + headersize;
   fprintf(stderr, "datastart = %08x\n", i);
 
   /* writing ELF */
@@ -224,7 +233,7 @@ char *typename;
   /* seek to symbols (offset from end) */
   n = lseek(fd, 0, SEEK_END);
   //fprintf(stderr, "total length = %08x\n", n);
-  n = lseek(fd, 0x40 + ntohl(ph.textsize)+ntohl(ph.datasize), SEEK_SET);
+  n = lseek(fd, headersize + ntohl(ph.textsize)+ntohl(ph.datasize), SEEK_SET);
   fprintf(stderr, "symbolstart = %08X\n", n);
   lseek(fd, n, SEEK_SET);
   
@@ -359,17 +368,10 @@ char *typename;
     fprintf(stderr,"wrote %d bytes (Section%d 0x%08x %d %d)\n", (int)sizeof(sect[0]), i, ntohl(sect[i].sh_addr), ntohl(sect[i].sh_offset), ntohl(sect[i].sh_size));
     write(elf_fd, &sect[i], sizeof(sect[0]));
   }
-  
+
   // write text (starts after header)
   n = lseek(elf_fd, 0, SEEK_CUR);
-  lseek(fd, 0x000 + 0x40, SEEK_SET);
-
-	// if its demand-loaded, it will be on 512 byte boundary
-	if (ph.magic[1] & 0x20)
-	{
-		fprintf(stderr,"demand-loaded (.text)\n");
-		lseek(fd, 512, SEEK_SET);
-	}
+  lseek(fd, 0x000 + headersize, SEEK_SET);
 	
   i = ntohl(ph.textsize);
   fprintf(stderr,"wrote %d bytes at %d (.text)\n", i, n);
@@ -381,7 +383,7 @@ char *typename;
 
   // write data (starts after text)
   n = lseek(elf_fd, 0, SEEK_CUR);
-  lseek(fd, ntohl(ph.textsize) + 0x40, SEEK_SET);
+  lseek(fd, ntohl(ph.textsize) + headersize, SEEK_SET);
   i = ntohl(ph.datasize);
   fprintf(stderr,"wrote %d bytes at %d (.data)\n", i, n);
   while ((i > 0) && (n = read(fd, buffer, min(i,sizeof(buffer)) )) > 0)
