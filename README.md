@@ -10,6 +10,8 @@ Generally uses #ifdef __clang__ for compiling on modern Un*x
 - **ifdump.c**  - uses diddle() to extract MAC address, assigned IP and stats<br>
 - **dhcp.c**  - DHCP client; needs router address for Uniflex since we cant do SO_BROADCAST <br>
 - **ash.c**  - replacement minimal shell with history, autocomplete, jobs & various builtins that runs in 36k not 350k <br>
+- **ctrace.c**  - log kernel calls made during execution of argument <br>
+- **systat.c**  - extract system kernel settings <br>
 
 - **uniflexshim.h**  - working but incomplete Uniflex emulation to allow compiling these on Darwin<br>
 
