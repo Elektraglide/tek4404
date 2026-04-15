@@ -1,6 +1,13 @@
 #include "uniflex/userbl.h"
 #include "uniflex/task.h"
 
+
+DOES rd_io need to tek task its "ready"?
+
+refcounting needs bumping?
+
+
+
 /* char devices are device major */
 typedef struct
 {
@@ -11,17 +18,24 @@ typedef struct
   char *special;	
 } CDfuncs;
 
+typedef struct
+{
+	char* open;
+	char* close;
+	char* io;
+} BDfuncs;
+
 /* block devices are function major, device minor */
 typedef struct
 {
   char *minorfunc[9];
-} BDfuncs;
+} BDminor;
 
 typedef struct
 {
-  BDfuncs *BDopen;	
-  BDfuncs *BDclose;	
-  BDfuncs *BDio;	
+	BDminor* BDopen;
+	BDminor* BDclose;
+	BDminor* BDio;
 } BDTable;
 
 /* itoa without using mul or div! */
@@ -71,39 +85,53 @@ int rd_open(userblk,majmin)
 struct userbl *userblk;
 int majmin;
 {
+  struct task* atask;
+  char mesg[80], tmp[8];
+
   kprinthex("rd_open: dev=",majmin & 255,4);
   kprinthex(" userblk=",userblk, 8);
-  kprint("\n");  
+  kprint("\n");
+
+  atask = (struct task*)userblk->utask;
+  kstrcat(mesg, "\nCalled from task:");
+  kitoa(tmp, (int)atask->tstid);
+  kstrcat(mesg, tmp);
+  kstrcat(mesg, "\n");
 
   return 0;
 }
 
-int rd_close()
+int rd_close(userblk, majmin)
+struct userbl* userblk;
+int majmin;
 {
-   kprint("rd_close\n");
+	kprinthex("rd_close: dev=", majmin & 255, 4);
+	kprinthex(" userblk=", userblk, 8);
+	kprint("\n");
 
   return 0;
 }
 
-int rd_io(rw)
-int rw;
+int rd_io(userblk, cmd)
+struct userbl* userblk;
+int cmd;
 {
-  kprinthex("rd_io: ", rw,4);
-  kprint("\n");  
+	kprinthex("rd_io: cmd=", cmd, 4);
+	kprinthex(" userblk=", userblk, 8);
+	kprint("\n");
 
   return 0;
 }
 
-void installBD0(blktab,minor)
-BDTable *blktab;
-int minor;
+#define BDMINOR 3
+int bdinit(blkdev)
+BDfuncs* blkdev;
 {
-  blktab->BDopen->minorfunc[minor] = rd_open;
-  blktab->BDclose->minorfunc[minor] = rd_close;
-  blktab->BDio->minorfunc[minor] = rd_io;
-	
-  kprinthex("block device is major(0x00) minor(0x",minor, 2);
-  kprint(")\n");  
+  blkdev->open = rd_open;
+  blkdev->close = rd_close;
+  blkdev->io = rd_io;
+
+  return(BDMINOR);
 }
 
 char devname[8];

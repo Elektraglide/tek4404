@@ -24,7 +24,51 @@ Start
 	move.l #cd_write,12(a0)
 	move.l #cd_special,16(a0)
 	
+	move.l #bdfunc,-(sp)
+	jsr _bdinit
+	add.l #4,sp
+* minor device in d0
+	lsl.w #2,d0
+	move.l #blktab,a0
+* install trampolines to C functions
+	move.l (a0),a1
+	move.l #bd_open,0(a1,d0.w)
+	move.l 4(a0),a1
+	move.l #bd_close,0(a1,d0.w)
+	move.l 8(a0),a1
+	move.l #bd_io,0(a1,d0.w)
+	
 	move.l #0,d0
+	rts
+
+bd_open
+	move.l a3,(userblk)
+	move.l a5,-(sp)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+	move.l (bdfunc),a0
+	jsr (a0)
+	add #12,sp
+	rts
+	
+bd_close
+	move.l a3,(userblk)
+	move.l a5,-(sp)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (bdfunc+4),a0
+	jsr (a0)
+	add #12,sp
+	rts
+
+bd_io
+	move.l a3,(userblk)
+	move.l a5,-(sp)
+	move.l d7,-(sp)
+	move.l a3,-(sp)
+ 	move.l (bdfunc+8),a0
+	jsr (a0)
+	add #12,sp
 	rts
 	
 cd_open
@@ -79,6 +123,7 @@ cd_special
 
 	data
 cdfunc fqb 0,0,0,0,0
+bdfunc fqb 0,0,0 
 userblk fqb 0
 
 	text
