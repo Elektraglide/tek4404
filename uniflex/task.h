@@ -57,8 +57,8 @@ struct task {
   uchar		tsstat;		/*  task status code  */
   uchar		tsmode;		/*  task mode code  */
   uchar		tsmode2;	/*  task mode code 2  */
-  uchar		tsprir;		/*  task priority  */
-  uchar		tsprb;		/*  task priority bias  */
+  char		tsprir;		/*  task priority  */
+  char		tsprb;		/*  task priority bias  */
   uchar		tsact;		/*  task activity counter */
   uchar		tsage;		/*  task  residency age */
   
