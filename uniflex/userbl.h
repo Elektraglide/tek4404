@@ -18,7 +18,9 @@
 #define MAX_MDEP_SEGS 8		/* # of machine dependent mappable segments */
 
 /* compiling with 64-bit means we need to keep pointers as 32-bit */
+#ifndef ptr32
 #define ptr32 char *
+#endif
 #define ulongptr32 ulong *
 
 #ifdef __clang__
