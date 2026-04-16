@@ -70,6 +70,7 @@ _kernbootfile	link a6,#0
 	movem.l d2-d7/a2-a5,-(sp)
 	move.l 8(a6),a0
 	move #71,d0
+	move #0,d1		; this handler assumes d1 is zero and only loads lsbyte!
 	trap #13
 	movem.l (sp)+,d2-d7/a2-a5
 	unlk a6
