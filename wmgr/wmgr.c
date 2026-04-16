@@ -1243,6 +1243,9 @@ char **argv;
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\015",usecustomblit);
 
+  /* ensure we always get to repaint */
+  boost(getpid());
+
   menu = MenuCreateX(3,items,flags,0,font);
 
   screen = InitGraphics(TRUE);

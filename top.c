@@ -142,6 +142,9 @@ char **argv;
 	symbols = getsymbols(bootfile, &symbolsize);
 	bootstamp = getkint32(symbols, symbolsize, "sbttim", pmem);
 
+	/* boost our priority */
+	if (argc > 1 && !strcmp(argv[1],"high"))
+		boostext(symbols, symbolsize, pmem, getpid());
 
 	/* these are task scheduling profiles depending on current work */
 	len = getkconstant(symbols, symbolsize, "PERSONALITY_SIZE", pmem);
@@ -275,7 +278,7 @@ while(1)
 		read(pmem, &userbl.ustart, 4);
 		i = offsetof(struct userbl, uquantum);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.uquantum, 10);
+		read(pmem, &userbl.uquantum, 10);			/* NB reading uquantum,ucpu,usys_ratio,upersonality*/
 
 		i = offsetof(struct userbl, umem) + 2 * MTSIZE;
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
@@ -345,7 +348,7 @@ while(1)
 					if (personality == dsk_pers)  status = "DISK";
 					if (personality == tty_pers)  status = "TTY ";
 					if (personality == pip_pers)  status = "PIPE";
-					printf("%-7d %s  \033[K\n",ntohs(userbl.uquantum), status );
+					printf("%3d:%-3d %s  \033[K\n",ntohs(userbl.uquantum), ntohs(userbl.usys_ratio), status );
 				}
 				else
 				{
