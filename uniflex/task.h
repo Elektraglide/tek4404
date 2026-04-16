@@ -93,3 +93,7 @@ struct task {
 #define TTRACP 0x08   /*  task is being traced  */
 #define TSWAPO 0x10   /*  task is being swapped  */
 #define TARGX  0x20   /*  task is in argument expansion  */
+
+#define TPAUSED 0x40	/* based on ctask() processsing */
+#define TNOMAP 0x80	/* based on ctask() processsing */
+
