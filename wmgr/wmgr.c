@@ -159,6 +159,7 @@ int fdtty;
 /**********************************/
 
 #define DEBUGREPAINTxx
+#define DEBUGxx
 
 #define FORCEPAINT 	0x0001
 #define DRAGGED 		0x8000
@@ -521,7 +522,9 @@ int islogger;
   int pid,ptfd[2];
   Window *win = allwindows + numwindows;
   struct RECT r,glyph;
-
+#ifdef DEBUG
+  fprintf(stderr, "WindowCreate: %s\015", title);
+#endif
   /* term emu */
   win->vt.cols = 80;
   win->vt.rows = 32;
@@ -796,46 +799,60 @@ int forcedirty;
     /* during dragging do not update content */
     if (forcedirty & DRAGGED)
     {
-			if (win == wintopmost)
-			{
-					bb.srcform =
-					bb.destform = screen;
-					bb.destrect.x = win->contentrect.x;
-					bb.destrect.y = win->contentrect.y;
-					bb.destrect.w = win->contentrect.w;
-					bb.destrect.h = win->contentrect.h;
-					bb.halftoneform = NULL;
-					bb.rule = bbS;
+        if (win == wintopmost && contentcache)
+        {
+            bb.srcform = contentcache;
+            bb.destform = screen;
+            bb.destrect.x = win->contentrect.x;
+            bb.destrect.y = win->contentrect.y;
+            bb.destrect.w = win->contentrect.w;
+            bb.destrect.h = win->contentrect.h;
+            bb.halftoneform = NULL;
+            bb.rule = bbS;
 
-					bb.srcpoint.x = 0;
-					bb.srcpoint.y = 0;
-					BitBlt(&bb);
-					bb.srcform = screen;
-			
-          r.x = win->contentrect.x;
-          r.y = win->contentrect.y;
-          r.w = win->contentrect.w;
-          r.h = win->contentrect.h;
-          RectDebug(&r, rand() & 255,rand() & 255,rand() & 255);
-			}
-			else
-			{
-				r.x = win->contentrect.x;
-				r.y = win->contentrect.y;
-				r.w = win->contentrect.w;
-				r.h = win->contentrect.h;
-				bb.halftoneform = &WhiteMask;
-				RectDrawX(&r, &bb);
-			}
-				
-       return 0;
+            bb.srcpoint.x = 0;
+            bb.srcpoint.y = 0;
+            BitBlt(&bb);
+
+            bb.srcform = NULL;
+            bb.srcpoint.x = 0;
+            bb.srcpoint.y = 0;
+            bb.destrect.x = 0;
+            bb.destrect.y = 0;
+            bb.destrect.w = screen->w;
+            bb.destrect.h = screen->h;
+        }
+        else
+        {
+            r.x = win->contentrect.x;
+            r.y = win->contentrect.y;
+            r.w = win->contentrect.w;
+            r.h = win->contentrect.h;
+            bb.halftoneform = &WhiteMask;
+            RectDrawX(&r, &bb);
+        }
+
+        return 0;
     }
+
 
 		/* make all lines dirty */
     if (forcedirty)
-			win->vt.dirtylines = ALLDIRTY;
-			
+    {
+		win->vt.dirtylines = ALLDIRTY;
+	}
+
     /* render contents */
+    if (win->vt.dirtylines == ALLDIRTY)
+    {
+        r.x = win->contentrect.x;
+        r.y = win->contentrect.y;
+        r.w = win->contentrect.w;
+        r.h = win->contentrect.h;
+        bb.halftoneform = &WhiteMask;
+        RectDrawX(&r, &bb);
+    }
+			
     if (win->vt.dirtylines)
     {
       bb.halftoneform = NULL;
@@ -1282,10 +1299,10 @@ char **argv;
   usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
   fprintf(stderr,"usecustom=%d\015",usecustomblit);
 
-  /* ensure we always get to repaint */
-  boost(getpid());
-
   menu = MenuCreateX(3,items,flags,0,font);
+#ifdef DEBUG
+  fprintf(stderr, "MenuCreate\015");
+#endif
 
   screen = InitGraphics(TRUE);
   screenrect.x = 0;
@@ -1314,6 +1331,11 @@ char **argv;
   /* does SIGINPUT get delivered? */
 /*  signal(SIGINPUT, sh_input);  */
 
+  /* ensure we always get to repaint */
+  boost(getpid());
+#ifdef DEBUG
+  fprintf(stderr, "boost\015");
+#endif
   /* window chain */
   wintopmost = NULL;
   numwindows = 0;
@@ -1591,7 +1613,32 @@ dummysock = fdtty;
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
 
-					//	contentcache = FormCreate(win->contentrect.w, win->contentrect.h);
+            /* if it has a content window */
+            if (win->contentrect.h)
+            {
+                contentcache = FormCreate(win->contentrect.w,win->contentrect.h);
+                if (contentcache == NULL)
+                    fprintf(stderr, "Failed to open cache: %s\015", strerror(errno));
+                    
+              if (contentcache)
+              {
+                bb.srcform = screen;
+                bb.destform = contentcache;
+                bb.destrect.x = 0;
+                bb.destrect.y = 0;
+                bb.destrect.w = win->contentrect.w;
+                bb.destrect.h = win->contentrect.h;
+                bb.halftoneform = NULL;
+                bb.rule = bbS;
+
+                bb.srcpoint.x = win->contentrect.x;
+                bb.srcpoint.y = win->contentrect.y;
+                SetClip(&bb.destrect);
+                BitBlt(&bb);
+                bb.srcform = NULL;
+                bb.destform = screen;
+              }
+            }
 
             /* track drag of window frame (ie not in contentrect) */
             if (!myRectContainsPoint(&win->contentrect, &origin))
@@ -1618,9 +1665,6 @@ dummysock = fdtty;
               }
             }
             
-       //     FormDestroy(contentcache);
-            contentcache = NULL;
-            
             /* was it a Click on top left? */
             if (offset.x < 20 && offset.y < 20)
             {
@@ -1630,6 +1674,10 @@ dummysock = fdtty;
             /* repaint everything */
             Paint(wintopmost, &screenrect, FORCEPAINT);
 
+            if (contentcache)
+                FormDestroy(contentcache);
+            contentcache = NULL;
+            
             /* now has focus */
             break;
           }
