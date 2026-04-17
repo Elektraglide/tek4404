@@ -175,6 +175,8 @@ char *items[6] = {"shell","refresh", "quit to console"};
 int flags[6] = {0,MENU_LINE,0};
 struct MENU *menu;
 
+struct FORM *contentcache;
+
 int usecustomblit = 0;
 long newtime,oldtime = 0;
 char cursor;
@@ -722,43 +724,48 @@ int forcedirty;
     if (forcedirty || (win->dirty & DIRTYFRAME))
     {
       /* render (just) frame */
+
+      /* left */
       r.x = win->windowrect.x;
       r.y = win->windowrect.y + WINTITLEBAR;
-      r.w = win->windowrect.w;
+      r.w = WINBORDER;
       r.h = win->windowrect.h - WINTITLEBAR;
       bb.halftoneform = &WhiteMask;
       RectDrawX(&r, &bb);
-
-      /* margins */
+      RectInset(&r,1);
       bb.halftoneform = &BlackMask;
-
-      /* left */
-      r.x = win->windowrect.x + 1;
-      r.y = win->windowrect.y;
-      r.w = WINBORDER - 2;
-      r.h = win->windowrect.h;
       RectBoxDrawX(&r, 1, &bb);
 
       /* right */
-      r.x += win->windowrect.w - 1 - (WINBORDER-1);
+      r.x = win->windowrect.x + win->windowrect.w - WINBORDER;
+      r.y = win->windowrect.y + WINTITLEBAR;
+      r.w = WINBORDER;
+      r.h = win->windowrect.h - WINTITLEBAR;
+      bb.halftoneform = &WhiteMask;
+      RectDrawX(&r, &bb);
+      RectInset(&r,1);
+      bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
 
       /* bottom */
       r.x = win->windowrect.x;
-      r.y = win->windowrect.y + win->windowrect.h - 1 - (WINBORDER-1) + 1;
+      r.y = win->windowrect.y + win->windowrect.h - (WINBORDER);
       r.w = win->windowrect.w;
-      r.h = WINBORDER - 2;
+      r.h = WINBORDER;
+      bb.halftoneform = &WhiteMask;
+      RectDrawX(&r, &bb);
+      RectInset(&r,1);
+      bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
 
       /* title bar */
+      r.x = win->windowrect.x;
       r.y = win->windowrect.y;
+      r.w = win->windowrect.w;
       r.h = WINTITLEBAR;
       bb.halftoneform = &VeryLightGrayMask;
       RectDrawX(&r, &bb);
-      r.x += 1;
-      r.y += 1;
-      r.w -= 2;
-      r.h -= 2;
+      RectInset(&r,1);
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
 
@@ -789,6 +796,38 @@ int forcedirty;
     /* during dragging do not update content */
     if (forcedirty & DRAGGED)
     {
+			if (win == wintopmost)
+			{
+					bb.srcform =
+					bb.destform = screen;
+					bb.destrect.x = win->contentrect.x;
+					bb.destrect.y = win->contentrect.y;
+					bb.destrect.w = win->contentrect.w;
+					bb.destrect.h = win->contentrect.h;
+					bb.halftoneform = NULL;
+					bb.rule = bbS;
+
+					bb.srcpoint.x = 0;
+					bb.srcpoint.y = 0;
+					BitBlt(&bb);
+					bb.srcform = screen;
+			
+          r.x = win->contentrect.x;
+          r.y = win->contentrect.y;
+          r.w = win->contentrect.w;
+          r.h = win->contentrect.h;
+          RectDebug(&r, rand() & 255,rand() & 255,rand() & 255);
+			}
+			else
+			{
+				r.x = win->contentrect.x;
+				r.y = win->contentrect.y;
+				r.w = win->contentrect.w;
+				r.h = win->contentrect.h;
+				bb.halftoneform = &WhiteMask;
+				RectDrawX(&r, &bb);
+			}
+				
        return 0;
     }
 
@@ -1552,6 +1591,7 @@ dummysock = fdtty;
             offset.x = origin.x - win->windowrect.x;
             offset.y = origin.y - win->windowrect.y;
 
+					//	contentcache = FormCreate(win->contentrect.w, win->contentrect.h);
 
             /* track drag of window frame (ie not in contentrect) */
             if (!myRectContainsPoint(&win->contentrect, &origin))
@@ -1577,6 +1617,9 @@ dummysock = fdtty;
 #endif
               }
             }
+            
+       //     FormDestroy(contentcache);
+            contentcache = NULL;
             
             /* was it a Click on top left? */
             if (offset.x < 20 && offset.y < 20)
