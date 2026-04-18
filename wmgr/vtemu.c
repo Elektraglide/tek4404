@@ -600,6 +600,24 @@ int fdout;
             vt->cy++;
         }
         else
+        if (c == 'K')
+        {
+            clearregion(vt, RC2OFF(vt->cy, vt->cx), vt->cols - vt->cx);
+            vt->dirtylines |= (1 << vt->cy);
+            vt->linelengths[vt->cy] = vt->cols - 1;
+        }
+        else
+        if (c == 'J')
+        {
+            i = MAXTERMCOLS * MAXTERMROWS - RC2OFF(vt->cy, vt->cx);
+            clearregion(vt, RC2OFF(vt->cy, vt->cx), i);
+            for (i = vt->cy; i < vt->rows; i++)
+            {
+                vt->dirtylines |= (1 << i);
+                vt->linelengths[i] = vt->cols - 1;
+            }
+        }
+        else
         if (c == 'c')
         {
           /* reset to initial state */
