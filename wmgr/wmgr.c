@@ -298,7 +298,6 @@ int islogger;
     rc = gtty(fdslave, &slave_orig_term_settings);
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
-    new_term_settings.sg_flag &= ~ECHO;
 
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
