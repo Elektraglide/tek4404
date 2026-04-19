@@ -178,8 +178,8 @@ int fastscroll;
   {
     vt->cy -= numlines;
     /* scroll up */
-    VTmovelines(vt, vt->margintop, vt->margintop+numlines, vt->marginbot - vt->margintop - numlines);
-    VTclearlines(vt,vt->marginbot-numlines,numlines);
+    VTmovelines(vt, vt->margintop, vt->margintop+numlines, vt->marginbot - vt->margintop + 1 - numlines);
+    VTclearlines(vt,vt->marginbot,numlines);
   }
   
   vt->dirtylines |= (1<<vt->cy);
