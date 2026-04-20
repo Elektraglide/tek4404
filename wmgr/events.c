@@ -59,7 +59,7 @@ int maxlen;
   		if (currtime > lastrepeat)
   		{
             buffer[total++] = lastkey;
-  			lastrepeat = currtime + 100;
+  			lastrepeat = currtime + 25;
   		}
   	}	
   }
