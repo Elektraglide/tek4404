@@ -816,6 +816,7 @@ char **argv;
   socketopt opt;
 #endif
   int reuse = 1;
+  int reusesize = sizeof(reuse);
   char buffer[64];
   char *rparams;
     
@@ -836,7 +837,7 @@ char **argv;
       return 1;
     }
 
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &reusesize);
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -886,7 +887,7 @@ char **argv;
       if (state == STOPPED) break;
 
 #ifndef __clang__
-      /* setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)0, 0); */
+      setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)&reuse, &reusesize);
       /* is turning off Nagle supported? */
 #else
       setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
