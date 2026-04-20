@@ -4,6 +4,10 @@
 #define CLOSEBOX 8
 
 
+#define WINSHELL 0
+#define WINCONSOLE 1
+#define WINLOGIN 2
+
 typedef struct _win
 {
     /* term emulator; NB always first so we can cast it to a Window */
@@ -17,5 +21,6 @@ typedef struct _win
     int master, slave;
     int pid;
     int dirty;
-
+    short xon;
+    short type;
 } Window;

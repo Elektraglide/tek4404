@@ -55,7 +55,7 @@ extern int system_control(); /* arg=1 does something, arg=2 makes controlling te
 #define USE_TTYREADERx
 #define POLLINGINPx
 #else
-#define POLLINGPTY			/* cannot select() pty; only way to check for pty input is to poll using control_pty() */
+#define POLLINGPTY			/* cannot select() pty; only way to check for pty output is to poll using control_pty() */
 #define USE_EVENTS			/* use Event system to get input */
 #define USE_TTYREADERx		/* cannot select() stdin; use a socketpair + child process */
 #define POLLINGINPx			/* PLAN Z;  Poll stdin by checking (sg_speed & INCHR) */
@@ -178,21 +178,23 @@ struct MENU *menu;
 
 struct FORM *contentcache;
 
+int closing_down = 0;
 int usecustomblit = 0;
 long newtime,oldtime = 0;
 char cursor;
-
 
 Window *wintopmost;
 Window allwindows[32];
 int numwindows = 0;
 #ifdef __clang__
-char *logprocess[] = {"tail","-f", "/var/log/system.log", NULL};
-char *winprocess[] = {"sh", NULL};
+char *consoleprocess[] = {"tail","-f", "/var/log/system.log", NULL};
+char *shellprocess[] = {"sh", NULL};
+char *loginprocess[] = {"login", NULL };
 #else
 /* native tail is kinda noddy, this one supports follow (-f) */
-char *logprocess[] = {"/bin/UNIXtools/tail","-f", "/etc/log/system.log", NULL};
-char *winprocess[] = {"ash", NULL};
+char *consoleprocess[] = {"/bin/UNIXtools/tail","-f", "/etc/log/system.log", NULL};
+char *shellprocess[] = {"ash", NULL};
+char *loginprocess[] = {"login", NULL };
 #endif
 
 char welcome[] = "Welcome to Tektronix 4404\015";
@@ -246,13 +248,13 @@ void cleanup_child(sig)
 int sig;
 {
 
-  WindowLog("signal(%d): child of parent %d\015", sig, getpid());
+  WindowLog("signal(%d): child of parent %d\012", sig, getpid());
   exit(sig);
 }
 
-int window_session(ptfd, islogger)
+int window_session(ptfd, wintype)
 int *ptfd;
-int islogger;
+int wintype;
 {
   int fdmaster,fdslave;
   int n,rc;
@@ -286,7 +288,7 @@ int islogger;
     /* CHILD */
     signal(SIGHUP, cleanup_child);
     signal(SIGINT, cleanup_child);
-    signal(SIGQUIT, cleanup_child);    
+    signal(SIGQUIT, cleanup_child);
     signal(SIGTERM, cleanup_child);
     signal(SIGPIPE, cleanup_child);
     signal(SIGDEAD, SIG_IGN);
@@ -298,11 +300,12 @@ int islogger;
     rc = gtty(fdslave, &slave_orig_term_settings);
     new_term_settings = slave_orig_term_settings;
     new_term_settings.sg_flag |= CBREAK;
-
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
+/*
     new_term_settings.sg_prot |= TRANS;
     new_term_settings.sg_prot |= ANY;
+*/
 
     stty(fdslave, &new_term_settings);
 
@@ -324,10 +327,18 @@ int islogger;
 
     /* use preferred shell */
     if (getenv("SHELL"))
-      winprocess[0] = (char *)getenv("SHELL");
+      shellprocess[0] = (char *)getenv("SHELL");
     
     /* Execution of the session shell */
-    rc = islogger ? execvp(logprocess[0], logprocess) : execvp(winprocess[0], winprocess);
+    if (wintype == WINCONSOLE)
+        rc = execvp(consoleprocess[0], consoleprocess);
+    else
+    if (wintype == WINSHELL)
+        rc = execvp(shellprocess[0], shellprocess);
+    else
+    if (wintype == WINLOGIN)
+        rc = execvp(loginprocess[0], loginprocess);
+
     if (rc < 0)
     {
       fprintf(stderr, "Error %d on exec\015", errno);
@@ -462,8 +473,12 @@ char *msg;
 int n;
 {
   Window *win = allwindows + wid;
+
   if (!validwin(win))
-  	return -1;
+  {
+      fprintf(stderr, "invalidate win %d\015", wid);
+      return -1;
+  }
 
   if (win == wintopmost)
    removecursor(win);
@@ -507,16 +522,16 @@ unsigned int val4;
 	va_end(p);
     
 	sprintf(buffer, fmt, val1, val2, val3, val4);
-	if(wintopmost)
- 		WindowOutput(0, buffer, strlen(buffer));
- 		
- 	return 0;
+
+    WindowOutput(0, buffer, strlen(buffer));
+
+    return 0;
 }
 
-int WindowCreate(title, x, y, islogger)
+int WindowCreate(title, x, y, wintype)
 char *title;
 int x,y;
-int islogger;
+int wintype;
 {
   int pid,ptfd[2];
   Window *win = allwindows + numwindows;
@@ -524,9 +539,15 @@ int islogger;
 #ifdef DEBUG
   fprintf(stderr, "WindowCreate: %s\015", title);
 #endif
+
+  if (closing_down)
+      return -2;
+
+  win->type = wintype;
+
   /* term emu */
   win->vt.cols = 80;
-  win->vt.rows = 32;
+  win->vt.rows = wintype == WINCONSOLE ? 16 : 32;
   VTreset(&win->vt);
 
   /* size of text block */
@@ -549,7 +570,7 @@ int islogger;
   win->windowrect.h += WINTITLEBAR - WINBORDER;
 
   /* create a pty process; first window is always a logger */
-  pid = window_session(ptfd, islogger);
+  pid = window_session(ptfd, wintype);
   if (pid > 0)
   {
     win->pid = pid;
@@ -562,15 +583,24 @@ int islogger;
     win->dirty = DIRTYFRAME;
     win->vt.dirtylines = ALLDIRTY;
 
+    /* is not blocking output */
+    win->xon = 1;
+
     /* link it */
     win->next = wintopmost;
     wintopmost = win;
     numwindows++;
 
-    if (!islogger)
+    if (wintype != WINCONSOLE)
 	  	WindowOutput(numwindows-1, welcome, sizeof(welcome));
 
     WindowTop(win);
+
+    /* can we get the user login */
+    if (wintype == WINLOGIN)
+    {
+        WindowOutput(numwindows-1, "need login info\012", 16);
+    }
 
     return numwindows;
   }
@@ -731,10 +761,11 @@ int forcedirty;
       r.x = win->windowrect.x;
       r.y = win->windowrect.y + WINTITLEBAR;
       r.w = WINBORDER;
-      r.h = win->windowrect.h - WINTITLEBAR;
+      r.h = win->windowrect.h - WINTITLEBAR - WINBORDER;
       bb.halftoneform = &WhiteMask;
       RectDrawX(&r, &bb);
-      RectInset(&r,1);
+      RectInset(&r, 1);
+      r.w -= 1;  /* cosmetic hack */
       bb.halftoneform = &BlackMask;
       RectBoxDrawX(&r, 1, &bb);
 
@@ -742,7 +773,7 @@ int forcedirty;
       r.x = win->windowrect.x + win->windowrect.w - WINBORDER;
       r.y = win->windowrect.y + WINTITLEBAR;
       r.w = WINBORDER;
-      r.h = win->windowrect.h - WINTITLEBAR;
+      r.h = win->windowrect.h - WINTITLEBAR - WINBORDER;
       bb.halftoneform = &WhiteMask;
       RectDrawX(&r, &bb);
       RectInset(&r,1);
@@ -751,7 +782,7 @@ int forcedirty;
 
       /* bottom */
       r.x = win->windowrect.x;
-      r.y = win->windowrect.y + win->windowrect.h - (WINBORDER);
+      r.y = win->windowrect.y + win->windowrect.h - WINBORDER;
       r.w = win->windowrect.w;
       r.h = WINBORDER;
       bb.halftoneform = &WhiteMask;
@@ -765,7 +796,7 @@ int forcedirty;
       r.y = win->windowrect.y;
       r.w = win->windowrect.w;
       r.h = WINTITLEBAR;
-      bb.halftoneform = &VeryLightGrayMask;
+      bb.halftoneform = (win->type == WINCONSOLE) ? &DarkGrayMask : &VeryLightGrayMask;
       RectDrawX(&r, &bb);
       RectInset(&r,1);
       bb.halftoneform = &BlackMask;
@@ -1117,6 +1148,7 @@ int wid;
   Window *awin,*prevwin;
   struct RECT oldrect;
   int i;
+  short oldwintype;
 
   /* unlink it */
   prevwin = NULL;
@@ -1134,8 +1166,31 @@ int wid;
     awin = awin->next;
   }
 
-	oldrect = allwindows[wid].windowrect;
-  
+  oldrect = allwindows[wid].windowrect;
+  oldwintype = allwindows[wid].type;
+
+  /* is this required? */
+  close(ttyname(allwindows[wid].slave));
+
+  if (oldwintype == WINLOGIN)
+  {
+      int foundwin;
+
+      /* kill all WINSHELL windows */
+      do
+      {
+          foundwin = 0;
+          for (i = 0; i < numwindows; i++)
+          {
+              if (allwindows[i].type == WINSHELL)
+              {
+                  kill(allwindows[i].pid, SIGTERM);
+                  foundwin = 1;
+              }
+          }
+      } while (foundwin);
+  }
+
   if (wintopmost == &allwindows[wid])
     wintopmost = wintopmost->next;
 
@@ -1153,14 +1208,23 @@ int wid;
 
   numwindows--;
 
-
-  if (numwindows > 0)
+  /* refreshing not needed */
+  if (!closing_down)
   {
-    WindowTop(wintopmost);
+      if (numwindows > 0)
+      {
+          WindowTop(wintopmost);
+      }
+
+      SetClip(&oldrect);
+      Paint(wintopmost, &oldrect, FORCEPAINT);
+
+      /* spawn a new login */
+      if (oldwintype == WINLOGIN)
+      {
+          WindowCreate("Login", 64, 64, WINLOGIN);
+      }
   }
-  
-  SetClip(&oldrect);
-  Paint(wintopmost, &oldrect, FORCEPAINT);
 }
 
 void
@@ -1171,6 +1235,8 @@ int sig;
   int i;
 	
   fprintf(stderr, "cleanup on %d\015", sig);
+
+  closing_down = 1;
 
 #ifdef USE_TTYREADER
   ttycleanup(sig);
@@ -1210,7 +1276,6 @@ int sig;
   int i,pid;
 
   pid = wait(&i);
-  WindowLog("child proc(%d) died with exit code %d\015", pid, i);
 
   for(i=0; i<numwindows; i++)
   {
@@ -1228,7 +1293,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  WindowLog("timer signal\015");
+  WindowLog("timer signal\012");
   signal(sig, sh_timer);
   ESetAlarm(EGetTime() + 1000);
 }
@@ -1246,7 +1311,7 @@ void sh_input(sig)
 int sig;
 {
 
-  WindowLog("input signal\015");
+  WindowLog("input signal\012");
   signal(sig, sh_input);
 }
 
@@ -1275,11 +1340,8 @@ char **argv;
   
   signal(SIGDEAD, cleanup_window);
 
-#if 0
   /* watchdog */
-  signal(SIGALRM, cleanup);
-  alarm(120);
-#endif
+  signal(SIGALRM, cleanup_and_exit);
 
   SaveDisplayState(&ds);
 
@@ -1335,6 +1397,7 @@ char **argv;
 #ifdef DEBUG
   fprintf(stderr, "boost\015");
 #endif
+
   /* window chain */
   wintopmost = NULL;
   numwindows = 0;
@@ -1343,9 +1406,9 @@ char **argv;
   welcome[sizeof(welcome)-1] = 0x0a;
  
   /* create a logger of /var/log/system.log OR run a shell */
-  WindowCreate("Console", 64-WINBORDER, 50, TRUE);
+  WindowCreate("Console", 32, 32, WINCONSOLE);
 
-  WindowCreate("Window", 128, 128, FALSE);
+  WindowCreate("Login", 64, 64, WINLOGIN);
 
 #ifdef USE_TTYREADER
 
@@ -1386,10 +1449,7 @@ dummysock = fdtty;
   bind(dummysock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
 #endif
 
-	/* we want this to be snappy */
-	nice(-32);
-
-  WindowLog("Window Manager started as pid%d\015", getpid());
+  WindowLog("Window Manager started as pid%d\012", getpid());
 
   /* mainloop */
   last_read = 0;
@@ -1399,6 +1459,9 @@ dummysock = fdtty;
     FD_ZERO(&fd_in);
     FD_SET(dummysock, &fd_in);
     n = dummysock;
+
+    /* 15 second watchdog armed */
+    alarm(15);
 
 #ifndef POLLINGPTY
     for(i=0; i<numwindows; i++)
@@ -1455,40 +1518,45 @@ dummysock = fdtty;
       {
           last_read = 5;
 
-          n = (int)write(wintopmost->master, inputbuffer, n);
-		  if (n < 0)
-		  {
-		    if (errno != EINTR && errno != EWOULDBLOCK)
-		    {
-		      /* should destroy window? */
-		      break;
-		    }
-		    continue;
-		  }
-		  
           /* Uniflex pty does not handle Ctrl-D */
           if (inputbuffer[0] == 0x04)
           {
+              wintopmost->xon = 1;
+              control_pty(wintopmost->master, PTY_START_OUTPUT, 0);
               control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
               kill(wintopmost->pid, SIGHUP);
 
-              WindowLog("Sent SIGHUP to window%d\015", wintopmost - allwindows);
+              WindowLog("Sent \033[1mSIGHUP\033[0m to window(%s)\012", wintopmost->title);
           }
 
-/* we dont know whether we are in RAW mode.. */
 #if 0
+          /* we dont know whether we are in RAW mode.. */
           /* flow control DC1 / DC3 */
           if (inputbuffer[0] == 0x11)
           {
+              wintopmost->xon = 1;
               control_pty(wintopmost->master, PTY_START_OUTPUT, 0);
-              WindowLog( "XON\015");
+              WindowLog( "XON\012");
           }
           if (inputbuffer[0] == 0x13)
           {
+              wintopmost->xon = 0;
               control_pty(wintopmost->master, PTY_STOP_OUTPUT, 0);
-              WindowLog( "XOFF\015");
+              WindowLog( "XOFF\012");
           }
 #endif
+
+          n = (int)write(wintopmost->master, inputbuffer, n);
+          if (n < 0)
+          {
+              if (errno != EINTR && errno != EWOULDBLOCK)
+              {
+                  /* should destroy window? */
+                  break;
+              }
+              continue;
+          }
+
 
       }
 
@@ -1511,7 +1579,7 @@ dummysock = fdtty;
         if (inputbuffer[0] == 0x04)
         {
           control_pty(wintopmost->master, PTY_FLUSH_WRITE, 0);
-          WindowOutput(wintopmost - allwindows, "SIGHUP\015", 8);
+          WindowOutput(wintopmost - allwindows, "SIGHUP\n", 8);
           kill(wintopmost->pid, SIGHUP);
         }
       
@@ -1536,32 +1604,37 @@ dummysock = fdtty;
       if (FD_ISSET(allwindows[i].master, &fd_in))
 #endif
       {
-        n = (int)read(allwindows[i].master, inputbuffer, sizeof(inputbuffer));
-
-        /* window process terminated */
-        if (n <= 0)
-        {
-          if (errno != EINTR && errno != EWOULDBLOCK)
+          /* not paused */
+          n = 0;
+          if (allwindows[i].xon)
           {
-            rc = 0;
-            wait(&rc);
+              n = (int)read(allwindows[i].master, inputbuffer, sizeof(inputbuffer));
 
-            WindowDestroy(i);
-            WindowLog("window%d destroyed with exit code 0x%04x\015", i, rc);
-            break;
-          }
-        }
-        else
-        if (n > 0)
-        {
-          WindowOutput(i, inputbuffer, n);
-        }
-        
+              /* window process terminated */
+              if (n <= 0)
+              {
+                  if (errno != EINTR && errno != EWOULDBLOCK)
+                  {
+                      rc = 0;
+                      wait(&rc);
+
+                      WindowDestroy(i);
+                      WindowLog("window%d destroyed with exit code 0x%04x\012", i, rc);
+                      i = numwindows;
+                      break;
+                  }
+              }
+              else
+              if (n > 0)
+              {
+                  WindowOutput(i, inputbuffer, n);
+              }
+
 #ifdef POLLINGPTY
-        /* check again if any output */
-        n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
+              /* check again if any output */
+              n = control_pty(allwindows[i].master, PTY_INQUIRY, 0);
 #endif
-
+          }
       }
     }
   }
@@ -1575,7 +1648,7 @@ dummysock = fdtty;
         if (choice == 0)
         {
             GetMPosition(&origin);
-            WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+            WindowCreate("Window", origin.x, origin.y, WINSHELL);
         }
         else
         if (choice == 1)
@@ -1596,7 +1669,8 @@ dummysock = fdtty;
       {
 		/* always make it visible */
       	CursorVisible(1);
-      	
+        alarm(0);
+
         /* walk from frontmost windows back to find which we are over */
         GetMPosition(&origin);
 
@@ -1689,13 +1763,13 @@ dummysock = fdtty;
       {
 		/* always make it visible */
       	CursorVisible(1);
-      	
-        /* pop up menu */
+        alarm(0);
 
+        /* pop up menu */
         while (GetButtons() & M_RIGHT);
 
         GetMPosition(&origin);
-        WindowCreate("Window", origin.x - 32, origin.y - 32, FALSE);
+        WindowCreate("Window", origin.x, origin.y, WINSHELL);
       }
 
     /* debugging dirtylines */
@@ -1762,7 +1836,6 @@ dummysock = fdtty;
 #ifdef __clang__
       SDLrefreshwin();
 #endif
-
     }
   }
 
