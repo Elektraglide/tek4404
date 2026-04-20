@@ -33,7 +33,7 @@ extern int open();
 extern int wait();
 extern int kill();
 
-extern int system_control();  /* arg=1 does something,  arg=2 makes pty controlling terminal.. */
+extern int system_control();  /* arg=1 detach controlling terminal,  arg=2 makes pty controlling terminal.. */
 
 #define in_sockaddr sockaddr_in
 #define  IPO_TELNET    23
@@ -469,7 +469,8 @@ char *from;
 nonblocking(din);
     
     last_was_cr = 0;
-    last_read = 0;
+    /* we want to immediately check for any initial output */
+    last_read = 10;
     while(state != STOPPED)
     {
         /* Uniflex select appears to only expect actual socket fds */
@@ -492,7 +493,7 @@ nonblocking(din);
         {
           /* if there is slave output, for a few loops use a short timeout */
           timeout.tv_sec = 0;
-          timeout.tv_usec = 10000;
+          timeout.tv_usec = 20000;
           last_read--;
         }
 #endif
@@ -588,7 +589,6 @@ fprintf(console, "**Write master %d bytes\015", ts.bi.end - ts.bi.start);
 
                  fprintf(console, "sent SIGHUP to %d\015", sessionpid);
                  kill(sessionpid, SIGHUP);
-
              }
              
 
