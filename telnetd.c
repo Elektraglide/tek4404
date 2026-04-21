@@ -35,9 +35,24 @@ extern int kill();
 
 extern int system_control();  /* arg=1 detach controlling terminal,  arg=2 makes pty controlling terminal.. */
 
+// clashes with Uniflex, so use MacOS constants
+#define F_GETFL         3               /* get file status flags */
+#define F_SETFL         4               /* set file status flags */
+#define O_NONBLOCK      0x00000004      /* no delay */
+extern int fcntl();
+int blocking(int fd)
+{
+ 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+}
+int nonblocking(int fd)
+{
+ 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+}
+
 #define in_sockaddr sockaddr_in
 #define  IPO_TELNET    23
 char *telnetprocess[] = {"sh", NULL};
+char *shellprocess[] = {"sh", NULL};
 
 #include "uniflexshim.h"
 
@@ -729,9 +744,11 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
     sessionargv[0] = sessionname;
     sessionargv[1] = NULL;
       
+#ifndef __clang__
     /* calls pty_make_controlling_terminal */
     system_control(2, fdslave);
-    
+#endif
+
     dup2(fdslave, 0); /* PTY becomes standard input (0) */
     dup2(fdslave, 1); /* PTY becomes standard output (1) */
     dup2(fdslave, 2);  /* PTY becomes standard error (2) */
@@ -837,7 +854,11 @@ char **argv;
       return 1;
     }
 
+#ifndef __clang__
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &reusesize);
+#else
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reusesize));
+#endif
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -890,6 +911,7 @@ char **argv;
       setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)&reuse, &reusesize);
       /* is turning off Nagle supported? */
 #else
+      //setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)&reuse, sizeof(reusesize));
       setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &off, sizeof(off));
 #endif
 
@@ -921,6 +943,7 @@ char **argv;
     
     close(sock);
   }
+#ifndef __clang__
   else
   {
     struct stat s;
@@ -985,8 +1008,9 @@ char **argv;
       fprintf(console, "stdin is not a pipe.\n");	
     }
   }
+#endif
 
-  fclose(console);  
+  fclose(console);
   return 0;
 }
 
