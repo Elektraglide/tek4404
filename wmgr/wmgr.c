@@ -1373,8 +1373,15 @@ char **argv;
       font->bitmap, font->width, font->height);
 
   /* can we use a custom text render? */
-  usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
-  fprintf(stderr,"usecustom=%d\015",usecustomblit);
+  if (usecustomblit == 0)
+  {
+    usecustomblit = (font->maps->maxw == 8 && font->maps->line == 12 && font->bitmap);
+    fprintf(stderr,"usecustom=%d\015",usecustomblit);
+  }
+  else
+  {
+    usecustomblit = 0;	
+  }
 
   menu = MenuCreateX(3,items,flags,0,font);
 #ifdef DEBUG
