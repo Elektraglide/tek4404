@@ -179,7 +179,7 @@ int fastscroll;
     vt->cy -= numlines;
     /* scroll up */
     VTmovelines(vt, vt->margintop, vt->margintop+numlines, vt->marginbot - vt->margintop + 1 - numlines);
-    VTclearlines(vt,vt->marginbot,numlines);
+    VTclearlines(vt,vt->cy, numlines);
   }
   
   vt->dirtylines |= (1<<vt->cy);
@@ -371,8 +371,6 @@ int fdout;
                 vt->linelengths[i] = vt->cols - 1;
               }
             }
-            vt->cx = 0;
-            vt->cy = 0;
             break;
             case 'K':
             i = asciinum(vt->escseq+2, 0);
@@ -403,14 +401,12 @@ int fdout;
             i = asciinum(vt->escseq+2, 1);
             VTmovelines(vt, vt->cy+i, vt->cy, i);
             VTclearlines(vt, vt->cy, i);
-            printf("case L:\n");
             break;
             
             case 'M':
             i = asciinum(vt->escseq+2, 1);
             VTmovelines(vt, vt->cy, vt->cy+i, i);
             VTclearlines(vt, vt->cy+i, vt->rows-vt->cy-i);
-            printf("case M:\n");
             break;
 
             case 'P':
