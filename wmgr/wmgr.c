@@ -1010,7 +1010,7 @@ struct POINT cur;
   bb.destrect.y = win->contentrect.y + dst  * font->maps->line;
   bb.destrect.w = win->contentrect.w;
   bb.destrect.h = n * font->maps->line;
-  bb.halftoneform = &BlackMask;
+  bb.halftoneform = NULL;
   bb.rule = bbS;
 
   bb.srcpoint.x = win->contentrect.x;
