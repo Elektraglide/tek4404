@@ -1345,7 +1345,23 @@ char **argv;
 
   SaveDisplayState(&ds);
 
-  font = (struct FontHeader *)FontOpen(argv[1] ? argv[1] : "/fonts/MagnoliaFixed7.font");
+  name = "/fonts/MagnoliaFixed7.font";
+  usecustomblit = 0;
+  for (i=1; i<argc; i++)
+  {
+    if (argv[i][0] == '-')
+  	{
+      /* disable custom blit */
+      if (argv[i][1] == 'c')
+        usecustomblit = -1;
+    }
+    else
+    {
+      name = argv[i];
+    }
+  }
+   
+  font = (struct FontHeader *)FontOpen(name);
   if (!font)
     fprintf(stderr,"Failed to open font: %s\015", strerror(errno));
     
