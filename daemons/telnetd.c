@@ -67,7 +67,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define USE_PACKETMODExx
-#define DEBUGxx
+#define DEBUG
 #define DEBUGCONSOLExx
 /***********************************/
 
@@ -116,8 +116,6 @@ FILE  *logger;
 
 int istelnet = 1;
 char ruser[32],rhost[32];
-char sessionname[64];
-char *sessionargv[2];
 
 struct buffer {
   unsigned char data[4096];
@@ -317,16 +315,17 @@ void
 cleanup_child(sig)
 int sig;
 {
-
+  
 #ifdef DEBUGCONSOLE
-    fprintf(console,"cleanup telnet session on %d => %d\n",sig);
+    fprintf(console,"pid(%d): cleanup telnet session on %d\015\012",getpid(), sig);
+    fprintf(console,"sessionpid(%d)\015\012", sessionpid);
 #endif
-    close(sessionsock);
-    close(sessionpty);
 
-    /* rmut */
-    
-    signal(sig, cleanup_child);
+  /* SIGDEAD is *after* process has died so nothing to do here */
+
+  state = STOPPED;
+
+  signal(sig, cleanup_child);
 }
 
 void
@@ -335,8 +334,20 @@ int sig;
 {
   int result;
   
-  fprintf(console,"signal(%d) for pid%d\015",sig, getpid());
+  fprintf(console,"signal(%d) for pid(%d)\015\012",sig, getpid());
+  fprintf(console,"sessionpid(%d)\015\012", sessionpid);
 
+  state = STOPPED;
+
+#if 0
+  close(sessionsock);
+  close(sessionpty);
+#ifdef DEBUGCONSOLE
+  fprintf(console,"sessionsock(%d) closed\015\012",sessionsock);
+  fprintf(console,"sessionpty(%d) closed\015\012",sessionpty);
+#endif
+#endif
+  
   signal(sig, testsig);
 }
 
@@ -392,6 +403,8 @@ char *from;
   int i,fd;
   char buffer[64];
   struct timeval timeout;
+  char sessionname[64];
+  char *sessionargv[3];
 
   /* telnet state */
   memset(&ts, 0, sizeof(struct termstate));
@@ -418,7 +431,7 @@ char *from;
   rc = create_pty(ptfd);
   if (rc < 0)
   {
-    fprintf(console, "Error %d on create_pty\015", errno);
+    fprintf(console, "Error %s on create_pty\015", strerror(errno));
     exit(1);
   }
 
@@ -426,9 +439,12 @@ char *from;
   fdmaster = ptfd[1];
 
   sessionsock = din;
-  sessionpty = fdslave;
-  
+  sessionpty = fdmaster;
   signal(SIGDEAD, cleanup_child);
+#ifdef DEBUGCONSOLE
+  fprintf(console, "sessionsock(%d)\015\012", sessionsock);
+  fprintf(console, "sessionpty(%d)\015\012", sessionpty);
+#endif
 
   signal(SIGPIPE, testsig);
   signal(SIGHUP, testsig);
@@ -484,13 +500,13 @@ char *from;
 nonblocking(din);
     
     last_was_cr = 0;
-    /* we want to immediately check for any initial output */
-    last_read = 10;
+    /* we want to immediately check if there is any initial output */
+    last_read = 5;
     while(state != STOPPED)
     {
         /* Uniflex select appears to only expect actual socket fds */
         /* having stdin in the FD_SET wreaks havoc */
-        timeout.tv_sec = 3;
+        timeout.tv_sec = 10;
         timeout.tv_usec = 0;
         FD_ZERO(&fd_in);
         n = 0;
@@ -514,19 +530,23 @@ nonblocking(din);
 #endif
 
 #ifdef DEBUGCONSOLE
-fprintf(console, "About to select n(%d) \015", n+1);
+fprintf(console, "pid(%d): select n(%d) for pty(%d)\015\012", sessionpid, n+1, sessionpty);
 #endif
-
+        errno = 0;
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
         
 #ifdef DEBUGCONSOLE
-fprintf(console, "** select n(%d) timeout(%d) => %d\015", n+1, timeout.tv_usec, rc);
+fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", sessionpid, n+1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc);
 #endif
 
-        if (rc < 0 && errno != EINTR)
+        if (rc < 0)
         {
-            /* fprintf(console, "select(): error %d\n", errno);  */
-            break;
+            fprintf(console, "pid(%d): select(): error %s\015\012", sessionpid, strerror(errno)); 
+        	
+        	if (errno != EINTR)
+        	{
+              /* break;  */
+            }
         }
         else
 
@@ -541,14 +561,14 @@ fprintf(console, "** select n(%d) timeout(%d) => %d\015", n+1, timeout.tv_usec, 
         {
           if (ts.bi.start == ts.bi.end)
           {
-#ifdef DEBUGCONSOLE
-fprintf(console, "**Read din\015");
+#ifdef DEBUGCONSOLE_
+fprintf(console, "**Read din\015\012");
 #endif
               n = (int)read(din, ts.bi.data, sizeof(ts.bi.data));
 
               if (n < 0)
               {
-                /* fprintf(console, "din read() error %d\n", errno); */
+                fprintf(console, "din read() error %s\015\012", strerror(errno));
                 if (errno != EINTR && errno != EWOULDBLOCK)
                 {
                   break;
@@ -579,13 +599,13 @@ fprintf(console, "**Read din\015");
           /* send any socket input to slave (fdmaster) */
           if (ts.bi.start != ts.bi.end)
           {
-#ifdef DEBUGCONSOLE
-fprintf(console, "**Write master %d bytes\015", ts.bi.end - ts.bi.start);
+#ifdef DEBUGCONSOLE_
+fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 #endif
               n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
               if (n < 0)
               {
-                fprintf(console, "fdmaster write() error %d\015", errno);
+                fprintf(console, "fdmaster write() error %s\015\012",strerror(errno));
                 if (errno != EINTR && errno != EWOULDBLOCK)
                 {
                   break;
@@ -602,8 +622,10 @@ fprintf(console, "**Write master %d bytes\015", ts.bi.end - ts.bi.start);
                  control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
                  write(dout, "SIGHUP\015", 8);
 
-                 fprintf(console, "sent SIGHUP to %d\015", sessionpid);
+                 fprintf(console, "sent SIGHUP to %d\015\012", sessionpid);
                  kill(sessionpid, SIGHUP);
+
+				 break;
              }
              
 
@@ -625,13 +647,13 @@ fprintf(console, "**Write master %d bytes\015", ts.bi.end - ts.bi.start);
           /* Data arrived from application */
           if (ts.bo.start == ts.bo.end)
           {
-#ifdef DEBUGCONSOLE
-fprintf(console, "**Read master\015");
+#ifdef DEBUGCONSOLE_
+fprintf(console, "**Read master\015\012");
 #endif
             n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
             if (n < 0)
             {
-              fprintf(console, "fdmaster read() error %d\015", errno);
+              fprintf(console, "fdmaster read() error %s\015\012", strerror(errno));
               if (errno != EINTR && errno != EWOULDBLOCK)
               {
                 break;
@@ -642,14 +664,14 @@ fprintf(console, "**Read master\015");
 
             if (n == 0)
             {
-            	if (errno != EINTR && errno != EWOULDBLOCK)
-                  fprintf(console,"broken connection %d\015",errno);
+            	if (errno && errno != EINTR && errno != EWOULDBLOCK)
+                  fprintf(console,"broken connection %s\015\012",strerror(errno));
                 break;
             }
             else
             if (n == sizeof(ts.bo.data))
             {
-              fprintf(console,"read choked\n");
+              fprintf(console,"read filled whole buffer\015\012");
             }
 
 #ifdef USE_PACKETMODE
@@ -675,13 +697,18 @@ fprintf(console, "**Read master\015");
         
           if (ts.bo.start != ts.bo.end)
           {
-#ifdef DEBUGCONSOLE
-fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
+#ifdef DEBUGCONSOLE_
+fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
 #endif
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
+            if (n < ts.bo.end - ts.bo.start)
+            {
+              fprintf(console, "output choked\015\012");
+            }
+
             if (n < 0)
             {
-              /* fprintf(console, "dout write() error %d\015", errno); */
+              fprintf(console, "dout write() error %s\015", strerror(errno));
               if (errno != EINTR && errno != EWOULDBLOCK)
               {
                 break;
@@ -690,28 +717,26 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
               continue;
             }
 
-            if (n < ts.bo.end - ts.bo.start)
-            {
-              fprintf(console, "output choked\015");
-            }
             ts.bo.start += n;
           }
 
         }
       }
     
-      /* collect child process */
       kill(sessionpid, SIGQUIT);
-      n = wait(&rc);
 
+      /* collect child process */
+      n = wait(&rc);
+#ifdef DEBUGCONSOLE
+      fprintf(console, "Collect child pid(%d) => %d\015\012", n, rc);
+#endif      
   }
   else
   {
     /* CHILD */
-    signal(SIGHUP, SIG_DFL);
-    signal(SIGQUIT, SIG_DFL);
     signal(SIGALRM, SIG_DFL);
-
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
 
@@ -742,7 +767,8 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
     }
 
     sessionargv[0] = sessionname;
-    sessionargv[1] = NULL;
+    sessionargv[1] = sessionname;
+    sessionargv[2] = NULL;
       
 #ifndef __clang__
     /* calls pty_make_controlling_terminal */
@@ -759,7 +785,7 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
     /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    /* close(fdslave); */
+    close(fdslave); 
 
     /* Execution of the program */
     {
@@ -767,7 +793,7 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
       rc = execvp(istelnet ? telnetprocess[0] : shellprocess[0], sessionargv);
       if (rc < 0)
       {
-        fprintf(console, "Error %d on exec\n", errno);
+        fprintf(console, "Error %s on exec\n", strerror(errno));
       }
     }
 
@@ -775,8 +801,8 @@ fprintf(console, "**Write dout %d bytes \015", ts.bo.end - ts.bo.start);
     return errno;
   }
 
-#ifdef DEBUG
-  fprintf(console, "EXIT telnet_session\n");
+#ifdef DEBUGCONSOLE
+  fprintf(console, "EXIT telnet_session\015\012");
 #endif
   return errno;
 }
@@ -799,7 +825,7 @@ int sig;
   
   pid = wait(&rc);
 #ifdef DEBUG
-  fprintf(stderr,"cleanup session: telnet proc(%d)\015",pid);
+  fprintf(stderr,"cleanup session: telnet proc(%d)\015\012",pid);
 #endif
 
   signal(SIGDEAD, cleanup_session);
@@ -924,7 +950,7 @@ char **argv;
         logtime(logger);
         fprintf(logger, ": connect from %s\015", inet_ntoa(cli_addr.sin_addr.s_addr));
       
-        sleep(5);
+        sleep(1);
         close(newsock);
       }
       else
@@ -997,7 +1023,7 @@ char **argv;
           istelnet = 1;
      }
 
-     fprintf(logger, "\015");
+     fprintf(logger, "\015\012");
      fflush(logger);
 
       /* use socketpair */
