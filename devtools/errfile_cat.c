@@ -40,7 +40,7 @@ char buffer[128];
   }	
   else
   {
-    fprintf(stderr,"caterr errorfile\n");	
+    fprintf(stderr,"%s errorfile\n",argv[0]);
   }
 
 }

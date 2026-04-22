@@ -99,7 +99,7 @@ int newoffset;
   }	
   else
   {
-    fprintf(stderr,"adderr errorfile errnum errmesg\n");	
+    fprintf(stderr,"%s errorfile errnum errmesg\n",argv[0]);	
   }
 
 }
