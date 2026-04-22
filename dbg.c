@@ -24,6 +24,12 @@ typedef struct
 char buffer[4096];
 retainedwin regwindow;
 
+/* extracted info */
+char sp[9], pc[9];
+long spval, pcval;
+long oldspval, oldpcval;
+char nextinstr[16];
+
 int sockpair[2] = { 0,0 };
 int readerpid = 0;
 char* debugprocess[] = { "/bin/debug", NULL,NULL };
@@ -172,7 +178,7 @@ int _varargs;
     val4 = va_arg(p, unsigned int);
     va_end(p);
 
-    printf("\033[25;33r\033[8;1H");
+    printf("\033[%d;%dr\033[%dH",CMDWIN,CMDWIN+10, CMDWIN + 9);
     printf(fmt, val1, val2, val3, val4);
 
     /* we dont know what is the current window, so.. */
@@ -361,6 +367,7 @@ int n;
         printf("\033[0K\n");
         ptr = strtok(NULL, "\n");
     }
+    printf("\033[0K");
 }
 
 printlastclear(buf, n)
@@ -380,6 +387,29 @@ int n;
     printf("\033[0K");
 }
 
+/* rely on hardcoded offsets */
+void parseregisters(buff)
+char* buff;
+{
+    char *line1 = strchr(buff, '\n') + 1;
+    char* line2 = strchr(line1, '\n') + 1;
+    char* line3 = strchr(line2, '\n') + 1;
+
+    memcpy(sp, line2 + 67, 8);
+    memcpy(pc, line3 + 16, 8);
+    pcval = _atoh(pc);
+}
+
+void parsedisassembly(buff)
+char* buff;
+{
+    char* line1 = strchr(buff, '\n') + 1;
+    char* end = strchr(line1, ' ') + 1;
+
+    memcpy(nextinstr, line1, end - line1);
+    nextinstr[end - line1] = '\0';
+}
+
 main(argc, argv)
 int argc;
 char **argv;
@@ -388,7 +418,7 @@ char **argv;
 	int rc;
 	char *ptr, ch, input[32];
     int master, slave;
-    int refresh;
+    int refresh,i;
 
     signal(SIGINT, sighandler);
 
@@ -403,11 +433,11 @@ char **argv;
   master = ptfd[1];
   slave = ptfd[0];
 
-  printf("\033[1;32r\033[2J\033[%d;1H",CMDWIN-1);
+  printf("\033[1;32r\033[2J\033[%dH",CMDWIN-1);
   printf("===== Dbg v1.0 %s [pid:%d] =====\n", argv[1], readerpid);
   sleep(1);
   rc = readdebug(master, buffer, sizeof(buffer));
-  printf("\033[32;1H");
+  printf("\033[31H");
   printf(buffer);
 
   /* retained window for reg display */
@@ -418,15 +448,23 @@ char **argv;
   while (1)
   {
       /* make a 10 line scroll region */
-      printf("\033[%d;%dr\033[10;1H>", CMDWIN, CMDWIN+10);
+      printf("\033[%d;%dr\033[10H>", CMDWIN, CMDWIN+10);
       fflush(stdout);
       rc = (int)read(0, input, sizeof(input));
-      if (rc > 1) ch = input[0];
+      if (rc > 1)
+      {
+          if (input[0] != '\n')
+              ch = input[0];
+      }
+      if (ch == 'r')
+          refresh = 1;
       if (ch == '?')
       {
           printf("x - create process\n");
-          printf("s - singlestep\n");
+          printf("s - step in\n");
+          printf("n - step over\n");
           printf("g - go\n");
+          printf("C - stacktrace\n");
           printf("t - trace\n");
           printf("q - quit\n");
       }
@@ -445,7 +483,13 @@ char **argv;
 			printf(buffer);
             refresh = 1;
       }
-	  if (ch == 'g')
+      if (ch == 'C')
+      {
+          write(master, "C\n", 2);
+          readdebug(master, buffer, sizeof(buffer));
+          printf(buffer);
+      }
+      if (ch == 'g')
 	  {
 		  write(master, "g\n", 2);
           readdebug(master, buffer, sizeof(buffer));
@@ -457,6 +501,18 @@ char **argv;
           readdebug(master, buffer, sizeof(buffer));
           /* printf(buffer); */
       }
+      if (ch == 'n')
+      {
+          /* make a temp breakpoint on the next instruction, run and then remove it */
+          sprintf(buffer, "b %s\n", nextinstr);
+          write(master, buffer, strlen(buffer));
+          readdebug(master, buffer, sizeof(buffer));
+          write(master, "g\n", 2);
+          readdebug(master, buffer, sizeof(buffer));
+          sprintf(buffer, "c %s\n", nextinstr);
+          write(master, buffer, strlen(buffer));
+          readdebug(master, buffer, sizeof(buffer));
+      }
       if (ch == 't')
       {
           write(master, "T\n", 2);
@@ -465,18 +521,25 @@ char **argv;
           while (1)
           {
               readdebugline(master, buffer, sizeof(buffer));
+              printf(buffer);
               if (buffer[0] == 0x3f)
                   break;
-              printf(buffer);
           }
+
       }
 
-	  /* refresh top of screen */
-      printf("\033[1;20r\033[1;1H");
+	  /* refresh register display */
+      printf("\033[1;10r\033[1H");
 
       /* get register state */
 	  write(master, "r\n", 2);
 	  rc = readdebug(master, buffer, sizeof(buffer));
+      parseregisters(buffer);
+
+      /* was it a branch to a new location? */
+      if (abs((pcval - oldpcval)) > 6)
+          refresh = 1;
+
       if (refresh)
       {
           memcpy(regwindow.back, buffer, sizeof(regwindow.back));
@@ -487,24 +550,43 @@ char **argv;
           printdiffclear(&regwindow, buffer);
       }
 
-      /* get disassembly (more than we need because we want N line) */
-      write(master, "i .-0,20\n", 9);
+      /* show stack contents */
+      sprintf(buffer, "d %8s\n", sp);
+      write(master, buffer, 11);
       rc = readdebug(master, buffer, sizeof(buffer));
+      printf("\033[6HSP = ");
+      printf(buffer);
+
+      /* refresh code display */
+      printf("\033[%d;%dr", CODEWIN, CODEWIN + 7);
+
+      /* get disassembly
+      (more than we need because we want N line) */
+      sprintf(buffer, "i %s,40\n", pc);
+      write(master, buffer, 14);
+      rc = readdebug(master, buffer, sizeof(buffer));
+      parsedisassembly(buffer);
+
       /* full redraw or 1 line redraw */
-      if (1 || refresh)
+      if (refresh)
       {
-          printf("\033[%d;1H",CODEWIN);
           printclear(buffer, 7);
+
+          /* get next instruction address so we can break */
       }
       else
       {
           /* scroll region 1 line */
-          printf("\033[%d;%dr\033[17;1H",CODEWIN,CODEWIN+7);
+          printf("\033[%dH",8);
           printlastclear(buffer, 8);
           printf("\n");
       }
 
+#if 0
+      logit("pc=%8s sp=%8s next=%s diff=%d\n", pc,sp,nextinstr, abs((pcval - oldpcval)));
+#endif
       refresh = 0;
+      oldpcval = pcval;
   }
   
    /* restore */
