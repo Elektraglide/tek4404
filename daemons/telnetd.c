@@ -446,12 +446,13 @@ char *from;
   fprintf(console, "sessionpty(%d)\015\012", sessionpty);
 #endif
 
-  signal(SIGPIPE, testsig);
-  signal(SIGHUP, testsig);
-  signal(SIGINT, testsig);
-  signal(SIGQUIT, testsig);
-  signal(SIGTERM, testsig);
   signal(SIGEMT, testsig);
+  signal(SIGPIPE, testsig);
+
+  signal(SIGHUP, SIG_IGN);
+  signal(SIGINT, SIG_IGN);
+  signal(SIGQUIT, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
 
   sessionpid = fork();
   if (sessionpid)
@@ -622,7 +623,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
                  control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
                  write(dout, "SIGHUP\015", 8);
 
-                 fprintf(console, "sent SIGHUP to %d\015\012", sessionpid);
+                 fprintf(console, "sent SIGHUP to pid(%d)\015\012", sessionpid);
                  kill(sessionpid, SIGHUP);
 
 				 break;
@@ -695,31 +696,33 @@ fprintf(console, "**Read master\015\012");
 #endif
           }
         
-          if (ts.bo.start != ts.bo.end)
+          while (ts.bo.start != ts.bo.end)
           {
 #ifdef DEBUGCONSOLE_
 fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
 #endif
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
-            if (n < ts.bo.end - ts.bo.start)
+            if (n > 0 && n < ts.bo.end - ts.bo.start)
             {
               fprintf(console, "output choked\015\012");
             }
 
             if (n < 0)
             {
-              fprintf(console, "dout write() error %s\015", strerror(errno));
-              if (errno != EINTR && errno != EWOULDBLOCK)
+#ifdef DEBUGCONSOLE
+                fprintf(console, "dout write() error %s\015\012", strerror(errno));
+#endif
+                if (errno && errno != EINTR && errno != EWOULDBLOCK)
               {
                 break;
               }
 
+              /* keep trying to output */
               continue;
             }
 
             ts.bo.start += n;
           }
-
         }
       }
     
@@ -735,6 +738,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
   {
     /* CHILD */
     signal(SIGALRM, SIG_DFL);
+
     signal(SIGQUIT, SIG_DFL);
     signal(SIGHUP, SIG_DFL);
     signal(SIGINT, SIG_DFL);
@@ -950,7 +954,8 @@ char **argv;
         logtime(logger);
         fprintf(logger, ": connect from %s\015", inet_ntoa(cli_addr.sin_addr.s_addr));
       
-        sleep(1);
+        /* rate limiting */
+        sleep(2);
         close(newsock);
       }
       else
@@ -1023,7 +1028,7 @@ char **argv;
           istelnet = 1;
      }
 
-     fprintf(logger, "\015\012");
+     fprintf(logger, "\n");
      fflush(logger);
 
       /* use socketpair */
