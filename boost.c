@@ -81,11 +81,18 @@ int tid;
 		read(pmem, &atask, sizeof(atask));
 		if (atask.tstid == tid)
 		{
-			char bias = -16;
 
+            /* set task priority bias */
+            atask.tsprb = -16;
 			i = offsetof(struct task, tsprb);
 			lseek(pmem, rc + i, SEEK_SET);
-			write(pmem, &bias, 1);
+			write(pmem, &atask.tsprb, 1);
+
+            /* set FIXEDPRIORITY flag */
+			atask.tsmode2 |= TFIXEDPRIORITY;
+			i = offsetof(struct task, tsmode2);
+			lseek(pmem, rc + i, SEEK_SET);
+			write(pmem, &atask.tsmode2, 1);
 
 			result = 0;
 			break;
@@ -106,6 +113,7 @@ char bootfile[256];
 unsigned char buffer[256];
 int result;
 
+	buffer[0] = 0;
 	kernbootfile(buffer);
 	sprintf(bootfile, "/%s", buffer);
 	buffer[0] = 0;
@@ -118,6 +126,7 @@ int result;
 	}
 
 	symbols = getsymbols(bootfile, &symbolsize);
+
 	result = boostext(symbols, symbolsize, pmem, tid);
 	free(symbols);
 	close(pmem);
