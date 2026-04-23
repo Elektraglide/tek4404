@@ -28,7 +28,7 @@
 #define ulong unsigned int
 typedef unsigned int ptr32;
 #else
-typedef char *ptr32;
+#define ptr32 ulong
 #endif
 
 /* used to play fast and loose with signed */
@@ -94,6 +94,11 @@ struct task {
 #define TSWAPO 0x10   /*  task is being swapped  */
 #define TARGX  0x20   /*  task is in argument expansion  */
 
-#define TPAUSED 0x40	/* based on ctask() processsing */
-#define TNOMAP 0x80	/* based on ctask() processsing */
+/*
+	  task mode2 codes (undocumented)
+*/
 
+#define TUNKNOWN		0x01  /* single stepping? */
+#define TFROZEN			0x08
+#define TFIXEDPRIORITY	0x40
+#define TDETACHEDTERM	0x80
