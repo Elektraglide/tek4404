@@ -88,11 +88,14 @@ int tid;
 			lseek(pmem, rc + i, SEEK_SET);
 			write(pmem, &atask.tsprb, 1);
 
+#if 0
             /* set FIXEDPRIORITY flag */
+            /* DANGER: this is INHERITED, so every child has FIXEDPRIORITY */
 			atask.tsmode2 |= TFIXEDPRIORITY;
 			i = offsetof(struct task, tsmode2);
 			lseek(pmem, rc + i, SEEK_SET);
 			write(pmem, &atask.tsmode2, 1);
+#endif
 
 			result = 0;
 			break;
