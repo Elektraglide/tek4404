@@ -1416,10 +1416,7 @@ char **argv;
 /*  signal(SIGINPUT, sh_input);  */
 
   /* ensure we always get to repaint */
-  boost(getpid());
-#ifdef DEBUG
-  fprintf(stderr, "boost\015");
-#endif
+  nice(-20);
 
   /* window chain */
   wintopmost = NULL;

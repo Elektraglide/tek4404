@@ -143,8 +143,8 @@ char **argv;
 	bootstamp = getkint32(symbols, symbolsize, "sbttim", pmem);
 
 	/* boost our priority */
-	if (argc > 1 && !strcmp(argv[1],"high"))
-		boostext(symbols, symbolsize, pmem, getpid());
+	if (argc > 1 && !strcmp(argv[1], "high"))
+		nice(-16);
 
 	/* these are task scheduling profiles depending on current work */
 	len = getkconstant(symbols, symbolsize, "PERSONALITY_SIZE", pmem);
