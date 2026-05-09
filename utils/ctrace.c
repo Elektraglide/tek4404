@@ -239,6 +239,7 @@ paramtype *arglist;
 			case 27:
 				name = "ofstat";
 				arglist[0] = D0;
+				arglist[1] = POINTER;
 				break;
 			case 28:
 				name = "status";
