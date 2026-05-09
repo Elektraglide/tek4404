@@ -302,6 +302,8 @@ int wintype;
     new_term_settings.sg_flag |= CBREAK;
     new_term_settings.sg_prot |= ESC;
     new_term_settings.sg_prot |= OXON;
+    new_term_settings.sg_prot |= CRMOD;
+    
 /*
     new_term_settings.sg_prot |= TRANS;
     new_term_settings.sg_prot |= ANY;
@@ -1315,6 +1317,14 @@ int sig;
   signal(sig, sh_input);
 }
 
+void quantum(sig)
+int sig;
+{
+
+  WindowLog("SIGTIME\015\012");
+  signal(sig, quantum);
+}
+
 
 int
 main(argc, argv)
@@ -1343,6 +1353,8 @@ char **argv;
   /* watchdog */
   signal(SIGALRM, cleanup_and_exit);
 
+  signal(SIGTIME, quantum);
+  
   SaveDisplayState(&ds);
 
   name = "/fonts/MagnoliaFixed7.font";
