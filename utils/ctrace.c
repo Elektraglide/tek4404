@@ -450,7 +450,7 @@ int main(argc, argv)
 int argc;
 char **argv;
 {
-	int i,rc;
+	int i,j,rc;
 	unsigned char mem[8];
 	unsigned int special[32];
 	struct ctask *task;
