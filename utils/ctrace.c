@@ -460,9 +460,17 @@ char **argv;
 	tracee = defaultprocess;
 	if (argc > 1)
 	{
-		for (i=1; i<argc; i++)
-			cmdoptions[i-1] = argv[i];
-		cmdoptions[i-1] = NULL;
+		i = 1;
+		if (argv[i],"+v")
+		{
+		  verbose = 1;
+		  i++;	
+		}
+		/* copy args */
+		j = 0;
+		for (; i<argc; i++)
+			cmdoptions[j++] = argv[i];
+		cmdoptions[j] = NULL;
 		
 		tracee = cmdoptions;
 	}
