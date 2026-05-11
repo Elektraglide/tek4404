@@ -97,6 +97,8 @@ char *typename;
   fprintf(stderr, "datastart = %08x\n", ntohl(ph.datastart));
   fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
   fprintf(stderr, "relocsize = %08x\n", ntohs(ph.relocsize));
+  fprintf(stderr, "rcssize = %08x (does not include zero terminator in length)\n", ntohs(ph.rcssize));
+  fprintf(stderr, "commentsize = %08x\n", ntohs(ph.commentsize));
   fprintf(stderr, "minpage = %d maxpage = %d stack = %d\n", ntohs(ph.minpage),ntohs(ph.maxpage),ntohs(ph.stacksize));
 
 	// header size differs
@@ -232,59 +234,65 @@ char *typename;
 
   /* seek to symbols (offset from end) */
   n = lseek(fd, 0, SEEK_END);
-  //fprintf(stderr, "total length = %08x\n", n);
-  n = lseek(fd, headersize + ntohl(ph.textsize)+ntohl(ph.datasize), SEEK_SET);
+  fprintf(stderr, "total length = %08x\n", n);
+  n -= ntohs(ph.commentsize);
+  n -= ntohs(ph.namesize);
+  n -= ntohs(ph.rcssize);  if (ph.rcssize) n--;  // appears to not include terminating \0
+  n -= ntohl(ph.symbolsize);
+  n -= ntohl(ph.relocsize);
+  
   fprintf(stderr, "symbolstart = %08X\n", n);
   lseek(fd, n, SEEK_SET);
   
   /* each symbol */
   symbolsize = ntohl(ph.symbolsize);
   fprintf(stderr, "symbolsize = %08x\n\n", symbolsize);
-  for (i=0; i<symbolsize; i += sizeof(symbolheader))
+  // symbolsize can be off-by-1 so ensure we have at least enough for another symbol
+  for (i=0; i<symbolsize-10; i += sizeof(symbolheader))
   {
     sym.kind = readshort(fd);
     sym.offset = readlong(fd);
     sym.segment = readshort(fd);
 
-    // HACK: ensure we dont read invalid data..
-    if (sym.segment > 15)
-      break;
-      
     sym.len = readshort(fd);
+		
+		// WHAT IS THIS SEGMENT TYPE?
+		if (sym.segment == 0x2f)
+		{
+			// appears to be segment and len packed into a short?
+			sym.segment = sym.len >> 8;
+			sym.len = sym.len & 0xff;
+		}
+		else
+		if (sym.segment & 0xff00)
+		{
+			fprintf(stderr, "**** UNKNOWN SEGMENT:  segment=0x%4.4x\n", (unsigned short)sym.segment);
+			sym.segment &= 0xff;
+			if (sym.segment == 0)
+				sym.segment = SEGABS;
+		}
+		else
+		if (sym.len == 0x2f)
+		{
+			// single byte before name -  length-1
+      read(fd, buffer, 1);
+			sym.len = buffer[0] - 1;
+		}
+		else
+		if ((sym.len & 0xff00))
+		{
+			fprintf(stderr, "**** BAD sym.len:  len=0x%4.4x\n", sym.len);
+			
+			n = lseek(fd, 0, SEEK_CUR);
+      read(fd, buffer, 32);
+			sym.len = 0;
+			while(buffer[sym.len])
+				sym.len++;
+			lseek(fd, n, SEEK_SET);
+		}
+		
     read(fd, buffer, sym.len);
 
-    /* peek to see if is there more because sometimes the len field is just wrong */
-    if (sym.len > 9)
-    {
-    read(fd, &buffer[sym.len], 1);
-    sym.len++;
-
-    /* if we're past the symbolsize, dont so our hack */
-    if (i + sym.len + sizeof(symbolheader) < symbolsize)
-    {
-      if (buffer[sym.len-1] != 0)
-      {
-        while (buffer[sym.len-1] != 0)
-        {
-          sym.len++;
-          read(fd, &buffer[sym.len-1], 1);
-        }
-      }
-      else
-      {
-        sym.len--;
-      }
-
-      /* overshot, go back one */
-      n = lseek(fd, -1, SEEK_CUR);
-      lseek(fd, n, SEEK_SET);
-    }
-    else
-    {
-      sym.len--;
-    }
-    }
-    
     buffer[sym.len] = '\0';
     switch(sym.segment)
     {
@@ -304,6 +312,9 @@ char *typename;
         typename = "BSS";
         n = 2;
         break;
+			default:
+				fprintf(stderr, "**** UNKNOWN SEGMENT: %4.4x\n",sym.segment);
+				break;
     }
     fprintf(stderr, "%32s:  %s  %08x\n", buffer, typename, sym.offset);
     
@@ -384,6 +395,7 @@ char *typename;
   // write data (starts after text)
   n = lseek(elf_fd, 0, SEEK_CUR);
   lseek(fd, ntohl(ph.textsize) + headersize, SEEK_SET);
+
   i = ntohl(ph.datasize);
   fprintf(stderr,"wrote %d bytes at %d (.data)\n", i, n);
   while ((i > 0) && (n = read(fd, buffer, min(i,sizeof(buffer)) )) > 0)
