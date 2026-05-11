@@ -97,7 +97,7 @@ char *typename;
   fprintf(stderr, "datastart = %08x\n", ntohl(ph.datastart));
   fprintf(stderr, "datasize = %08x\n", ntohl(ph.datasize));
   fprintf(stderr, "relocsize = %08x\n", ntohs(ph.relocsize));
-  fprintf(stderr, "rcssize = %08x (does not include zero terminator in length)\n", ntohs(ph.rcssize));
+  fprintf(stderr, "rcssize = %08x\n", ntohs(ph.rcssize));
   fprintf(stderr, "commentsize = %08x\n", ntohs(ph.commentsize));
   fprintf(stderr, "minpage = %d maxpage = %d stack = %d\n", ntohs(ph.minpage),ntohs(ph.maxpage),ntohs(ph.stacksize));
 
@@ -237,7 +237,7 @@ char *typename;
   fprintf(stderr, "total length = %08x\n", n);
   n -= ntohs(ph.commentsize);
   n -= ntohs(ph.namesize);
-  n -= ntohs(ph.rcssize);  if (ph.rcssize) n--;  // appears to not include terminating \0
+  n -= ntohs(ph.rcssize);  	// if (ph.rcssize) n--;  // appears to not include terminating \0
   n -= ntohl(ph.symbolsize);
   n -= ntohl(ph.relocsize);
   
@@ -255,7 +255,10 @@ char *typename;
     sym.segment = readshort(fd);
 
     sym.len = readshort(fd);
-		
+
+#if 0
+		// a bug in my Uniflex Fuse filesystem meant I got corrupted binary files and chased my tail all morning..
+
 		// WHAT IS THIS SEGMENT TYPE?
 		if (sym.segment == 0x2f)
 		{
@@ -290,7 +293,8 @@ char *typename;
 				sym.len++;
 			lseek(fd, n, SEEK_SET);
 		}
-		
+#endif
+
     read(fd, buffer, sym.len);
 
     buffer[sym.len] = '\0';
