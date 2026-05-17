@@ -4,6 +4,8 @@ LFLAGS= +x=1M
 
 all:	rcat kset top ash dhcp ifdump telnetd ntpclient diskutil screencastd
 
+coreinfo: coreinfo.r
+	cc +v coreinfo.r +o=$@ 
 
 top: top.r ../kernutils.r ../kernasm.r
 	cc +v +x=b=1M top.r ../kernutils.r ../kernasm.r +o=$@ +l=netlib
