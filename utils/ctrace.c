@@ -85,11 +85,19 @@ int pcount;
 		start = ph.textstart + i;
 		len = sizeof(dottext);
 		if (i + len > ph.textsize)
-			len = ph.textsize - i;	
-		get_controlled_task_memory(task, start, dottext, len);
+			len = ph.textsize - i;
+        j = get_controlled_task_memory(task, start, dottext, len);
+        if (j != len)
+        {
+		  fprintf(stderr,"failed to read task memory %8.8x\n", start);
+		  sleep(3);
+        j = get_controlled_task_memory(task, start, dottext, len);
+
+		}
+			
 		if (verbose) printf("fetched %d bytes\n", len);
 		
-		instr = (unsigned char *)dottext;
+		instr = (unsigned short *)dottext;
 		icount = len >> 1;	/* 16-bit words */
 		j = 0;
 		while(j < icount)
@@ -141,6 +149,7 @@ paramtype *arglist;
 				break;
 			case 4:
 				name = "wait";
+				arglist[0] = POINTER;
 				break;
 			case 5:
 				done = 1;			/* terminate parent */
@@ -307,13 +316,37 @@ paramtype *arglist;
 				name = "phys";
 				arglist[0] = VALUE;
 				break;
+			case 56:
+				name = "vfork";
+				arglist[0] = STRINGPTR;
+				break;
+			case 60:
+				name = "gpid";
+				break;
 			case 64:
 				name = "make_realtime (unimplemented)";
 				break;
-			case 65:
-				name = "control_pty";
+			case 63:
+				name = "system_control";
 				arglist[0] = VALUE;
 				arglist[1] = VALUE;
+				break;
+			case 65:
+				name = "control_pty";
+				arglist[0] = D0;
+				arglist[1] = VALUE;
+				break;
+			case 69:
+				name = "fcntl";
+				arglist[0] = D0;
+				arglist[1] = VALUE;
+				break;
+			case 75:
+				name = "yield_CPU";
+				break;
+			case 76:
+				name = "stack_limit";
+				arglist[0] = VALUE;
 				break;
 			default:
 				sprintf(buffer,"trap%d", code);
@@ -377,9 +410,12 @@ unsigned short mem[8];
 unsigned int faultPC;
 paramtype arglist[4];
 char *name;
+int j;
 				
 	/* NB undocumented parameters */
-	get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
+	j = get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
+	if (j < 0)
+	  fprintf(stderr,"failed read\n");
 	if (mem[0] != ILLEGAL)
 	{
 		printf("-- %8.8x: %4.4x\n", task->task_PC, mem[0]);
@@ -398,16 +434,24 @@ char *name;
 		unsigned int argptr;
 		
 		argptr = *(unsigned int *)(mem + 2);
-		get_controlled_task_memory(task, argptr, params, sizeof(params));
+		j = get_controlled_task_memory(task, argptr, params, sizeof(params));
+    	if (j < 0)
+	      fprintf(stderr,"failed read\n");
 		name = gettrapname(params[0],arglist);
 		printargs(task, name, arglist, params, ") ind");
 	}
 	else
 	if (mem[1] == 1)	/* use A0 for args */
 	{
-		unsigned short params[8];
-												
-		get_controlled_task_memory(task, task->task_REGS[8], params, sizeof(params));
+		unsigned short params[16];
+        int c;
+        
+		j = get_controlled_task_memory(task, task->task_REGS[8], params, sizeof(params));
+    	if (j < 0)
+	      fprintf(stderr,"failed read\n");
+
+printf("%8.8x ", task->task_REGS[8]);
+		
 		name = gettrapname(params[0],arglist);
         printargs(task, name, arglist, params, ") indx");
 	}
@@ -461,7 +505,7 @@ char **argv;
 	if (argc > 1)
 	{
 		i = 1;
-		if (argv[i],"+v")
+		if (!strcmp(argv[i],"+v"))
 		{
 		  verbose = 1;
 		  i++;	
@@ -476,30 +520,35 @@ char **argv;
 	}
 
 	/* does it exist? */
-	rc = open(tracee[0], 0);
+	rc = open(tracee[0], O_RDONLY);
 	if (rc < 0)
 	{
 		fprintf(stderr, "cannot open: %s\n", tracee[0]);
 		exit(1);	
 	}
-	close(rc);
+/*	close(rc);
+*/
+
+	rc = open(tracee[0], O_RDONLY);
+	rc = open(tracee[0], O_RDONLY);
+	rc = open(tracee[0], O_RDONLY);
+
+
+	signal(SIGDEAD, childreap);
 
 	task = create_controlled_task();
-
 	/* do parent processing */
 	if (task->task_fd != 0)
 	{
-		signal(SIGDEAD, childreap);
+        halt_controlled_task(task);
 
-		/* allow child to start */
-		sleep(3);
-
-		/* allow child to start */
-	    step_controlled_task(task);  
-		get_controlled_task_registers(task);
+sleep(3);
 		
 		/* patch trap instr with ILLEGAL */
+		get_controlled_task_registers(task);
 		patchtext(tracee[0], task);
+
+        resume_controlled_task(task);  
 
 		printf("tracing...\n");
 		done = 0;
@@ -509,6 +558,7 @@ char **argv;
 			execute_controlled_task(task); 
 
 			get_controlled_task_registers(task);
+
 			i = (task->task_state >> 24);
 			if (i)
 			{
@@ -533,9 +583,9 @@ char **argv;
 	else
 	{	
 			printf("tracing child: execvp(%s)\n",tracee[0]);
-
+            
             /* ensure in memory */
-            lock(1);
+/*             lock(1);  */
 
 			/* launch cmd */
 			rc = execvp(tracee[0], tracee);
