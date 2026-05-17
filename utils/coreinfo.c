@@ -21,6 +21,7 @@ char **argv;
 		struct userbl* userbl;
 		struct task* task;
 		struct mt* map;
+		unsigned int* regs;
 
 		read(fd, header, sizeof(header));
 		close(fd);
@@ -37,6 +38,16 @@ char **argv;
 			printf("%8.8x - %8.8x\n", map->vaddr, map->vaddr + map->numpages * 4096 - 1);
 			map++;
 		}
+
+		regs = (unsigned int *)((char*)userbl - 66 - (16 * 4));
+		printf("Dn ");
+		for (i = 0; i < 8; i++)
+			printf("%8.8x ", regs[i]);
+		printf("\n");
+		printf("An ");
+		for (i = 0; i < 8; i++)
+			printf("%8.8x ", regs[8+i]);
+		printf("\n");
 
 		task = (struct task*)((char*)userbl - sizeof(struct task));
 		printf("tsuid  %d\n", task->tsuid);
