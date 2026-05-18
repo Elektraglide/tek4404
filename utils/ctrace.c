@@ -89,10 +89,7 @@ int pcount;
         j = get_controlled_task_memory(task, start, dottext, len);
         if (j != len)
         {
-		  fprintf(stderr,"failed to read task memory %8.8x\n", start);
-		  sleep(3);
-        j = get_controlled_task_memory(task, start, dottext, len);
-
+		  fprintf(stderr,"failed to read task memory %8.8x  (%d)\n", start,errno);
 		}
 			
 		if (verbose) printf("fetched %d bytes\n", len);
@@ -403,6 +400,8 @@ char *epilog;
 	printf(epilog);
 }
 
+unsigned short params[8];
+
 void executetrap(task)
 struct ctask *task;
 {
@@ -411,11 +410,12 @@ unsigned int faultPC;
 paramtype arglist[4];
 char *name;
 int j;
-				
+
 	/* NB undocumented parameters */
 	j = get_controlled_task_memory(task, task->task_PC, mem, sizeof(mem));
 	if (j < 0)
 	  fprintf(stderr,"failed read\n");
+
 	if (mem[0] != ILLEGAL)
 	{
 		printf("-- %8.8x: %4.4x\n", task->task_PC, mem[0]);
@@ -430,28 +430,27 @@ int j;
 	arglist[3] = NONE;
 	if (mem[1] == 0)	/* use inline pointer for args */
 	{
-		unsigned short params[8];
 		unsigned int argptr;
 		
 		argptr = *(unsigned int *)(mem + 2);
 		j = get_controlled_task_memory(task, argptr, params, sizeof(params));
     	if (j < 0)
-	      fprintf(stderr,"failed read\n");
+	      fprintf(stderr,"failed inline read %8.8x (%d)\n",argptr, errno);
 		name = gettrapname(params[0],arglist);
 		printargs(task, name, arglist, params, ") ind");
 	}
 	else
 	if (mem[1] == 1)	/* use A0 for args */
 	{
-		unsigned short params[16];
         int c;
+	  get_controlled_task_registers(task);
         
 		j = get_controlled_task_memory(task, task->task_REGS[8], params, sizeof(params));
     	if (j < 0)
-	      fprintf(stderr,"failed read\n");
+	      fprintf(stderr,"failed A0 read %8.8x (%d)\n",task->task_REGS[8], errno);
 
-printf("%8.8x ", task->task_REGS[8]);
-		
+printf("0x%8.8x ", task->task_REGS[8]);
+
 		name = gettrapname(params[0],arglist);
         printargs(task, name, arglist, params, ") indx");
 	}
@@ -526,13 +525,7 @@ char **argv;
 		fprintf(stderr, "cannot open: %s\n", tracee[0]);
 		exit(1);	
 	}
-/*	close(rc);
-*/
-
-	rc = open(tracee[0], O_RDONLY);
-	rc = open(tracee[0], O_RDONLY);
-	rc = open(tracee[0], O_RDONLY);
-
+	close(rc);
 
 	signal(SIGDEAD, childreap);
 
@@ -542,14 +535,12 @@ char **argv;
 	{
         halt_controlled_task(task);
 
-sleep(3);
-		
 		/* patch trap instr with ILLEGAL */
 		get_controlled_task_registers(task);
 		patchtext(tracee[0], task);
 
-        resume_controlled_task(task);  
-
+/*        resume_controlled_task(task);  
+*/
 		printf("tracing...\n");
 		done = 0;
 		while(!done)
