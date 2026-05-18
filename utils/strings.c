@@ -8,10 +8,6 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
-# if defined(DDOSMSMS)
-#define TEST1
-# endif
-
 
 char astring[256];
 
@@ -23,18 +19,20 @@ FILE *fp;
 int i = 0;
 char c = 1;
 int total = 0;
-int startpos = 0;
+int startpos = 0x40;
 PH ph;
+int fd;
 
 /* should we seek to .data */
-int fd = open(argv[1], O_RDONLY);
+fd = open(argv[1], O_RDONLY);
 if (fd > 0)
 {
-  read(fd, &ph, sizeof(PH));
+  read(fd, &ph, sizeof(ph));
   close(fd);
-  if (ph.magic == 0x400)
+
+  if (ph.magic[0] == 0x04)
   {
-	startpos = ph.datastart;
+	startpos = 0x40 + ph.textsize;
   }
 }
 
@@ -61,8 +59,10 @@ if (c >= 'a' && c <= 'z')
 if (c >= 'A' && c <= 'Z')
   astring[i++] = c;
 
+if (ispunct(c))
+  astring[i++] = c;
 
-if (c == 0 || c == ' ' || c == '(' || c == ')' || c == '[' || c == ']')
+if (c == 0  || i > 253)
 {
   astring[i] = 0;
   if (i > 3)
