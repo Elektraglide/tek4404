@@ -23,8 +23,8 @@ char **argv;
 		struct mt* map;
 		unsigned int* regs;
 
+		/* first 4k */
 		read(fd, header, sizeof(header));
-		close(fd);
 
 		userbl = (struct userbl *)(((char*)header) + header[0]);
 
@@ -49,14 +49,22 @@ char **argv;
 			printf("%8.8x ", regs[8+i]);
 		printf("\n");
 
-		task = (struct task*)((char*)userbl - sizeof(struct task));
+printf("offset = %8.8x\n", header[0] + (char *)&userbl->usizet - (char *)userbl);
+
+printf("%d %d %d\n",userbl->usizet, userbl->usized, userbl->usizes);
+
+		i = 1 + userbl->usizet + userbl->usized + userbl->usizes;
+		lseek(fd, i * 4096, SEEK_SET);
+		lseek(fd, 4, SEEK_CUR);
+		read(fd, &task, sizeof(task));
 		printf("tsuid  %d\n", task->tsuid);
 		printf("tstid  %d\n", task->tstid);
 		printf("tstidp  %d\n", task->tstidp);
-		printf("tstxtp  %d\n", task->tstxtp);
+		printf("tsalrm  %d\n", task->tsalrm);
 		printf("tsdatp  %d\n", task->tsdatp);
 		printf("tsstkp  %d\n", task->tsstkp);
 
+		printf("tsstat  %d\n", task->tsstat);
 	}
 }
 
