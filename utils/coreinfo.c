@@ -25,6 +25,12 @@ struct dirblk {
 	char d_name[14];
 };
 
+struct filedes {
+	ushort s1,s2;
+	ptr32 bufferptr;
+	ushort s3,s4;
+};
+
 int header[1024];
 
 int main(argc,argv)
@@ -41,9 +47,10 @@ char **argv;
 		struct task atask;
 		struct mt* map;
 		unsigned int* regs;
+		struct filedes afile;
 		unsigned char buffer[128],utmat[128];
 		char *status;
-		long timestamp;
+		unsigned long timestamp;
 		
 		/* first 4k */
 		read(fd, header, sizeof(header));
@@ -66,15 +73,19 @@ char **argv;
 		read(fd, buffer, 0x80 << (i & 0x3f));
 
 		// reading open files
+		printf("files:\n");
 		for(i=0; i<UNFILS; i++)
 		{
 			if (userbl->ufiles[i])
 			{
-					read(fd, buffer, 0xc);
+					read(fd, &afile, sizeof(afile));
+					printf("%d: 0x%4.4x 0x%4.4x  %8.8x\n", i, ntohs(afile.s1),ntohs(afile.s2),ntohl(afile.bufferptr));
+					
 					read(fd, buffer, 0x5e);
 			}
 		}
 		
+		printf("process:\n");
 		printf("uid(%d) uuid(%d) pid(%d) ppid(%d)\n", ntohs(atask.tsuid), ntohs(userbl->uuid), ntohs(atask.tstid),ntohs(atask.tstidp));
 
 		status = "";
