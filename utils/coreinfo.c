@@ -14,7 +14,7 @@
 #include <sys/_types/_u_int.h>
 #include <netinet/ip.h>
 #else
-
+#include <net/in.h>
 
 #endif
 
@@ -26,9 +26,9 @@ struct dirblk {
 };
 
 struct filedes {
-	ushort s1,s2;
+	unsigned short s1,s2;
 	ptr32 bufferlist;
-	ushort s3,s4;
+	unsigned short s3,s4;
 };
 
 int header[1024];
@@ -51,6 +51,7 @@ char **argv;
 		unsigned char buffer[128],utmat[128];
 		char *status;
 		unsigned long timestamp;
+		struct dirblk *fdn;
 		
 		/* first 4k */
 		read(fd, header, sizeof(header));
@@ -64,15 +65,15 @@ char **argv;
 		lseek(fd, i * 4096, SEEK_SET);
 		read(fd, &atask, sizeof(atask));
 				
-		// reading VM page map?
+		/* reading VM page map? */
 		read(fd, &utmat, 0x1a);
 		printf("umemc %d\n", ntohs(userbl->umemc));
-		// based on task size, writes more or less
+		/* based on task size, writes more or less */
 		i = ntohs(userbl->umemc) ;
 		read(fd, buffer, 0x80 << (i & 0x3f));
 		read(fd, buffer, 0x80 << (i & 0x3f));
 
-		// reading open files
+		/* reading open files */
 		printf("files:\n");
 		for(i=0; i<UNFILS; i++)
 		{
@@ -139,7 +140,7 @@ char **argv;
 
 		printf("bin flags: 0x%4.4x\n", ntohs(userbl->ubin_flags));
 		
-		struct dirblk *fdn = (struct dirblk *)userbl->ufdn;
+		fdn = (struct dirblk *)userbl->ufdn;
 		printf("cwd entry: \"%s\"\n", fdn->d_name);
 		
 		close(fd);
