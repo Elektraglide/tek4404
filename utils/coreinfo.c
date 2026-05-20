@@ -27,7 +27,7 @@ struct dirblk {
 
 struct filedes {
 	ushort s1,s2;
-	ptr32 bufferptr;
+	ptr32 bufferlist;
 	ushort s3,s4;
 };
 
@@ -79,7 +79,7 @@ char **argv;
 			if (userbl->ufiles[i])
 			{
 					read(fd, &afile, sizeof(afile));
-					printf("%d: 0x%4.4x 0x%4.4x  %8.8x\n", i, ntohs(afile.s1),ntohs(afile.s2),ntohl(afile.bufferptr));
+					printf("%d: 0x%4.4x 0x%4.4x  0x%8.8x\n", i, ntohs(afile.s1),ntohs(afile.s2),ntohl(afile.bufferlist));
 					
 					read(fd, buffer, 0x5e);
 			}
