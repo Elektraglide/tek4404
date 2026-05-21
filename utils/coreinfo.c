@@ -8,6 +8,7 @@
 
 #ifdef __clang__
 #include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/_types/_u_char.h>
 #include <sys/_types/_u_short.h>
@@ -17,7 +18,6 @@
 #include <net/in.h>
 
 #endif
-
 
 /* S_IFDIR block table, 32 per block */
 struct dirblk {
@@ -32,6 +32,14 @@ struct filedes {
 };
 
 int header[1024];
+
+int stackoffset(sp,map)
+int sp;
+struct mt *map;
+{
+	return sp - ntohl(map[2].vaddr);
+}
+
 
 int main(argc,argv)
 int argc;
@@ -106,8 +114,12 @@ char **argv;
 		if (atask.tsmode & TARGX) strcat(buffer, "ARGX ");
 		printf("tsmode(%d) %s\n", atask.tsmode, buffer);
 		printf("utimu(%d) utims(%d)\n", ntohl(userbl->utimu),ntohl(userbl->utims));
+		fdn = (struct dirblk *)userbl->ufdn;
+		printf("cwd entry: \"%s\"\n", fdn->d_name);
+		printf("bin flags: 0x%4.4x\n", ntohs(userbl->ubin_flags));
 
-		
+
+
 		printf("map:\n");
 		map = (struct mt *)userbl->umem;
 		while (ntohs(map->numpages) > 0)
@@ -138,11 +150,55 @@ char **argv;
 			printf("%8.8x ", ntohl(regs[8+i]));
 		printf("\n");
 
-		printf("bin flags: 0x%4.4x\n", ntohs(userbl->ubin_flags));
+		printf("stack frame:\n");
+		i = 1 + ntohs(userbl->usizet) + ntohs(userbl->usized);
+		lseek(fd, i * 4096, SEEK_SET);
+		char *stack = (char *)malloc(4096 * ntohs(userbl->usizes));
+		read(fd, stack, 4096 * ntohs(userbl->usizes));
+
+		int sp = ntohl(regs[15]);
+		unsigned int spoff;
+		map = (struct mt *)userbl->umem;
+		i = 0;
+		while(sp)
+		{
+			int newsp;
+			
+			/* SP, Return Addr, locals */
+			spoff = stackoffset(sp, map);
+			printf("%2d: 0x%8.8x\n",i++, ntohl(*(int *)(stack + spoff + 4)));
+			sp = ntohl(*(int *)(stack + spoff));
+		}
 		
-		fdn = (struct dirblk *)userbl->ufdn;
-		printf("cwd entry: \"%s\"\n", fdn->d_name);
+		spoff += 8;
+		int argc = ntohl(*(int *)(stack + spoff));
+		int argv = ntohl(*(int *)(stack + spoff + 4));
+		int envp = ntohl(*(int *)(stack + spoff + 8));
 		
+		/* walk argv array */
+		printf("cmdline: ");
+		for (i=0; i<argc; i++)
+		{
+			char *p = ntohl(*(int *)(stack + stackoffset(argv, map)));
+			printf("%s ", stack + stackoffset(p, map));
+			
+			argv += 4;
+		}
+		printf("\n");
+		
+		printf("environ:\n");
+		while(envp)
+		{
+			spoff = stackoffset(envp, map);
+			char *p = ntohl(*(int *)(stack + spoff));
+			if (!p)
+				break;
+				
+			printf("%s\n", stack + stackoffset(p, map));
+			
+			envp += 4;
+		}
+
 		close(fd);
 	}
 }
