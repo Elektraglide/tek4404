@@ -130,8 +130,7 @@ char **argv;
 		fdn = (struct dirblk *)userbl->ufdn;
 		printf("cwd entry: \"%s\"\n", fdn->d_name);
 		printf("bin flags: 0x%4.4x\n", ntohs(userbl->ubin_flags));
-		printf("umxmem flags: %d\n", ntohs(userbl->umxmem));
-		printf("uhltpri flags: %d\n", ntohs(userbl->uhltpri));
+		printf("uhltpri value: %d\n", ntohs(userbl->uhltpri));
 
 
 		/* reading VM page map? */
@@ -150,6 +149,8 @@ char **argv;
 		{
 			if (userbl->ufiles[i])
 			{
+				/* TODO: interpret / reverse engineer file descriptor entry */
+
 					read(fd, &afile, sizeof(afile));
 					printf("\t%d: 0x%4.4x 0x%4.4x  0x%8.8x  0x%8.8x\n", i,
 					ntohs(afile.s1),ntohs(afile.s2), ntohl(afile.bufferlist), ntohl(afile.bufferlist2));
@@ -202,8 +203,8 @@ char **argv;
 		i = 0;
 		while(sp)
 		{
-			int newsp;
-			
+			/* TODO: lookup addr from cmd executable symbol table */
+		
 			/* SP, Return Addr, locals */
 			spoff = stackoffset(sp, map);
 			printf("\t%d: 0x%8.8x\n",i++, ntohl(*(int *)(stack + spoff + 4)));
