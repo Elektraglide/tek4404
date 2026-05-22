@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <sys/signal.h>
 #include <sys/fcntl.h>
+#include <time.h>
 #include "kernutils.h"
 #include "ph.h"
 #include "uniflex/task.h"
@@ -105,8 +106,13 @@ char **argv;
 		lseek(fd, i * 4096, SEEK_SET);
 		read(fd, &atask, sizeof(atask));
 		printf("PROC:\n");
-		timestamp = userbl->ustart;
-		printf("started: %2.2d:%2.2d:%2.2d \n", (timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60);
+		time_t t = ntohl(userbl->ustart);
+#ifdef __clang__
+		// 10 years of seconds; UniFLEX epoch starts 1980.
+		t += (60 * 60 * 24 * 365 * 10 );
+#endif
+		printf("started: %s\n", ctime(&t));
+
 		printf("utimu(%d) utims(%d)\n", ntohl(userbl->utimu),ntohl(userbl->utims));
 
 		printf("uid(%d) uuid(%d) pid(%d) ppid(%d)\n", ntohs(atask.tsuid), ntohs(userbl->uuid), ntohs(atask.tstid),ntohs(atask.tstidp));
