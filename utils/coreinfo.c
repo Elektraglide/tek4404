@@ -75,6 +75,7 @@ char c1,c2,c3;
 	printf("\n");
 }
 
+/* parsing core files base on reverse engineering function 0xa814 which dumps a core file for kernel */
 int main(argc,argv)
 int argc;
 char **argv;
@@ -108,7 +109,7 @@ char **argv;
 		printf("PROC:\n");
 		time_t t = ntohl(userbl->ustart);
 #ifdef __clang__
-		// 10 years of seconds; UniFLEX epoch starts 1980.
+		// 10 years of seconds; UniFLEX epoch starts 1980 not 1970!
 		t += (60 * 60 * 24 * 365 * 10 );
 #endif
 		printf("started: %s\n", ctime(&t));
