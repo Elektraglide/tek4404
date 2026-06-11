@@ -108,6 +108,8 @@ char **argv;
   ntp_packet packet;
   int i,verbose;
 
+  alarm(5);
+  
   verbose = 0;
   setclock = 0;
   for(i=1; i<argc; i++)
@@ -153,7 +155,7 @@ char **argv;
   if ( connect( sockfd, ( struct sockaddr * ) &serv_addr, sizeof( serv_addr) ) < 0 )
     error( "ERROR connecting" );
 
-#if 0
+#if 1
   /* blast out 3 requests.. Uniflex seems to lose first one! */
   n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
   if ( n < 0 )
@@ -168,8 +170,6 @@ char **argv;
   if ( n < 0 )
     error( "ERROR send to socket" );
 
-  alarm(15);
-  
   n = read( sockfd, ( char* ) &packet, sizeof( ntp_packet ) );
   if ( n < 0 )
     error( "ERROR reading from socket" );

@@ -72,6 +72,17 @@ void setsid() {}
 
 #define IPPR_UDP IPPROTO_UDP
 
+#define MSG_FDBROADCAST 0
+
+char *nget_str(char *name)
+{
+  if (!strcmp(name, "my_name"))
+    return "MBPm1";
+		
+  return "unknown";
+}
+
+
 #endif
 
 extern int rand();
@@ -491,6 +502,7 @@ char **argv;
   socklen_t src_addr_len;
   dhcp_t *dhcp;
 
+  alarm(5);
 
   for(i=1; i<argc; i++)
   {
