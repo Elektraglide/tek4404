@@ -21,8 +21,6 @@
 
 typedef int socklen_t;
 
-void setsid() {}
-
 socketopt opt;
 char *telnetprocess[] = {"/etc/login", NULL};
 char *shellprocess[] = {"/tek/bin/ash", NULL};
@@ -67,7 +65,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define USE_PACKETMODExx
-#define DEBUG
+#define DEBUGxx
 #define DEBUGCONSOLExx
 /***********************************/
 
@@ -104,9 +102,9 @@ char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
 char linefeed[] = "\012";
 int sock = -1;
 int state = STOPPED;
-int sessionsock;
-int sessionpty;
-int sessionpid;
+int sessionsock = 0;
+int sessionpty = 0;
+int sessionpid = 0;
 
 int off = 0;
 int on = 1;
@@ -116,6 +114,7 @@ FILE  *logger;
 
 int istelnet = 1;
 char ruser[32],rhost[32];
+char sessionname[64];
 
 struct buffer {
   unsigned char data[4096];
@@ -318,7 +317,7 @@ int sig;
   
 #ifdef DEBUGCONSOLE
     fprintf(console,"pid(%d): cleanup telnet session on %d\015\012",getpid(), sig);
-    fprintf(console,"sessionpid(%d)\015\012", sessionpid);
+    fprintf(console,"child pid(%d)\015\012", sessionpid);
 #endif
 
   /* SIGDEAD is *after* process has died so nothing to do here */
@@ -403,7 +402,6 @@ char *from;
   int i,fd;
   char buffer[64];
   struct timeval timeout;
-  char sessionname[64];
   char *sessionargv[3];
 
   /* telnet state */
@@ -440,8 +438,8 @@ char *from;
 
   sessionsock = din;
   sessionpty = fdmaster;
-  signal(SIGDEAD, cleanup_child);
 #ifdef DEBUGCONSOLE
+  fprintf(console, "pid(%d): connect from %s\015\012", getpid(), from);
   fprintf(console, "sessionsock(%d)\015\012", sessionsock);
   fprintf(console, "sessionpty(%d)\015\012", sessionpty);
 #endif
@@ -457,6 +455,10 @@ char *from;
   sessionpid = fork();
   if (sessionpid)
   {
+#ifdef DEBUGCONSOLE
+    fprintf(console, "ptty slave pid(%d)\015\012", sessionpid);
+#endif      
+
     /* PARENT */
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     
@@ -498,7 +500,13 @@ char *from;
     /* Close the slave side of the PTY */
     close(fdslave);
 
-nonblocking(din);
+/* nonblocking(din); */
+
+/* getting spurious SIGDEADs...
+   Exiting child causes a SIGDEAD, but then other connections get SIGDEAD too..
+   Check PTY_EOF instead..
+    signal(SIGDEAD, cleanup_child);
+*/
     
     last_was_cr = 0;
     /* we want to immediately check if there is any initial output */
@@ -531,23 +539,27 @@ nonblocking(din);
 #endif
 
 #ifdef DEBUGCONSOLE
-fprintf(console, "pid(%d): select n(%d) for pty(%d)\015\012", sessionpid, n+1, sessionpty);
+fprintf(console, "pid(%d): select n(%d) for pty(%d)\015\012", getpid(), n+1, sessionpty);
 #endif
         errno = 0;
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
         
 #ifdef DEBUGCONSOLE
-fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", sessionpid, n+1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc);
+fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", getpid(), n+1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc);
 #endif
 
         if (rc < 0)
         {
-            fprintf(console, "pid(%d): select(): error %s\015\012", sessionpid, strerror(errno)); 
+            fprintf(console, "pid(%d): select(): error %s\015\012", getpid(), strerror(errno)); 
         	
         	if (errno != EINTR)
         	{
-              /* break;  */
+              fprintf(console,"break on %d\015\012",errno);
+              break;
             }
+
+            fprintf(console,"continuing on %d\015\012",errno);
+            continue;
         }
         else
 
@@ -628,7 +640,6 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 
 				 break;
              }
-             
 
              ts.bi.start += n;
           }
@@ -642,6 +653,13 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
         if (FD_ISSET(fdmaster, &fd_in))
 #else
         ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+        if (ptystatus & PTY_EOF)
+        {
+#ifdef DEBUGCONSOLE_
+          fprintf(console,"pid(%d): PTY_EOF\015\012",sessionpid);
+#endif
+          break;	
+        }
         while (ptystatus & PTY_OUTPUT_QUEUED)
 #endif
         {
@@ -657,6 +675,7 @@ fprintf(console, "**Read master\015\012");
               fprintf(console, "fdmaster read() error %s\015\012", strerror(errno));
               if (errno != EINTR && errno != EWOULDBLOCK)
               {
+              	state = STOPPED;              	
                 break;
               }
 
@@ -710,10 +729,11 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
             if (n < 0)
             {
 #ifdef DEBUGCONSOLE
-                fprintf(console, "dout write() error %s\015\012", strerror(errno));
+              fprintf(console, "dout write() error %s\015\012", strerror(errno));
 #endif
-                if (errno && errno != EINTR && errno != EWOULDBLOCK)
+              if (errno && errno != EINTR && errno != EWOULDBLOCK)
               {
+              	state = STOPPED;
                 break;
               }
 
@@ -731,7 +751,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
       /* collect child process */
       n = wait(&rc);
 #ifdef DEBUGCONSOLE
-      fprintf(console, "Collect child pid(%d) => %d\015\012", n, rc);
+      fprintf(console, "Collect ptty slave pid(%d) => %d\015\012", n, rc);
 #endif      
   }
   else
@@ -789,12 +809,16 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    close(fdslave); 
+    /* close(fdslave);  */
 
     /* Execution of the program */
     {
       /* launch cmd */
-      rc = execvp(istelnet ? telnetprocess[0] : shellprocess[0], sessionargv);
+      /* /etc/login checks argv[0] to decide functionality, so we cannot 
+         use our sessionargv friendly naming
+      */
+      rc = execvp(istelnet ? telnetprocess[0] : shellprocess[0], 
+                  istelnet ? telnetprocess : shellprocess);
       if (rc < 0)
       {
         fprintf(console, "Error %s on exec\n", strerror(errno));
@@ -816,7 +840,7 @@ cleanup_and_exit(sig)
 int sig;
 {
 #ifdef DEBUG
-  fprintf(stderr,"cleanup telnetd on %d\015",sig);
+  fprintf(console,"cleanup telnetd on %d\015",sig);
 #endif
   close(sock);
   state = STOPPED;
@@ -829,7 +853,7 @@ int sig;
   
   pid = wait(&rc);
 #ifdef DEBUG
-  fprintf(stderr,"cleanup session: telnet proc(%d)\015\012",pid);
+  fprintf(console,"cleanup session: telnet proc(%d)\015\012",pid);
 #endif
 
   signal(SIGDEAD, cleanup_session);
