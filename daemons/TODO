@@ -1,0 +1,8 @@
+- pattern for forking a shell for each telnet session is very similar to that
+used in the wmgr.  However, in wmgr, the SIGDEAD is used to sweep up when a 
+window closes and it works fine.  In telnetd, SIGDEAD gets called when the 
+session exits (shell closed) - but then every other session also gets a 
+SIGDEAD!
+
+Sure its a dumb coding error, but for now we just check for PTY_EOF and close.
+
