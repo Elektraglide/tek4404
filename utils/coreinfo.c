@@ -110,8 +110,10 @@ char **argv;
 		t = ntohl(userbl->ustart);
 #ifdef __clang__
 		// 10 years of seconds; UniFLEX epoch starts 1980 not 1970!
-		// Uniflex appears to use 365.2 days / year!
-		t += (int)(60 * 60 * 24 * 365.2 * 10 );
+		
+#define SECONDS_IN_DAY (60*60*24)
+#define NUM_OF_LEAP_DAYS_IN_10_YEARS 2
+		t += (int)(SECONDS_IN_DAY * 365 * 10 + SECONDS_IN_DAY * NUM_OF_LEAP_DAYS_IN_10_YEARS);
 #endif
 		status = ctime(&t);
 #ifndef __clang__
