@@ -377,13 +377,16 @@ while(1)
 						unsigned int mainargv;
 						unsigned int mainenvp;
 
+						int args[3];
+						unsigned int array[16];
+
 						/* we need to convert from vaddr to paddr */
 						arun = (struct mt *)(userbl.umem);
 
 						/* get userblock page */
 						i = ntohl(atask.tsutop) & 0xfffff000;
 						/* add in uregs offset into that page */
-						i |= (ntohl(userbl.uregs) & 0xfff);
+						i |= (ntohl((int)userbl.uregs) & 0xfff);
 						
 						/* get task A7 (Stack Pointer) */
 						lseek(pmem, i + 15*4, 0);
@@ -419,18 +422,16 @@ while(1)
 
 						/* read argc, argv and envp */
 						/* NB assuming same page for argv,envp as last SP */
-						int args[3];
 						read(pmem, args, sizeof(args));
 						mainargc = ntohl(args[0]);
 						mainargv = ntohl(args[1]) & 0xfff;
 						mainenvp = ntohl(args[2]) & 0xfff;
 						
 						/* read argv array of pointers */
-						unsigned int array[16];
 						lseek(pmem, page_addr + mainargv, 0);
 						read(pmem, array, mainargc * 4);
 						
-						remain = 32;
+						remain = 22;
 						for (i=0; i<mainargc; i++)
 						{
 							lseek(pmem, page_addr + (ntohl(array[i]) & 0xfff), 0);
