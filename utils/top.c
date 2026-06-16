@@ -3,8 +3,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/fcntl.h>
-#include <sys/modes.h>
-#include <sys/sgtty.h>
 #include <pwd.h>
 #include "ph.h"
 #include "kernutils.h"
@@ -14,6 +12,8 @@
 #include "uniflex/userbl.h"
 
 #ifndef __clang__
+#include <sys/modes.h>
+#include <sys/sgtty.h>
 #include <net/netdev.h>
 #define ntohl(A) (A)
 #define ntohs(A) (A)
@@ -24,6 +24,9 @@
 #define SEEK_END 2
 
 #else
+
+// cc -std=c89 top.c ../kernutils.c -I../uniflex -I.. -o top
+
 
 #define TRUN   '\1'   /*  running  */
 #define TSLEEP '\2'   /*  sleeping (high priority)  */
@@ -41,6 +44,10 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/ioctl_compat.h>
+#include <sgtty.h>
+
+extern int open(const char *filename, int mode, ...);
 #endif
 
 char tty[] = "tty00";
@@ -276,13 +283,16 @@ while(1)
 		i = offsetof(struct userbl, ustart);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, &userbl.ustart, 4);
+		i = offsetof(struct userbl, uregs);
+		lseek(pmem, ntohl(atask.tsutop) + i, 0);
+		read(pmem, &userbl.uregs, 4);					/* NB for getting A7 (stack pointer) */
 		i = offsetof(struct userbl, uquantum);
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, &userbl.uquantum, 10);			/* NB reading uquantum,ucpu,usys_ratio,upersonality*/
 
 		i = offsetof(struct userbl, umem) + 2 * MTSIZE;
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, userbl.umem + 2 * MTSIZE, 10);
+		read(pmem, userbl.umem + 2 * MTSIZE, 10);	/* NB just reading stack descriptor (not text & data) */
 
 #ifdef __clang__
 		lseek(pmem, ntohl(atask.tsutop), 0);
@@ -326,13 +336,6 @@ while(1)
 			/* if its core.. */
 			if (atask.tsmode & TCORE)
 			{
-				struct mt *arun;
-				unsigned int page,page_addr;
-				unsigned int argcee;
-				unsigned int argvee[4];
-				char cmdline[32];
-				int remain;
-				
 				printf("%-4d ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) *100)/totalcpu );
 
 				/* printf("IO count:%d  limits[time:%d io:%d mem:%d] ", ntohl(userbl.uicnt), ntohl(userbl.utimlmt), ntohl(userbl.uiotlmt), ntohl(userbl.umemlmt)); */
@@ -362,33 +365,75 @@ while(1)
 					else
 					if (userbl.usizes)
 					{
-						/* read user stack page entry for oldest page in chunk */
-						arun = (struct mt *)(userbl.umem);
-		
-						i = ntohl(arun[2].paddr) + (ntohs(arun[2].numpages) - 1) * 4;
-						lseek(pmem, i, 0);
-						len = read(pmem, &page, 4);
-#if 0
-    printf("\n len=%d seek = %6.6x\n", len, i);
-	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[0].vaddr), ntohl(arun[0].paddr), ntohs(arun[0].numpages));
-	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[1].vaddr), ntohl(arun[1].paddr), ntohs(arun[1].numpages));
-	printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun[2].vaddr), ntohl(arun[2].paddr), ntohs(arun[2].numpages));
+						struct mt *arun;
+						unsigned int page,page_addr;
+						char cmdline[32];
+						int remain;
+						
+						unsigned int regs[16];
+						unsigned int sp;
+						unsigned int spoff;
+						unsigned int mainargc;
+						unsigned int mainargv;
+						unsigned int mainenvp;
 
-	printf("%8.8x => %8.8x \n", ntohl(page), ntohl(page) << 12 );
-#endif
-						/* remove permissions bits */
-						page_addr = (ntohl(page) & 0xfffff) << 12;
-								
-						/* read argc, read argv pointer */
-						lseek(pmem, page_addr, 0);
-						read(pmem, &argcee, 4);
-						if (ntohl(argcee) < 1) argcee = htonl(1);
-						read(pmem, argvee, 4 * ntohl(argcee));
-			
-						remain = 20;
-						for (i=0; i<ntohl(argcee); i++)
+						/* we need to convert from vaddr to paddr */
+						arun = (struct mt *)(userbl.umem);
+
+						/* get userblock page */
+						i = ntohl(atask.tsutop) & 0xfffff000;
+						/* add in uregs offset into that page */
+						i |= (ntohl(userbl.uregs) & 0xfff);
+						
+						/* get task A7 (Stack Pointer) */
+						lseek(pmem, i + 15*4, 0);
+						read(pmem, regs+15, 4);
+						sp = ntohl(regs[15]);
+						
+						/* walk up stack until transfer address (assuming 0x0) */
+						while(sp != 0x0)
 						{
-							lseek(pmem, page_addr + (ntohl(argvee[i]) & 0xfff), 0);
+							unsigned int pageindex,pageoff;
+							
+							/* convert SP to pageindex and pageoffset */
+							spoff = sp - ntohl(arun[2].vaddr);
+							pageindex = spoff >> 12;
+							pageoff = spoff & 0xfff;
+
+							/* lookup physical page */
+							i = ntohl(arun[2].paddr) + pageindex * 4;
+							lseek(pmem, i, 0);
+							len = (int)read(pmem, &page, 4);
+
+							/* remove permissions bits */
+							page_addr = (ntohl(page) & 0xfffff) << 12;
+
+							/* read new SP */
+							lseek(pmem, page_addr + pageoff, 0);
+							read(pmem, &sp, 4);
+							sp = ntohl(sp);
+						}
+
+						/* skip */
+						lseek(pmem, 4, SEEK_CUR);
+
+						/* read argc, argv and envp */
+						/* NB assuming same page for argv,envp as last SP */
+						int args[3];
+						read(pmem, args, sizeof(args));
+						mainargc = ntohl(args[0]);
+						mainargv = ntohl(args[1]) & 0xfff;
+						mainenvp = ntohl(args[2]) & 0xfff;
+						
+						/* read argv array of pointers */
+						unsigned int array[16];
+						lseek(pmem, page_addr + mainargv, 0);
+						read(pmem, array, mainargc * 4);
+						
+						remain = 32;
+						for (i=0; i<mainargc; i++)
+						{
+							lseek(pmem, page_addr + (ntohl(array[i]) & 0xfff), 0);
 							read(pmem, cmdline, remain);
 							cmdline[remain] = 0;
 							printf("%s ", cmdline);
@@ -451,6 +496,7 @@ while(1)
 		}
 	}
 
+#ifndef __clang__
     /* quit? */
 	{
 	    gtty(fileno(stdin), &term_settings);
@@ -471,8 +517,9 @@ while(1)
 			}
 		}
 	}
+#endif
 
-	printf("\033[2K");	
+	printf("\033[2K");
 	printf("\033[1;1H");
 	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
 
