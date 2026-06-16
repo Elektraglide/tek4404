@@ -25,6 +25,13 @@ socketopt opt;
 char *telnetprocess[] = {"/etc/login", NULL};
 char *shellprocess[] = {"/tek/bin/ash", NULL};
 
+char *envp[] = {
+	"PATH=/bin:/bin/UNIXtools:/tek/bin", 
+	"TERM=4404", 
+	"TERMCAP=/etc/termcap",
+	NULL
+};
+
 #else
 
 extern int open();
@@ -781,8 +788,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     /* make a friendly name */
     if (istelnet)
     {
-      strcpy(sessionname, "telnet_");
-      strcat(sessionname, from);
+      strcpy(sessionname, "telnet_client");
     }
     else
     {
@@ -791,7 +797,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     }
 
     sessionargv[0] = sessionname;
-    sessionargv[1] = sessionname;
+    sessionargv[1] = from;
     sessionargv[2] = NULL;
       
 #ifndef __clang__
@@ -817,8 +823,9 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
       /* /etc/login checks argv[0] to decide functionality, so we cannot 
          use our sessionargv friendly naming
       */
-      rc = execvp(istelnet ? telnetprocess[0] : shellprocess[0], 
-                  istelnet ? telnetprocess : shellprocess);
+      rc = execve(istelnet ? telnetprocess[0] : shellprocess[0], 
+                  sessionargv,
+                  envp);
       if (rc < 0)
       {
         fprintf(console, "Error %s on exec\n", strerror(errno));
