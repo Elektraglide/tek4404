@@ -54,6 +54,8 @@ char tty[] = "tty00";
 char numbers[16] = "000";
 struct sgttyb orig_term_settings;
 
+unsigned int pa_entries[128];		/* max stack 512kB (128 pages) */
+
 void printbuffer(buffer, len)
 unsigned char *buffer;
 int len;
@@ -369,7 +371,7 @@ while(1)
 						unsigned int page,page_addr;
 						char cmdline[32];
 						int remain;
-						
+
 						unsigned int regs[16];
 						unsigned int sp;
 						unsigned int spoff;
@@ -388,11 +390,15 @@ while(1)
 						/* add in uregs offset into that page */
 						i |= (ntohl((int)userbl.uregs) & 0xfff);
 						
-						/* get task A7 (Stack Pointer) */
+						/* get task register A7 (Stack Pointer) */
 						lseek(pmem, i + 15*4, 0);
 						read(pmem, regs+15, 4);
 						sp = ntohl(regs[15]);
-						
+
+						/* read ALL physical page entries for stack segment */
+						lseek(pmem, ntohl(arun[2].paddr), 0);
+						read(pmem, pa_entries, 4 * ntohs(arun[2].numpages));
+
 						/* walk up stack until transfer address (assuming 0x0) */
 						while(sp != 0x0)
 						{
@@ -403,12 +409,13 @@ while(1)
 							pageindex = spoff >> 12;
 							pageoff = spoff & 0xfff;
 
+							if (pageindex > ntohs(arun[2].numpages))
+								break;
+								
 							/* lookup physical page */
-							i = ntohl(arun[2].paddr) + pageindex * 4;
-							lseek(pmem, i, 0);
-							len = (int)read(pmem, &page, 4);
+							page = pa_entries[pageindex];
 
-							/* remove permissions bits */
+							/* remove permissions bits and make page address */
 							page_addr = (ntohl(page) & 0xfffff) << 12;
 
 							/* read new SP */
