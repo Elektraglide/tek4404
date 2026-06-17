@@ -84,6 +84,24 @@ int len;
 
 #define offsetof(st, m) ((int)&(((st *)0)->m))
 
+unsigned int getSP(pmem, atask, userbl)
+int pmem;
+struct task *atask;
+struct userbl *userbl;
+{
+	int i,regs[16];
+
+	/* get userblock page */
+	i = ntohl(atask->tsutop) & 0xfffff000;
+	/* add in uregs offset into that page */
+	i |= (ntohl((int)userbl->uregs) & 0xfff);
+	
+	/* get task register A7 (Stack Pointer) */
+	lseek(pmem, i + 15*4, 0);
+	read(pmem, regs+15, 4);
+	return ntohl(regs[15]);
+}
+
 /* tweaking OS settings */
 int main(argc, argv)
 int argc;
@@ -368,7 +386,7 @@ while(1)
 					if (userbl.usizes)
 					{
 						struct mt *arun;
-						unsigned int page,page_addr;
+						unsigned int page,paddr;
 						char cmdline[32];
 						int remain;
 
@@ -382,20 +400,11 @@ while(1)
 						int args[3];
 						unsigned int array[16];
 
-						/* we need to convert from vaddr to paddr */
-						arun = (struct mt *)(userbl.umem);
-
-						/* get userblock page */
-						i = ntohl(atask.tsutop) & 0xfffff000;
-						/* add in uregs offset into that page */
-						i |= (ntohl((int)userbl.uregs) & 0xfff);
-						
-						/* get task register A7 (Stack Pointer) */
-						lseek(pmem, i + 15*4, 0);
-						read(pmem, regs+15, 4);
-						sp = ntohl(regs[15]);
+						/* get last known SP */
+						sp = getSP(pmem, &atask, &userbl);
 
 						/* read ALL physical page entries for stack segment */
+						arun = (struct mt *)(userbl.umem);
 						lseek(pmem, ntohl(arun[2].paddr), 0);
 						read(pmem, pa_entries, 4 * ntohs(arun[2].numpages));
 
@@ -413,13 +422,13 @@ while(1)
 								break;
 								
 							/* lookup physical page */
-							page = pa_entries[pageindex];
+							page = ntohl(pa_entries[pageindex]);
 
 							/* remove permissions bits and make page address */
-							page_addr = (ntohl(page) & 0xfffff) << 12;
+							paddr = (page & 0xfffff) << 12;
 
 							/* read new SP */
-							lseek(pmem, page_addr + pageoff, 0);
+							lseek(pmem, paddr + pageoff, 0);
 							read(pmem, &sp, 4);
 							sp = ntohl(sp);
 						}
@@ -434,14 +443,15 @@ while(1)
 						mainargv = ntohl(args[1]) & 0xfff;
 						mainenvp = ntohl(args[2]) & 0xfff;
 						
-						/* read argv array of pointers */
-						lseek(pmem, page_addr + mainargv, 0);
+						/* read argv array of pointers to virtual addresses */
+						lseek(pmem, paddr + mainargv, 0);
 						read(pmem, array, mainargc * 4);
 						
 						remain = 22;
 						for (i=0; i<mainargc; i++)
 						{
-							lseek(pmem, page_addr + (ntohl(array[i]) & 0xfff), 0);
+							/* use paddr with page offset of virtual address */
+							lseek(pmem, paddr + (ntohl(array[i]) & 0xfff), 0);
 							read(pmem, cmdline, remain);
 							cmdline[remain] = 0;
 							printf("%s ", cmdline);
