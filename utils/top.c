@@ -156,7 +156,7 @@ char **argv;
 
 
 #ifdef __clang__
-	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem2/allmem.bin", O_RDWR);
+	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem/allmem.bin", O_RDWR);
 #else
 	pmem = open("/dev/pmem", O_RDWR);
 #endif
@@ -334,7 +334,7 @@ while(1)
 		/* not sure how to identify a non-task */
 		if (atask.tstid != 0 && swapsize == 0)
 		{
-
+			continue;
 		}
 
 
@@ -408,7 +408,7 @@ while(1)
 						read(pmem, pa_entries, 4 * ntohs(arun[2].numpages));
 
 						/* walk up stack until transfer address (assuming 0x0) */
-						while(sp != 0x0)
+						while(sp > ntohl(arun[2].vaddr))
 						{
 							unsigned int pageindex,pageoff;
 
@@ -423,6 +423,7 @@ while(1)
 							/* remove permissions bits and make page address */
 							paddr = (page & 0xfffff) << 12;
 
+
 							/* read new SP */
 							lseek(pmem, paddr + pageoff, 0);
 							if (read(pmem, &sp, 4) != 4)
@@ -431,16 +432,18 @@ while(1)
 								break;
 							}
 							
-								
 							sp = ntohl(sp);
 						}
 
 						/* if we failed to get to TOS, skip cmdline parsing */
 						if (!sp)
 						{
+							unsigned int datapage;
+							int datapageindex = -1;
+							
 							/* skip */
 							lseek(pmem, 4, SEEK_CUR);
-
+			
 							/* read argc, argv and envp */
 							/* NB assuming same page for argv,envp as last SP */
 							mainargc = 0;
@@ -456,8 +459,37 @@ while(1)
 							remain = 22;
 							for (i=0; i<mainargc; i++)
 							{
+								unsigned int dataoff,pageindex,pageoff;
+
+								/* mostly references to stack.. */
+								dataoff = ntohl(array[i]) - ntohl(arun[2].vaddr);
+								pageindex = dataoff >> 12;
+								if (pageindex >= 0 && pageindex < ntohs(arun[2].numpages))
+								{
+									/* we have them cached */
+									page = ntohl(pa_entries[pageindex]);
+								}
+								else	/* assume .data reference */
+								{
+									dataoff = ntohl(array[i]) - ntohl(arun[1].vaddr);
+									pageindex = dataoff >> 12;
+								
+									/* indirect to paddr (if we need to) and cache it */
+									if (datapageindex != pageindex)
+									{
+										datapageindex = pageindex;
+										lseek(pmem, ntohl(arun[1].paddr) + 4 * datapageindex, 0);
+										read(pmem, &datapage, 4);
+									}
+
+									page = ntohl(datapage);
+								}
+
+								/* remove permissions bits and make a physical page address */
+								paddr = (page & 0xfffff) << 12;
+								 
 								/* use paddr with page offset of virtual address */
-								lseek(pmem, paddr + (ntohl(array[i]) & 0xfff), 0);
+								lseek(pmem, paddr + (dataoff & 0xfff), 0);
 								read(pmem, cmdline, remain);
 								cmdline[remain] = 0;
 								printf("%s ", cmdline);
