@@ -390,7 +390,6 @@ while(1)
 						char cmdline[32];
 						int remain;
 
-						unsigned int regs[16];
 						unsigned int sp;
 						unsigned int spoff;
 						unsigned int mainargc;
@@ -412,15 +411,12 @@ while(1)
 						while(sp != 0x0)
 						{
 							unsigned int pageindex,pageoff;
-							
+
 							/* convert SP to pageindex and pageoffset */
 							spoff = sp - ntohl(arun[2].vaddr);
 							pageindex = spoff >> 12;
 							pageoff = spoff & 0xfff;
 
-							if (pageindex > ntohs(arun[2].numpages))
-								break;
-								
 							/* lookup physical page */
 							page = ntohl(pa_entries[pageindex]);
 
@@ -429,7 +425,13 @@ while(1)
 
 							/* read new SP */
 							lseek(pmem, paddr + pageoff, 0);
-							read(pmem, &sp, 4);
+							if (read(pmem, &sp, 4) != 4)
+							{
+								fprintf(stderr,"read fail: %8.8x\n", paddr + pageoff);
+								break;
+							}
+							
+								
 							sp = ntohl(sp);
 						}
 
@@ -438,6 +440,7 @@ while(1)
 
 						/* read argc, argv and envp */
 						/* NB assuming same page for argv,envp as last SP */
+						mainargc = 0;
 						read(pmem, args, sizeof(args));
 						mainargc = ntohl(args[0]);
 						mainargv = ntohl(args[1]) & 0xfff;
