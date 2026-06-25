@@ -427,7 +427,7 @@ while(1)
 							lseek(pmem, paddr + pageoff, 0);
 							if (read(pmem, &sp, 4) != 4)
 							{
-								fprintf(stderr,"read fail: 0x%8.8x\n", paddr + pageoff);
+								fprintf(stderr,"read fail: 0x%8.8x", paddr + pageoff);
 								break;
 							}
 							
@@ -435,34 +435,38 @@ while(1)
 							sp = ntohl(sp);
 						}
 
-						/* skip */
-						lseek(pmem, 4, SEEK_CUR);
-
-						/* read argc, argv and envp */
-						/* NB assuming same page for argv,envp as last SP */
-						mainargc = 0;
-						read(pmem, args, sizeof(args));
-						mainargc = ntohl(args[0]);
-						mainargv = ntohl(args[1]) & 0xfff;
-						mainenvp = ntohl(args[2]) & 0xfff;
-						
-						/* read argv array of pointers to virtual addresses */
-						lseek(pmem, paddr + mainargv, 0);
-						read(pmem, array, mainargc * 4);
-						
-						remain = 22;
-						for (i=0; i<mainargc; i++)
+						/* if we failed to get to TOS, skip cmdline parsing */
+						if (!sp)
 						{
-							/* use paddr with page offset of virtual address */
-							lseek(pmem, paddr + (ntohl(array[i]) & 0xfff), 0);
-							read(pmem, cmdline, remain);
-							cmdline[remain] = 0;
-							printf("%s ", cmdline);
-							remain -= strlen(cmdline);
-							if (remain <= 0)
-								break;
-						}
+							/* skip */
+							lseek(pmem, 4, SEEK_CUR);
 
+							/* read argc, argv and envp */
+							/* NB assuming same page for argv,envp as last SP */
+							mainargc = 0;
+							read(pmem, args, sizeof(args));
+							mainargc = ntohl(args[0]);
+							mainargv = ntohl(args[1]) & 0xfff;
+							mainenvp = ntohl(args[2]) & 0xfff;
+							
+							/* read argv array of pointers to virtual addresses */
+							lseek(pmem, paddr + mainargv, 0);
+							read(pmem, array, mainargc * 4);
+							
+							remain = 22;
+							for (i=0; i<mainargc; i++)
+							{
+								/* use paddr with page offset of virtual address */
+								lseek(pmem, paddr + (ntohl(array[i]) & 0xfff), 0);
+								read(pmem, cmdline, remain);
+								cmdline[remain] = 0;
+								printf("%s ", cmdline);
+								remain -= strlen(cmdline);
+								if (remain <= 0)
+									break;
+							}
+						}
+						
 						lseek(pmem, rc, SEEK_SET);
 					}
 					/* delete rest of line */
