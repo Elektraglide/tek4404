@@ -427,7 +427,7 @@ while(1)
 							lseek(pmem, paddr + pageoff, 0);
 							if (read(pmem, &sp, 4) != 4)
 							{
-								fprintf(stderr,"read fail: %8.8x\n", paddr + pageoff);
+								fprintf(stderr,"read fail: 0x%8.8x\n", paddr + pageoff);
 								break;
 							}
 							
