@@ -54,8 +54,6 @@ char tty[] = "tty00";
 char numbers[16] = "000";
 struct sgttyb orig_term_settings;
 
-unsigned int pa_entries[128];		/* max stack 512kB (128 pages) */
-
 void printbuffer(buffer, len)
 unsigned char *buffer;
 int len;
@@ -100,6 +98,68 @@ struct userbl *userbl;
 	lseek(pmem, i + 15*4, 0);
 	read(pmem, regs+15, 4);
 	return ntohl(regs[15]);
+}
+
+int lastsegment = -1;
+int lastpageindex = -1;
+unsigned int lastpa;
+
+
+unsigned int va2pa(arun, pmem, va)
+struct mt *arun;
+int pmem;
+unsigned int va;
+{
+unsigned int pa;
+int i;
+
+	for(i=2; i>=0; i--)
+	{
+		unsigned int pageindex,vmoff;
+
+		vmoff = va - ntohl(arun[i].vaddr);
+		pageindex = vmoff >> 12;
+		if (pageindex >= 0 && pageindex < ntohs(arun[2].numpages))
+		{
+			/* do we need to fetch paddr indirection? */
+			if (i != lastsegment || pageindex != lastpageindex)
+			{
+				lastpageindex = pageindex;
+				lastsegment = i;
+			
+				lseek(pmem, ntohl(arun[i].paddr) + 4 * lastpageindex, 0);
+				read(pmem, &lastpa, 4);
+				
+				/* remove permissions bits and make page address */
+				lastpa = (ntohl(lastpa) & 0xfffff) << 12;
+			}
+
+			return lastpa + (vmoff & 0xfff);
+		}
+	}
+	return 0;
+}
+
+unsigned int readvaddr(arun, pmem, va)
+struct mt *arun;
+int pmem;
+unsigned int va;
+{
+		unsigned int pa,data;
+
+		/* get the paddr and read 4 bytes */
+		pa = va2pa(arun, pmem, va);
+		if (lseek(pmem, pa, 0) < 0)
+		{
+			fprintf(stderr,"\nlseek: failed 0x%6.6x\n",pa);
+		}
+		data = 0;
+		if (read(pmem, &data, 4) != 4)
+		{
+			fprintf(stderr,"\nread: failed 0x%6.6x\n",pa);
+		}
+
+		return ntohl(data);
 }
 
 /* tweaking OS settings */
@@ -386,12 +446,10 @@ while(1)
 					if (userbl.usizes)
 					{
 						struct mt *arun;
-						unsigned int page,paddr;
 						char cmdline[32];
 						int remain;
 
 						unsigned int sp;
-						unsigned int spoff;
 						unsigned int mainargc;
 						unsigned int mainargv;
 						unsigned int mainenvp;
@@ -402,37 +460,16 @@ while(1)
 						/* get last known SP */
 						sp = getSP(pmem, &atask, &userbl);
 
-						/* read ALL physical page entries for stack segment */
+						/* we need to read virtual addresses, so get segment table */
 						arun = (struct mt *)(userbl.umem);
-						lseek(pmem, ntohl(arun[2].paddr), 0);
-						read(pmem, pa_entries, 4 * ntohs(arun[2].numpages));
 
+						/* invalidate cached info */
+						lastsegment = -1;
+						
 						/* walk up stack until transfer address (assuming 0x0) */
 						while(sp > ntohl(arun[2].vaddr))
 						{
-							unsigned int pageindex,pageoff;
-
-							/* convert SP to pageindex and pageoffset */
-							spoff = sp - ntohl(arun[2].vaddr);
-							pageindex = spoff >> 12;
-							pageoff = spoff & 0xfff;
-
-							/* lookup physical page */
-							page = ntohl(pa_entries[pageindex]);
-
-							/* remove permissions bits and make page address */
-							paddr = (page & 0xfffff) << 12;
-
-
-							/* read new SP */
-							lseek(pmem, paddr + pageoff, 0);
-							if (read(pmem, &sp, 4) != 4)
-							{
-								fprintf(stderr,"read fail: 0x%8.8x", paddr + pageoff);
-								break;
-							}
-							
-							sp = ntohl(sp);
+							sp = readvaddr(arun, pmem, sp);
 						}
 
 						/* if we failed to get to TOS, skip cmdline parsing */
@@ -449,47 +486,21 @@ while(1)
 							mainargc = 0;
 							read(pmem, args, sizeof(args));
 							mainargc = ntohl(args[0]);
-							mainargv = ntohl(args[1]) & 0xfff;
-							mainenvp = ntohl(args[2]) & 0xfff;
-							
-							/* read argv array of pointers to virtual addresses */
-							lseek(pmem, paddr + mainargv, 0);
-							read(pmem, array, mainargc * 4);
+							mainargv = ntohl(args[1]);
+							mainenvp = ntohl(args[2]);
 							
 							remain = 22;
 							for (i=0; i<mainargc; i++)
 							{
-								unsigned int dataoff,pageindex,pageoff;
-
-								/* mostly references to stack.. */
-								dataoff = ntohl(array[i]) - ntohl(arun[2].vaddr);
-								pageindex = dataoff >> 12;
-								if (pageindex >= 0 && pageindex < ntohs(arun[2].numpages))
-								{
-									/* we have them cached */
-									page = ntohl(pa_entries[pageindex]);
-								}
-								else	/* assume .data reference */
-								{
-									dataoff = ntohl(array[i]) - ntohl(arun[1].vaddr);
-									pageindex = dataoff >> 12;
+								unsigned int stringvaddr;
+								unsigned int stringpaddr;
 								
-									/* indirect to paddr (if we need to) and cache it */
-									if (datapageindex != pageindex)
-									{
-										datapageindex = pageindex;
-										lseek(pmem, ntohl(arun[1].paddr) + 4 * datapageindex, 0);
-										read(pmem, &datapage, 4);
-									}
-
-									page = ntohl(datapage);
-								}
-
-								/* remove permissions bits and make a physical page address */
-								paddr = (page & 0xfffff) << 12;
-								 
-								/* use paddr with page offset of virtual address */
-								lseek(pmem, paddr + (dataoff & 0xfff), 0);
+								stringvaddr = readvaddr(arun, pmem, mainargv + i * 4);
+								if (!stringvaddr)
+									break;
+									
+								stringpaddr = va2pa(arun, pmem, stringvaddr);
+								lseek(pmem, stringpaddr, 0);
 								read(pmem, cmdline, remain);
 								cmdline[remain] = 0;
 								printf("%s ", cmdline);
