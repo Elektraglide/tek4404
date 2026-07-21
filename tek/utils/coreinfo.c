@@ -46,8 +46,8 @@ struct mt *map;
 #define MC_SHARED 0x10000000
 #define MC_PAGE 0x000fffff
 
-void printpages(mcpages, len)
-unsigned int *mcpages;
+void printpages(map_cell_pages, len)
+unsigned int *map_cell_pages;
 int len;
 {
 int i;
@@ -55,9 +55,9 @@ char c1,c2,c3;
 
 	for(i=0; i<len/4; i++)
 	{
-		if(mcpages[i])
+		if(map_cell_pages[i])
 		{
-			unsigned int v = ntohl(mcpages[i]);
+			unsigned int v = ntohl(map_cell_pages[i]);
 			c1 = '.';
 			c2 = '.';
 			c3 = '.';
@@ -92,7 +92,7 @@ char **argv;
 		struct filedes afile;
 		unsigned char buffer[128];
 		unsigned short utmat[128];
-		unsigned int mcpages[1024];
+		unsigned int map_cell_pages[1024];
 		char *status;
 		unsigned long timestamp;
 		struct dirblk *fdn;
@@ -155,9 +155,9 @@ char **argv;
 			printf("umemc %d => 0x%X\n", ntohs(utmat[9]), 0x80 << (ntohs(utmat[9]) & 0x3f));
 			/* based on task size, writes more or less */
 			i = ntohs(utmat[9]);
-			read(fd, mcpages, 0x80 << (i & 0x3f));
-			printpages(mcpages, 0x80 << (i & 0x3f));
-			read(fd, mcpages, 0x80 << (i & 0x3f));
+			read(fd, map_cell_pages, 0x80 << (i & 0x3f));
+			printpages(map_cell_pages, 0x80 << (i & 0x3f));
+			read(fd, map_cell_pages, 0x80 << (i & 0x3f));
 		}
 
 		/* reading open files */
