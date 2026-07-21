@@ -31,6 +31,24 @@ struct filedes {
 	ptr32 bufferlist2;
 };
 
+#ifdef __clang__
+#pragma pack(push, 1)
+#endif
+struct tmat
+{
+	ushort unknown1;
+	ptr32 memqueue;		/* 0x02 */
+	ptr32 unknown2;
+	ptr32 pooledpages;	/* 0x0a */
+	ptr32 privpages;	/* 0x0e */
+	ushort tasksize; 	/* 0x12 */
+	ushort taskordinal;	/* 0x14 */	
+	ptr32 unknown3;		/* 0x16 */
+};
+#ifdef __clang__
+#pragma pack(pop)
+#endif
+
 int header[1024];
 
 int stackoffset(sp,map)
@@ -91,7 +109,7 @@ char **argv;
 		unsigned int* regs;
 		struct filedes afile;
 		unsigned char buffer[128];
-		unsigned short utmat[128];
+		struct tmat utmat;
 		unsigned int map_cell_pages[1024];
 		char *status;
 		unsigned long timestamp;
@@ -149,12 +167,12 @@ char **argv;
 
 
 		/* reading VM page map? */
-		printf("PAGE MAP:\n");
+		printf("PAGE MAP CELLS:\n");
 		{
 			read(fd, &utmat, 0x1a);
-			printf("umemc %d => 0x%X\n", ntohs(utmat[9]), 0x80 << (ntohs(utmat[9]) & 0x3f));
+			/* printf("tmat %d for task %d => 0x%X\n", ntohs(utmat.tasksize), ntohs(utmat.taskordinal), 0x80 << (ntohs(utmat.tasksize) & 0x3f)); */
 			/* based on task size, writes more or less */
-			i = ntohs(utmat[9]);
+			i = ntohs(utmat.tasksize);
 			read(fd, map_cell_pages, 0x80 << (i & 0x3f));
 			printpages(map_cell_pages, 0x80 << (i & 0x3f));
 			read(fd, map_cell_pages, 0x80 << (i & 0x3f));
@@ -173,7 +191,7 @@ char **argv;
 					printf("    %d: 0x%4.4x 0x%4.4x  0x%8.8x  0x%8.8x\n", i,
 						ntohs(afile.s1), ntohs(afile.s2), ntohl(afile.bufferlist), ntohl(afile.bufferlist2));
 
-					read(fd, utmat, 0x5e);
+					read(fd, buffer, 0x5e);
 				}
 			}
 		}
