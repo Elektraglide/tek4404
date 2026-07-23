@@ -429,7 +429,7 @@ struct conn *request;
 			/* NULL-op */
 			break;
 		case 1:
-			/* Add Mount(cracker, packer); */
+			/* Add Mount */
 			path = getstring(request);
 			fprintf(console, "mountd: mount Path = %s\n",path);
 			if (makehandle(path, handle) >= 0)
@@ -444,7 +444,7 @@ struct conn *request;
 			}
 			break;
 		case 2:
-			/* Mount Entries(cracker, packer); */
+			/* Mount Entries */
 			break;
 		case 3:
 			/* Remove Mount */
@@ -493,7 +493,7 @@ struct conn *request;
 			/* NULL-op */
 			break;
 		case 1:
-			/* GetAttr(cracker, packer); */
+			/* GetAttr */
 			fh = getfilehandle(request);
 			fprintf(console, "nfsd: getattr: %s\n", mounttable[fh]);
 			if (stat(mounttable[fh], &info) == 0)
@@ -545,46 +545,46 @@ struct conn *request;
 			}
 			break;
 		case 2:
-			/* SetAttr(cracker, packer); */
+			/* SetAttr */
 			break;
 		case 3:
 			/* Root(). No-op. */
 			break;
 		case 4:
-			/* Lookup(cracker, packer); */
+			/* Lookup */
 			fh = getfilehandle(request);
 			path = getstring(request);
 			fprintf(console, "nfsd: lookup = %s\n",path);
 			break;
 		case 5:
-			/* ReadLink(cracker, packer); */
+			/* ReadLink */
 			break;
 		case 6:
-			/* Read(cracker, packer); */
+			/* Read */
 			break;
 		case 8:
-			/* Write(cracker, packer); */
+			/* Write */
 			break;
 		case 9:
-			/* Create(cracker, packer); */
+			/* Create */
 			break;
 		case 10:
-			/* Remove(cracker, packer); */
+			/* Remove */
 			break;
 		case 11:
-			/* Rename(cracker, packer); */
+			/* Rename */
 			break;
 		case 13:
-			/* SymLink(cracker, packer); */
+			/* SymLink */
 			break;
 		case 14:
-			/* MkDir(cracker, packer); */
+			/* MkDir */
 			break;
 		case 15:
-			/* RmDir(cracker, packer); */
+			/* RmDir */
 			break;
 		case 16:
-			/* ReadDir(cracker, packer); */
+			/* ReadDir */
 			fh = getfilehandle(request);
 			n = getuint(request);
 			count = getuint(request);
@@ -592,7 +592,7 @@ struct conn *request;
 			fprintf(console, "nfsd: readdir: count = %s\n", count);
 			break;
 		case 17:
-			/* StatFS(cracker, packer); */
+			/* StatFS */
 			addint(&reply, 4096);			/* tsize: optimum transfer size */
 			addint(&reply, 512);			/* Block size of FS */
 #ifdef __clang__
