@@ -377,8 +377,8 @@ struct conn *request;
 			prot = getuint(request);
 			port = getuint(request);
 			registeredport = 0;
-			if (prog == NFSD) registeredport = 2049;
-			if (prog == MOUNTD) registeredport = 635;
+			if (prog == NFSD && prot == IPPROTO_UDP) registeredport = 2049;
+			if (prog == MOUNTD && prot == IPPROTO_UDP) registeredport = 635;
 			if (registeredport)
 			{
 				addint(&reply, SUCCESS);
