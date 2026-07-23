@@ -274,6 +274,50 @@ struct conn *request;
 	return name;
 }
 
+						
+int makehandle(path, handle)
+char *path;
+char *handle;
+{
+	struct stat info;
+	int n;
+	
+	if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
+	{
+		for (n=0; n<4; n++)
+		{
+			/* already got it */
+			if ((mountmask & (1<<n)))
+			{
+				if (!strcmp(mounttable[n], path))
+				{
+					fprintf(console, "makehandle: already have\n");
+					break;
+				}
+			}
+			else
+			/* find a free slot */
+			{
+				strcpy(mounttable[n], path);
+				mountmask |= (1<<n);
+				break;
+			}
+		}
+
+		/* make a file handle */
+		memset(handle, 0, 32);
+		handle[0] = n;
+		handle[1] = info.st_dev;
+		handle[2] = info.st_ino;
+
+		return 0;
+	}
+	else
+	{
+		return -errno;
+	}
+}
+
 int createudpsock(port)
 int port;
 {
@@ -299,6 +343,285 @@ int port;
 
 	return sock;
 }
+
+void portmapperprog(request)
+struct conn *request;
+{
+	struct rpcheader *header = (struct rpcheader *)request->buffer;
+	struct response reply;
+	unsigned int prog, vers, prot, port, registeredport;
+	int n;
+	
+	credentials(request);
+	
+	/* verifier */
+	skiplump(request);
+	
+	reply.crp = 0;
+	addint(&reply, ntohl(header->xid));
+	addint(&reply, REPLY);
+	addint(&reply, MSG_ACCEPTED);
+	addint(&reply, 0);		/* opaque_verf */
+	addint(&reply, 0);		/* opaque_verf size */
+
+	switch(ntohl(header->proc))
+	{
+		default:
+		case 0:
+			addint(&reply, SUCCESS);
+			break;
+		case 3:
+			/* GetPort */
+			prog = getuint(request);
+			vers = getuint(request);
+			prot = getuint(request);
+			port = getuint(request);
+			registeredport = 0;
+			if (prog == NFSD) registeredport = 2049;
+			if (prog == MOUNTD) registeredport = 635;
+			if (registeredport)
+			{
+				addint(&reply, SUCCESS);
+				addint(&reply, registeredport);
+			}
+			else
+			{
+				addint(&reply, PROG_UNAVAIL);
+			}
+			fprintf(console, "portmapd: prog:%d vers:%d prot:%d => registeredport:%d\n", prog, vers, prot, registeredport);
+			break;
+			
+	}
+
+	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.crp)
+	{
+			fprintf(console, "portmapd: sendto: %s\n",strerror(errno));
+	}
+}
+
+void mountprog(request)
+struct conn *request;
+{
+	struct rpcheader *header = (struct rpcheader *)request->buffer;
+	struct response reply;
+	struct stat info;
+	char *path;
+	char handle[32];
+	int n;
+	
+	credentials(request);
+	
+	/* verifier */
+	skiplump(request);
+	
+	reply.crp = 0;
+	addint(&reply, ntohl(header->xid));
+	addint(&reply, REPLY);
+	addint(&reply, MSG_ACCEPTED);
+	addint(&reply, 0);		/* opaque_verf */
+	addint(&reply, 0);		/* opaque_verf size */
+	addint(&reply, SUCCESS);
+
+	switch(ntohl(header->proc))
+	{
+		case 0:
+			/* NULL-op */
+			break;
+		case 1:
+			/* Add Mount(cracker, packer); */
+			path = getstring(request);
+			fprintf(console, "mountd: mount Path = %s\n",path);
+			if (makehandle(path, handle) >= 0)
+			{
+				addint(&reply, SUCCESS);
+				adddata(&reply, (unsigned char *)handle, sizeof(handle));
+			}
+			else
+			{
+				addint(&reply, 2);	/* no such file */
+				addint(&reply, 0);
+			}
+			break;
+		case 2:
+			/* Mount Entries(cracker, packer); */
+			break;
+		case 3:
+			/* Remove Mount */
+			path = getstring(request);
+			fprintf(console, "mountd: unmount Path = %s\n",path);
+			
+			addint(&reply, SUCCESS);
+			break;
+	}
+
+	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.crp)
+	{
+			fprintf(console, "mountd: sendto: %s\n",strerror(errno));
+	}
+}
+
+void nfsprog(request)
+struct conn *request;
+{
+	struct rpcheader *header = (struct rpcheader *)request->buffer;
+	struct response reply;
+	struct stat info;
+	char *path;
+	int disksize,freesize;
+	int fh, n, count;
+
+	credentials(request);
+	
+	/* verifier */
+	skiplump(request);
+	
+	reply.crp = 0;
+	addint(&reply, ntohl(header->xid));
+	addint(&reply, REPLY);
+	addint(&reply, MSG_ACCEPTED);
+	addint(&reply, 0);		/* opaque_verf */
+	addint(&reply, 0);		/* opaque_verf size */
+	addint(&reply, SUCCESS);
+
+	addint(&reply, NFS_OK);
+
+	switch(ntohl(header->proc))
+	{
+		case 0:
+			/* NULL-op */
+			break;
+		case 1:
+			/* GetAttr(cracker, packer); */
+			fh = getfilehandle(request);
+			fprintf(console, "nfsd: getattr: %s\n", mounttable[fh]);
+			if (stat(mounttable[fh], &info) == 0)
+			{
+				if ((info.st_mode & S_IFDIR) == S_IFDIR)
+				{
+					addint(&reply, S_IFDIR);
+					addint(&reply, 0777);			/* info.st_perm */
+					addint(&reply, info.st_nlink);
+					addint(&reply, info.st_uid);
+					addint(&reply, info.st_uid);	/* no group */
+					addint(&reply, (unsigned int)info.st_size);
+					addint(&reply, 512);
+					addint(&reply, info.st_dev);
+					addint(&reply, FDNPB);
+					addint(&reply, 1);	/* fsid */
+					addint(&reply, (unsigned int)info.st_ino);
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+				}
+				else
+				{
+					addint(&reply, S_IFREG);
+					addint(&reply, 0777);
+					addint(&reply, info.st_nlink);
+					addint(&reply, info.st_uid);
+					addint(&reply, info.st_uid);	/* no group */
+					addint(&reply, (unsigned int)info.st_size);
+					addint(&reply, 512);
+					addint(&reply, info.st_dev);
+					addint(&reply, ((unsigned int)info.st_size + 511) / 512);
+					addint(&reply, 1);	/* fsid */
+					addint(&reply, (unsigned int)info.st_ino);
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+					addint(&reply, (unsigned int)info.st_mtime);
+					addint(&reply, 0);	/* usec */
+				}
+			}
+			else
+			{
+			
+			}
+			break;
+		case 2:
+			/* SetAttr(cracker, packer); */
+			break;
+		case 3:
+			/* Root(). No-op. */
+			break;
+		case 4:
+			/* Lookup(cracker, packer); */
+			fh = getfilehandle(request);
+			path = getstring(request);
+			fprintf(console, "nfsd: lookup = %s\n",path);
+			break;
+		case 5:
+			/* ReadLink(cracker, packer); */
+			break;
+		case 6:
+			/* Read(cracker, packer); */
+			break;
+		case 8:
+			/* Write(cracker, packer); */
+			break;
+		case 9:
+			/* Create(cracker, packer); */
+			break;
+		case 10:
+			/* Remove(cracker, packer); */
+			break;
+		case 11:
+			/* Rename(cracker, packer); */
+			break;
+		case 13:
+			/* SymLink(cracker, packer); */
+			break;
+		case 14:
+			/* MkDir(cracker, packer); */
+			break;
+		case 15:
+			/* RmDir(cracker, packer); */
+			break;
+		case 16:
+			/* ReadDir(cracker, packer); */
+			fh = getfilehandle(request);
+			n = getuint(request);
+			count = getuint(request);
+			
+			fprintf(console, "nfsd: readdir: count = %s\n", count);
+			break;
+		case 17:
+			/* StatFS(cracker, packer); */
+			addint(&reply, 4096);			/* tsize: optimum transfer size */
+			addint(&reply, 512);			/* Block size of FS */
+#ifdef __clang__
+			/* fake some numbers */
+			disksize = 40 * 1024 * 1024 / 512;
+			freesize = 10 * 1024 * 1024 / 512;
+#else
+			n = open(devname, O_RDONLY);
+			lseek(n, 512, SEEK_SET);
+			read(n, &sirbuf, sizeof(sirbuf));
+			close(n);
+			disksize = (sirbuf.ssizfr[0] << 16) + (sirbuf.ssizfr[1] << 8) + (sirbuf.ssizfr[2] << 0);
+			freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
+#endif
+			addint(&reply, disksize);					/* Total # of blocks (of the above size) */
+			addint(&reply, freesize);					/* Free blocks */
+			addint(&reply, freesize);					/* Free blocks available to non-priv. users */
+			fprintf(console, "nfsd: StatFS: %d blocks, free %d\n", disksize, freesize);
+			break;
+	}
+
+	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.crp)
+	{
+			fprintf(console, "nfsd: sendto: %s\n",strerror(errno));
+	}
+	
+}
+
 
 int main(argc, argv)
 int argc;
@@ -335,6 +658,8 @@ char **argv;
 		if (nfssock > n)
 			n = nfssock;
 
+		request.crp = 0;
+
 		n = select(n + 1, &fd_in, NULL, NULL, NULL);
 		if (n < 0)
 		{
@@ -350,61 +675,10 @@ char **argv;
 			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr *)&request.from, &fromSize);
 			if (request.len > 0)
 			{
-				request.crp = 0;
-				
 				/* validate */
 				if (validate(&request, PORTMAPPERD))
 				{
-					struct rpcheader *header = (struct rpcheader *)request.buffer;
-					struct response reply;
-					unsigned int prog, vers, prot, port, registeredport;
-				
-					credentials(&request);
-					
-					/* verifier */
-					skiplump(&request);
-					
-					reply.crp = 0;
-					addint(&reply, ntohl(header->xid));
-					addint(&reply, REPLY);
-					addint(&reply, MSG_ACCEPTED);
-					addint(&reply, 0);		/* opaque_verf */
-					addint(&reply, 0);		/* opaque_verf size */
-
-					switch(ntohl(header->proc))
-					{
-						default:
-						case 0:
-							addint(&reply, SUCCESS);
-							break;
-						case 3:
-							/* GetPort */
-							prog = getuint(&request);
-							vers = getuint(&request);
-							prot = getuint(&request);
-							port = getuint(&request);
-							registeredport = 0;
-							if (prog == NFSD) registeredport = 2049;
-							if (prog == MOUNTD) registeredport = 635;
-							if (registeredport)
-							{
-								addint(&reply, SUCCESS);
-								addint(&reply, registeredport);
-							}
-							else
-							{
-								addint(&reply, PROG_UNAVAIL);
-							}
-							fprintf(console, "portmapd: prog:%d vers:%d prot:%d => registeredport:%d\n", prog, vers, prot, registeredport);
-							break;
-							
-					}
-
-					n = sendto(request.sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request.from, sizeof(request.from));
-					if(n != reply.crp)
-					{
-							fprintf(console, "portmapd: sendto: %s\n",strerror(errno));
-					}
+					portmapperprog(&request);
 				}
 			}
 		}
@@ -415,93 +689,10 @@ char **argv;
 			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr *)&request.from, &fromSize);
 			if (request.len > 0)
 			{
-				request.crp = 0;
-				
 				/* validate */
 				if (validate(&request, MOUNTD))
 				{
-					struct rpcheader *header = (struct rpcheader *)request.buffer;
-					struct response reply;
-					struct stat info;
-					char *path;
-					
-					credentials(&request);
-					
-					/* verifier */
-					skiplump(&request);
-					
-					reply.crp = 0;
-					addint(&reply, ntohl(header->xid));
-					addint(&reply, REPLY);
-					addint(&reply, MSG_ACCEPTED);
-					addint(&reply, 0);		/* opaque_verf */
-					addint(&reply, 0);		/* opaque_verf size */
-					addint(&reply, SUCCESS);
-
-					switch(ntohl(header->proc))
-					{
-						case 0:
-							/* NULL-op */
-							break;
-						case 1:
-							/* Add Mount(cracker, packer); */
-							path = getstring(&request);
-							fprintf(console, "mountd: mount Path = %s\n",path);
-							if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
-							{
-								char handle[32] = {0,0,0,0,0,0,0,0};
-																
-								for (n=0; n<4; n++)
-								{
-									/* already got it */
-									if ((mountmask & (1<<n)))
-									{
-										if (!strcmp(mounttable[n], path))
-										{
-											fprintf(console, "mountd: already have\n");
-											break;
-										}
-									}
-									else
-									/* find a free slot */
-									{
-										strcpy(mounttable[n], path);
-										mountmask |= (1<<n);
-										break;
-									}
-								}
-
-								/* make a file handle */
-								handle[0] = n;
-								handle[1] = info.st_dev;
-								handle[2] = info.st_ino;
-
-								addint(&reply, SUCCESS);
-								adddata(&reply, (unsigned char *)handle, 32);
-							}
-							else
-							{
-								addint(&reply, 2);	/* no such file */
-								addint(&reply, 0);
-							}
-							break;
-						case 2:
-							/* Mount Entries(cracker, packer); */
-							break;
-						case 3:
-							/* Remove Mount */
-							path = getstring(&request);
-							fprintf(console, "mountd: unmount Path = %s\n",path);
-							
-							addint(&reply, SUCCESS);
-							break;
-					}
-
-					n = sendto(request.sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request.from, sizeof(request.from));
-					if(n != reply.crp)
-					{
-							fprintf(console, "mountd: sendto: %s\n",strerror(errno));
-					}
+					mountprog(&request);
 				}
 			}
 		}
@@ -512,170 +703,11 @@ char **argv;
 			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr *)&request.from, &fromSize);
 			if (request.len > 0)
 			{
-				request.crp = 0;
-				
 				/* validate */
 				if (validate(&request, NFSD))
 				{
-					struct rpcheader *header = (struct rpcheader *)request.buffer;
-					struct response reply;
-					struct stat info;
-					char *path;
-					int disksize,freesize;
-					int fh;
-
-					credentials(&request);
-					
-					/* verifier */
-					skiplump(&request);
-					
-					reply.crp = 0;
-					addint(&reply, ntohl(header->xid));
-					addint(&reply, REPLY);
-					addint(&reply, MSG_ACCEPTED);
-					addint(&reply, 0);		/* opaque_verf */
-					addint(&reply, 0);		/* opaque_verf size */
-					addint(&reply, SUCCESS);
-
-					addint(&reply, NFS_OK);
-
-					switch(ntohl(header->proc))
-					{
-						case 0:
-							/* NULL-op */
-							break;
-						case 1:
-							/* GetAttr(cracker, packer); */
-							fh = getfilehandle(&request);
-							fprintf(console, "nfsd: getattr: %s\n", mounttable[fh]);
-							if (stat(mounttable[fh], &info) == 0)
-							{
-								if ((info.st_mode & S_IFDIR) == S_IFDIR)
-								{
-									addint(&reply, S_IFDIR);
-									addint(&reply, 0777);			/* info.st_perm */
-									addint(&reply, info.st_nlink);
-									addint(&reply, info.st_uid);
-									addint(&reply, info.st_uid);	/* no group */
-									addint(&reply, (unsigned int)info.st_size);
-									addint(&reply, 512);
-									addint(&reply, info.st_dev);
-									addint(&reply, FDNPB);
-									addint(&reply, 1);	/* fsid */
-									addint(&reply, (unsigned int)info.st_ino);
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-									
-								}
-								else
-								{
-									addint(&reply, S_IFREG);
-									addint(&reply, 0777);
-									addint(&reply, info.st_nlink);
-									addint(&reply, info.st_uid);
-									addint(&reply, info.st_uid);	/* no group */
-									addint(&reply, (unsigned int)info.st_size);
-									addint(&reply, 512);
-									addint(&reply, info.st_dev);
-									addint(&reply, ((unsigned int)info.st_size + 511) / 512);
-									addint(&reply, 1);	/* fsid */
-									addint(&reply, (unsigned int)info.st_ino);
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-									addint(&reply, (unsigned int)info.st_mtime);
-									addint(&reply, 0);	/* usec */
-								}
-							}
-							else
-							{
-							
-							}
-
-							break;
-						case 2:
-							/* SetAttr(cracker, packer); */
-							break;
-						case 3:
-							/* Root(). No-op. */
-							break;
-						case 4:
-							/* Lookup(cracker, packer); */
-							fh = getfilehandle(&request);
-							path = getstring(&request);
-							fprintf(console, "nfsd: lookup = %s\n",path);
-							break;
-						case 5:
-							/* ReadLink(cracker, packer); */
-							break;
-						case 6:
-							/* Read(cracker, packer); */
-							break;
-						case 8:
-							/* Write(cracker, packer); */
-							break;
-						case 9:
-							/* Create(cracker, packer); */
-							break;
-						case 10:
-							/* Remove(cracker, packer); */
-							break;
-						case 11:
-							/* Rename(cracker, packer); */
-							break;
-						case 13:
-							/* SymLink(cracker, packer); */
-							break;
-						case 14:
-							/* MkDir(cracker, packer); */
-							break;
-						case 15:
-							/* RmDir(cracker, packer); */
-							break;
-						case 16:
-							/* ReadDir(cracker, packer); */
-							fh = getfilehandle(&request);
-							n = getuint(&request);
-							count = getuint(&request);
-							
-							fprintf(console, "nfsd: readdir: count = %s\n", count);
-							break;
-						case 17:
-							/* StatFS(cracker, packer); */
-							addint(&reply, 4096);			/* tsize: optimum transfer size */
-							addint(&reply, 512);			/* Block size of FS */
-#ifdef __clang__
-							/* fake some numbers */
-							disksize = 40 * 1024 * 1024 / 512;
-							freesize = 10 * 1024 * 1024 / 512;
-#else
-							n = open(devname, O_RDONLY);
-							lseek(n, 512, SEEK_SET);
-							read(n, &sirbuf, sizeof(sirbuf));
-							close(n);
-							disksize = (sirbuf.ssizfr[0] << 16) + (sirbuf.ssizfr[1] << 8) + (sirbuf.ssizfr[2] << 0);
-							freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
-#endif
-							addint(&reply, disksize);					/* Total # of blocks (of the above size) */
-							addint(&reply, freesize);					/* Free blocks */
-							addint(&reply, freesize);					/* Free blocks available to non-priv. users */
-							fprintf(console, "nfsd: StatFS: %d blocks, free %d\n", disksize, freesize);
-							break;
-					}
-
-					n = sendto(request.sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request.from, sizeof(request.from));
-					if(n != reply.crp)
-					{
-							fprintf(console, "nfsd: sendto: %s\n",strerror(errno));
-					}
-					
+					nfsprog(&request);
 				}
-							
 			}
 		}
 	}
