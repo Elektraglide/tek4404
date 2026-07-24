@@ -266,7 +266,7 @@ struct conn *request;
 	return val;
 }
 
-void skiplump(request)
+void verifier(request)
 struct conn *request;
 {
 	unsigned int flavour = getuint(request);
@@ -394,9 +394,7 @@ struct conn *request;
 	int n;
 	
 	credentials(request);
-	
-	/* verifier */
-	skiplump(request);
+	verifier(request);
 	
 	reply.crp = 0;
 	addint(&reply, ntohl(header->xid));
@@ -452,9 +450,7 @@ struct conn *request;
 	int n;
 	
 	credentials(request);
-	
-	/* verifier */
-	skiplump(request);
+	verifier(request);
 	
 	reply.crp = 0;
 	addint(&reply, ntohl(header->xid));
@@ -516,9 +512,7 @@ struct conn *request;
 	int fh, n, count;
 
 	credentials(request);
-	
-	/* verifier */
-	skiplump(request);
+	verifier(request);
 	
 	reply.crp = 0;
 	addint(&reply, ntohl(header->xid));
