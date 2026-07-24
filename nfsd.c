@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
+#include <sys/dir.h>
 
 /*
 
@@ -189,6 +190,26 @@ unsigned int val;
 	reply->crp += sizeof(val);
 }
 
+void addstring(reply, string, len)
+struct response *reply;
+char *string;
+int len;
+{
+	char *ptr;
+	
+	addint(reply, len);
+	ptr = reply->buffer + reply->crp;
+	if (reply->crp + len < 4096-4)
+	{
+		memcpy(ptr, string, len);
+		ptr[len] = '\0';
+		ptr[len+1] = '\0';
+		ptr[len+2] = '\0';
+		len = (len + 3) & -4;
+		reply->crp += len;
+	}
+}
+
 void adddata(reply, data, len)
 struct response *reply;
 unsigned char *data;
@@ -351,7 +372,6 @@ struct conn *request;
 	return ptr;
 }
 
-
 char *getstring(request)
 struct conn *request;
 {
@@ -359,6 +379,7 @@ struct conn *request;
 	unsigned int len = getuint(request);
 
 	memcpy(name, request->buffer + request->crp, len);
+	name[len] = '\0';
 	len = (len + 3) & -4;
 	request->crp += len;
 	
@@ -466,7 +487,7 @@ struct conn *request;
 	{
 		default:
 		case 0:
-			addint(&reply, SUCCESS);
+			addint(&reply, NFS_OK);
 			break;
 		case 3:
 			/* GetPort */
@@ -475,11 +496,11 @@ struct conn *request;
 			prot = getuint(request);
 			port = getuint(request);
 			registeredport = 0;
-			if (prog == NFSD && prot == IPPROTO_UDP) registeredport = 2049;
-			if (prog == MOUNTD && prot == IPPROTO_UDP) registeredport = 635;
+			if (prog == NFSD && prot == IPPROTO_UDP) registeredport = NFSD_PORT;
+			if (prog == MOUNTD && prot == IPPROTO_UDP) registeredport = MOUNTD_PORT;
 			if (registeredport)
 			{
-				addint(&reply, SUCCESS);
+				addint(&reply, NFS_OK);
 				addint(&reply, registeredport);
 			}
 			else
@@ -567,10 +588,12 @@ struct conn *request;
 	char *path;
 	char filepath[1024];
 	int disksize,freesize;
-	int fh, n, count;
-
+	int n, count, offset;
 	struct filehandle handle;
 	struct filehandle *fh;
+	DIR *d;
+	struct direct *dir;
+	
 	credentials(request);
 	verifier(request);
 	
@@ -657,10 +680,45 @@ struct conn *request;
 		case 16:
 			/* ReadDir */
 			fh = getfilehandle(request);
-			n = getuint(request);
+			offset = getuint(request);
 			count = getuint(request);
+			fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);
 			
-			fprintf(console, "nfsd: readdir: count = %s\n", count);
+			/* account for some wrapping costs */
+			count -= 32;
+			
+			d = opendir(filetable[fh->index]);
+			if (d)
+			{
+				n = 0;
+				addint(&reply, NFS_OK);
+				while ((dir = readdir(d)) != NULL)
+				{
+					/* skip if not past starting point */
+					if (n >= offset)
+					{
+						/* entry follows */
+						addint(&reply, 1);
+						
+						addint(&reply, n);
+						addstring(&reply, dir->d_name, dir->d_namlen);
+						addint(&reply, offset + n);
+						fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);
+					}
+	
+					n++;
+					
+					if (reply.crp > count)
+						break;
+				}
+				closedir(d);
+
+				/* no entry follows */
+				addint(&reply, 0);
+
+				/* complete or run out of room? */
+				addint(&reply, (reply.crp > count) ? 0 : 1);
+			}
 			break;
 		case 17:
 			/* StatFS */
