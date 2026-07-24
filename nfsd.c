@@ -315,14 +315,15 @@ struct conn *request;
 }
 
 						
-int makehandle(path, handle)
+int makehandle(path, handle,modefilter)
 char *path;
 char *handle;
+unsigned int modefilter;
 {
 	struct stat info;
 	int n;
 	
-	if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
+	if (stat(path, &info) == 0 && ((info.st_mode & modefilter) == modefilter))
 	{
 		for (n=0; n<4; n++)
 		{
@@ -472,7 +473,7 @@ struct conn *request;
 			/* Add Mount */
 			path = getstring(request);
 			fprintf(console, "mountd: mount Path = %s\n",path);
-			if (makehandle(path, handle) >= 0)
+			if (makehandle(path, handle, S_IFDIR) >= 0)
 			{
 				addint(&reply, SUCCESS);
 				adddata(&reply, (unsigned char *)handle, sizeof(handle));
@@ -600,7 +601,7 @@ struct conn *request;
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			fprintf(console, "nfsd: lookup = %s\n", filepath);
-			if (makehandle(filepath, handle) >= 0)
+			if (makehandle(filepath, handle, 0) >= 0)
 			{
 				addint(&reply, SUCCESS);
 				adddata(&reply, (unsigned char *)handle, sizeof(handle));
