@@ -46,8 +46,11 @@ struct sir sirbuf;
 
 #endif
 
+#define TRANSFER_SIZE 4096
+#define BLOCK_SIZE 512
 #define FDNPB 8
 
+/* RPC for NFS constants */
 enum msg_type {
  	CALL = 0,
  	REPLY = 1
@@ -73,40 +76,6 @@ enum accept_stat {
  	GARBAGE_ARGS = 4   /* procedure can't decode params */
 };
 
-struct conn {
-	int sock;
-	struct in_sockaddr from;
-	char buffer[4096];
-	int crp,len;
-};
-
-struct rpcheader {
-	unsigned int xid;
-	unsigned int msg_type;
-	unsigned int rpcvers;
-	unsigned int prog;
-	unsigned int vers;
-	unsigned int proc;
-};
-
-/* needs to be dynamically resized? */
-struct response {
-	char buffer[4096];
-	int crp;
-};
-
-/* well-known RPC prog names */
-enum {
-	PORTMAPPERD = 100000,
-	NFSD = 100003,
-	MOUNTD = 100005
-} progs;
-
-/* ports for RPC progs */
-#define PORTMAPPERD_PORT 111
-#define MOUNTD_PORT 635
-#define NFSD_PORT 2049
-
 enum NFSStatus
 {
 		NFS_OK				= 0,
@@ -128,7 +97,77 @@ enum NFSStatus
 		NFSERR_STALE		= 70,
 		NFSERR_WFLUSG		= 99
 };
-	
+
+enum ftype
+{
+	NFNON = 0,
+	NFREG = 1,
+	NFDIR = 2,
+	NFBLK = 3,
+	NFCHR = 4,
+	NFLNK = 5
+};
+
+enum modes
+{
+	DIR = 16384,
+	CHR = 8192,
+	BLK = 24576,
+	REG = 32768,
+	LNK = 40960,
+	NON = 49152,
+	SUID	= 2048,
+	SGID	= 1024,
+	SWAP	= 512,
+	ROWN	= 256,
+	WOWN	= 128,
+	XOWN	= 64,
+	RGRP	= 32,
+	WGRP	= 16,
+	XGRP	= 8,
+	ROTH	= 4,
+	WOTH	= 2,
+	XOTH	= 1
+};
+		
+struct rpcheader {
+	unsigned int xid;
+	unsigned int msg_type;
+	unsigned int rpcvers;
+	unsigned int prog;
+	unsigned int vers;
+	unsigned int proc;
+};
+
+typedef unsigned char filehandle[32];
+
+/* request and response state */
+struct conn {
+	int sock;
+	struct in_sockaddr from;
+	char buffer[4096];
+	int crp,len;
+};
+
+/* needs to be dynamically resized? */
+struct response {
+	char buffer[4096];
+	int crp;
+};
+
+/* well-known RPC prog names */
+enum {
+	PORTMAPPERD = 100000,
+	NFSD = 100003,
+	MOUNTD = 100005
+} progs;
+
+/* ports for RPC progs */
+#define PORTMAPPERD_PORT 111
+#define MOUNTD_PORT 635
+#define NFSD_PORT 2049
+
+
 FILE *console;
 
 /* mount table */
@@ -168,7 +207,8 @@ int prognum;
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
 
-	fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d\n", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc));
+	/* fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d\n", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc));
+	*/
 
 	reply.crp = 0;
 	if (ntohl(header->msg_type) != CALL)
@@ -254,7 +294,7 @@ int getfilehandle(request)
 struct conn *request;
 {
 	unsigned char *ptr = (request->buffer + request->crp);
-	fprintf(console, "handle=%d dev=%d\n", ptr[0], ptr[1]);
+	fprintf(console, "handle=%d dev=%d ino=%d\n", ptr[0], ptr[1], ptr[2]);
 	request->crp += 32;
 	
 	return ptr[0];
@@ -469,6 +509,8 @@ struct conn *request;
 	struct response reply;
 	struct stat info;
 	char *path;
+	char filepath[1024];
+	char handle[32];
 	int disksize,freesize;
 	int fh, n, count;
 
@@ -485,8 +527,6 @@ struct conn *request;
 	addint(&reply, 0);		/* opaque_verf size */
 	addint(&reply, SUCCESS);
 
-	addint(&reply, NFS_OK);
-
 	switch(ntohl(header->proc))
 	{
 		case 0:
@@ -498,15 +538,17 @@ struct conn *request;
 			fprintf(console, "nfsd: getattr: %s\n", mounttable[fh]);
 			if (stat(mounttable[fh], &info) == 0)
 			{
+				addint(&reply, NFS_OK);
+
 				if ((info.st_mode & S_IFDIR) == S_IFDIR)
 				{
-					addint(&reply, S_IFDIR);
-					addint(&reply, 0777);			/* info.st_perm */
+					addint(&reply, NFDIR);
+					addint(&reply, DIR | ROWN | WOWN | XOWN);			/* info.st_perm */
 					addint(&reply, info.st_nlink);
 					addint(&reply, info.st_uid);
 					addint(&reply, info.st_uid);	/* no group */
 					addint(&reply, (unsigned int)info.st_size);
-					addint(&reply, 512);
+					addint(&reply, BLOCK_SIZE);
 					addint(&reply, info.st_dev);
 					addint(&reply, FDNPB);
 					addint(&reply, 1);	/* fsid */
@@ -520,15 +562,15 @@ struct conn *request;
 				}
 				else
 				{
-					addint(&reply, S_IFREG);
-					addint(&reply, 0777);
+					addint(&reply, NFREG);
+					addint(&reply, REG | ROWN | WOWN | XOWN );
 					addint(&reply, info.st_nlink);
 					addint(&reply, info.st_uid);
 					addint(&reply, info.st_uid);	/* no group */
 					addint(&reply, (unsigned int)info.st_size);
-					addint(&reply, 512);
+					addint(&reply, BLOCK_SIZE);
 					addint(&reply, info.st_dev);
-					addint(&reply, ((unsigned int)info.st_size + 511) / 512);
+					addint(&reply, ((unsigned int)info.st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
 					addint(&reply, 1);	/* fsid */
 					addint(&reply, (unsigned int)info.st_ino);
 					addint(&reply, (unsigned int)info.st_mtime);
@@ -541,7 +583,7 @@ struct conn *request;
 			}
 			else
 			{
-			
+				addint(&reply, NFSERR_EXIST);
 			}
 			break;
 		case 2:
@@ -554,7 +596,20 @@ struct conn *request;
 			/* Lookup */
 			fh = getfilehandle(request);
 			path = getstring(request);
-			fprintf(console, "nfsd: lookup = %s\n",path);
+			strcpy(filepath, mounttable[fh]);
+			strcat(filepath, "/");
+			strcat(filepath, path);
+			fprintf(console, "nfsd: lookup = %s\n", filepath);
+			if (makehandle(filepath, handle) >= 0)
+			{
+				addint(&reply, SUCCESS);
+				adddata(&reply, (unsigned char *)handle, sizeof(handle));
+			}
+			else
+			{
+				addint(&reply, 2);	/* no such file */
+				addint(&reply, 0);
+			}
 			break;
 		case 5:
 			/* ReadLink */
@@ -593,15 +648,16 @@ struct conn *request;
 			break;
 		case 17:
 			/* StatFS */
-			addint(&reply, 4096);			/* tsize: optimum transfer size */
-			addint(&reply, 512);			/* Block size of FS */
+			addint(&reply, NFS_OK);
+			addint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
+			addint(&reply, BLOCK_SIZE);			/* Block size of FS */
 #ifdef __clang__
 			/* fake some numbers */
-			disksize = 40 * 1024 * 1024 / 512;
-			freesize = 10 * 1024 * 1024 / 512;
+			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
+			freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
 #else
 			n = open(devname, O_RDONLY);
-			lseek(n, 512, SEEK_SET);
+			lseek(n, BLOCK_SIZE, SEEK_SET);
 			read(n, &sirbuf, sizeof(sirbuf));
 			close(n);
 			disksize = (sirbuf.ssizfr[0] << 16) + (sirbuf.ssizfr[1] << 8) + (sirbuf.ssizfr[2] << 0);
