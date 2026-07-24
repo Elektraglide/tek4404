@@ -110,7 +110,7 @@ enum ftype
 
 enum modes
 {
-	DIR = 16384,
+	DIR_NFS = 16384,		/* clash with Uniflex DIR */
 	CHR = 8192,
 	BLK = 24576,
 	REG = 32768,
@@ -199,6 +199,52 @@ int len;
 	}
 }
 
+void addstat(reply, info)
+struct response *reply;
+struct stat *info;
+{
+
+	if ((info->st_mode & S_IFDIR) == S_IFDIR)
+	{
+		addint(reply, NFDIR);
+		addint(reply, DIR_NFS | ROWN | WOWN | XOWN | ROTH);			/* info->st_perm */
+		addint(reply, info->st_nlink);
+		addint(reply, info->st_uid);
+		addint(reply, info->st_uid);	/* no group */
+		addint(reply, (unsigned int)info->st_size);
+		addint(reply, BLOCK_SIZE);
+		addint(reply, info->st_dev);
+		addint(reply, FDNPB);
+		addint(reply, 1);	/* fsid */
+		addint(reply, (unsigned int)info->st_ino);
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+	}
+	else
+	{
+		addint(reply, NFREG);
+		addint(reply, REG | ROWN | WOWN | XOWN | ROTH);
+		addint(reply, info->st_nlink);
+		addint(reply, info->st_uid);
+		addint(reply, info->st_uid);	/* no group */
+		addint(reply, (unsigned int)info->st_size);
+		addint(reply, BLOCK_SIZE);
+		addint(reply, info->st_dev);
+		addint(reply, ((unsigned int)info->st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+		addint(reply, 1);	/* fsid */
+		addint(reply, (unsigned int)info->st_ino);
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+		addint(reply, (unsigned int)info->st_mtime);
+		addint(reply, 0);	/* usec */
+	}
+}
 
 int validate(request, prognum)
 struct conn *request;
@@ -534,47 +580,7 @@ struct conn *request;
 			if (stat(mounttable[fh], &info) == 0)
 			{
 				addint(&reply, NFS_OK);
-
-				if ((info.st_mode & S_IFDIR) == S_IFDIR)
-				{
-					addint(&reply, NFDIR);
-					addint(&reply, DIR | ROWN | WOWN | XOWN);			/* info.st_perm */
-					addint(&reply, info.st_nlink);
-					addint(&reply, info.st_uid);
-					addint(&reply, info.st_uid);	/* no group */
-					addint(&reply, (unsigned int)info.st_size);
-					addint(&reply, BLOCK_SIZE);
-					addint(&reply, info.st_dev);
-					addint(&reply, FDNPB);
-					addint(&reply, 1);	/* fsid */
-					addint(&reply, (unsigned int)info.st_ino);
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-				}
-				else
-				{
-					addint(&reply, NFREG);
-					addint(&reply, REG | ROWN | WOWN | XOWN );
-					addint(&reply, info.st_nlink);
-					addint(&reply, info.st_uid);
-					addint(&reply, info.st_uid);	/* no group */
-					addint(&reply, (unsigned int)info.st_size);
-					addint(&reply, BLOCK_SIZE);
-					addint(&reply, info.st_dev);
-					addint(&reply, ((unsigned int)info.st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
-					addint(&reply, 1);	/* fsid */
-					addint(&reply, (unsigned int)info.st_ino);
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-					addint(&reply, (unsigned int)info.st_mtime);
-					addint(&reply, 0);	/* usec */
-				}
+				addstat(&reply, &info);
 			}
 			else
 			{
