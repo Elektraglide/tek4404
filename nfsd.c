@@ -40,6 +40,10 @@ struct sir sirbuf;
 #define O_NONBLOCK      0x00000004      /* no delay */
 
 #define in_sockaddr sockaddr_in
+#define st_perm st_mode
+#define S_IOREAD         S_IROTH         /* backward compatability */
+#define S_IOWRITE        S_IWOTH         /* backward compatability */
+#define S_IOEXEC         S_IXOTH         /* backward compatability */
 
 //#include "uniflexshim.h"
 #include <unistd.h>
@@ -388,11 +392,26 @@ void addstat(reply, info)
 struct response *reply;
 struct stat *info;
 {
+	unsigned int nfsperms = 0;
+
+	/* translate to NFS bits */
+	if (info->st_perm & S_IREAD)
+		nfsperms |= ROWN;
+	if (info->st_perm & S_IWRITE)
+		nfsperms |= WOWN;
+	if (info->st_perm & S_IEXEC)
+		nfsperms |= XOWN;
+	if (info->st_perm & S_IOREAD)
+		nfsperms |= ROTH;
+	if (info->st_perm & S_IOWRITE)
+		nfsperms |= WOTH;
+	if (info->st_perm & S_IOEXEC)
+		nfsperms |= XOTH;
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
 		addint(reply, NFDIR);
-		addint(reply, DIR_NFS | ROWN | WOWN | XOWN | ROTH);			/* info->st_perm */
+		addint(reply, DIR_NFS | nfsperms);			/* info->st_perm */
 		addint(reply, info->st_nlink);
 		addint(reply, info->st_uid);
 		addint(reply, info->st_uid);	/* no group */
@@ -412,7 +431,7 @@ struct stat *info;
 	else
 	{
 		addint(reply, NFREG);
-		addint(reply, REG | ROWN | WOWN | XOWN | ROTH);
+		addint(reply, REG | nfsperms);
 		addint(reply, info->st_nlink);
 		addint(reply, info->st_uid);
 		addint(reply, info->st_uid);	/* no group */
@@ -795,7 +814,7 @@ struct conn *request;
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
-					/* TODO: file permissions */
+					/* TODO: check file permissions */
 
 					fd = open(filepath, O_RDONLY);
 					lseek(fd, offset, SEEK_SET);
@@ -832,6 +851,28 @@ struct conn *request;
 			break;
 		case 14:
 			/* MkDir */
+			fh = getfilehandle(request);
+			path = getstring(request);
+			decodepath(fh->pathtokens, filepath);
+			strcat(filepath, "/");
+			strcat(filepath, path);
+			unsigned int mode = getuint(request);
+			unsigned int uid = getuint(request);
+			unsigned int gid = getuint(request);
+			unsigned int size = getuint(request);
+			unsigned int atime = getuint(request);	getuint(request);
+			unsigned int mtime = getuint(request);	getuint(request);
+			mkdir(filepath, mode);
+			chown(filepath, uid, gid);
+			if (stat(filepath, &info) == 0)
+			{
+				makehandle(filepath, &info, &handle);
+				addint(&reply, NFS_OK);
+				addfilehandle(&reply, &handle);
+				addstat(&reply, &info);
+			
+				fprintf(console, "nfsd: mkdir = %s\n", filepath);
+			}
 			break;
 		case 15:
 			/* RmDir */
