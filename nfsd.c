@@ -176,6 +176,41 @@ enum {
 
 FILE *console;
 
+#ifndef __clang__
+/* missing CRT */
+int mkdir(path)
+char *path;
+{
+	char linkpath[256], linkdest[256];
+	char *pcVar1;
+
+	mknod(path, 0x0800 + 0x38 + 0x07, 0x0000);
+	chown(path, 0);
+
+	/* frpom Ghidra decompile of Tek4404 crdir command */
+	strcpy(linkpath,path);
+	strcat(linkpath,"/.");
+	link(path,linkpath);
+	chown(linkpath, 0);
+	
+	if (path[0] == '/') {
+		strcpy(linkpath,path);
+	}
+	else {
+		strcpy(linkpath,"./");
+		strcat(linkpath,path);
+	}
+	pcVar1 = strchr(linkpath, '/');
+	if (linkpath == pcVar1) {
+		pcVar1 = pcVar1 + 1;
+	}
+	*pcVar1 = '\0';
+	strcpy(linkdest,path);
+	strcat(linkdest,"/..");
+	link(linkpath,linkdest);
+}
+#endif
+
 /* cache of file handle entries */
 unsigned int filetablemask = 0;
 char filetable[4][1024];
