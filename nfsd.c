@@ -276,17 +276,14 @@ unsigned char *encoded;
 	char *ptr;
 	int n;
 	
-	fprintf(console, "encodepath(%s): ",filepath);
 	n = 0;
 	strcpy(working, filepath);
 	ptr = strtok(working, "/");
 	while(ptr)
 	{
 		encoded[n++] = addsubpath(ptr);
-		fprintf(console, "%d, ", encoded[n-1]);
 		ptr = strtok(NULL,  "/");
 	}
-	fprintf(console, "\n");
 	
 	return n;
 }
