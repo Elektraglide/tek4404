@@ -25,6 +25,7 @@
 #include "fdset.h"
 
 #define  IPPROTO_UDP IPPR_UDP
+#define socklen_t unsigned int
 
 struct sir sirbuf;
 
