@@ -947,8 +947,10 @@ struct conn *request;
 			strcat(filepath, path);
 			getsattr(request, &info);
 			fd = creat(filepath, info.st_mode);
-			lseek(fd, info.st_size, SEEK_SET);
-			chown(filepath, info.st_uid, info.st_gid);
+			if (info.st_size >= 0)
+				lseek(fd, info.st_size, SEEK_SET);
+			if (info.st_uid >= 0 && info.st_gid >= 0)
+				chown(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
