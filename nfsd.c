@@ -1090,6 +1090,8 @@ char **argv;
 		exit(-1);
 #endif
 
+	umask(0);
+	
 	/* we act as portmapd, mountd and nfsd... */
 	portmapsock = createudpsock(PORTMAPPERD_PORT);
 	mountsock = createudpsock(MOUNTD_PORT);
