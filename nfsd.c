@@ -170,8 +170,8 @@ enum {
 
 /* ports for RPC progs */
 #define PORTMAPPERD_PORT 111
-#define MOUNTD_PORT 635
-#define NFSD_PORT 2049
+#define MOUNTD_PORT 6135
+#define NFSD_PORT 21049
 
 
 FILE *console;
