@@ -32,6 +32,7 @@ struct sir sirbuf;
 //extern int open();
 //extern int wait();
 //extern int kill();
+#include <stdlib.h>
 
 // clashes with Uniflex, so use MacOS constants
 #define F_GETFL         3               /* get file status flags */
@@ -144,7 +145,7 @@ struct filehandle {
 	unsigned int index;
 	unsigned int inode;
 	unsigned int dev;
-	unsigned char unused[20];
+	unsigned char pathtokens[20];
 };
 
 /* request and response state */
@@ -214,6 +215,99 @@ char *path;
 /* cache of file handle entries */
 unsigned int filetablemask = 0;
 char filetable[32][256];
+
+int stringcachelen = 0;
+char *stringcache;
+
+short numsubpaths = 0;
+int subpathindex[256];
+
+int addsubpath(path)
+char *path;
+{
+	short n;
+	char *ptr;
+	
+	/* init */
+	if (stringcachelen == 0)
+	{
+		stringcachelen = 2048;
+		stringcache = malloc(stringcachelen);
+
+		/* subpath index 0 terminates run */
+		numsubpaths = 1;
+		subpathindex[0] = 0;
+	}
+	
+	/* find it */
+	for (n=0; n<numsubpaths; n++)
+	{
+		if (!strcmp(path, stringcache + subpathindex[n]))
+		{
+			return n;
+		}
+	}
+
+	/* append it  */
+	ptr = stringcache + subpathindex[numsubpaths-1];
+	ptr += strlen(ptr) + 1;
+	strcpy(ptr, path);
+	subpathindex[numsubpaths++] = ptr - stringcache;
+
+	/* expand it */
+	ptr += strlen(ptr) + 1;
+	if (ptr - stringcache > stringcachelen)
+	{
+		stringcachelen += stringcachelen / 2;
+		stringcache = realloc(stringcache, stringcachelen);
+		fprintf(console, "pathslen = %d\n",stringcachelen);
+	}
+	
+	return numsubpaths - 1;
+}
+
+int encodepath(filepath, encoded)
+char *filepath;
+unsigned char *encoded;
+{
+	char working[1024];
+	char *ptr;
+	int n;
+	
+	fprintf(console, "encodepath(%s): ",filepath);
+	n = 0;
+	strcpy(working, filepath);
+	ptr = strtok(working, "/");
+	while(ptr)
+	{
+		encoded[n++] = addsubpath(ptr);
+		fprintf(console, "%d, ", encoded[n-1]);
+		ptr = strtok(NULL,  "/");
+	}
+	fprintf(console, "\n");
+	
+	return n;
+}
+
+void decodepath(encoded, path)
+unsigned char *encoded;
+char *path;
+{
+	int n = 0;
+
+	path[0] = '\0';
+	
+	if (stringcache == NULL)
+		return;
+	
+	while(encoded[n])
+	{
+		strcat(path, "/");
+		strcat(path, stringcache + subpathindex[encoded[n]]);
+		n++;
+	}
+	fprintf(console, "decodepath(%s)\n",path);
+}
 
 void addint(reply, val)
 struct response *reply;
@@ -431,7 +525,6 @@ struct filehandle *getfilehandle(request)
 struct conn *request;
 {
 	struct filehandle *ptr = (struct filehandle *)(request->buffer + request->crp);
-	fprintf(console, "  getfilehandle: index=%d inode=%d\n", ptr->index, ptr->inode);
 	request->crp += sizeof(struct filehandle);
 	
 	return ptr;
@@ -454,21 +547,7 @@ struct conn *request;
 void releasehandle(path)
 char *path;
 {
-	int n;
-	
-	for (n=0; n<32; n++)
-	{
-		/* in use */
-		if ((filetablemask & (1<<n)))
-		{
-			if (!strcmp(filetable[n], path))
-			{
-				filetablemask &= ~(1<<n);
-				filetable[n][0] = '\0';
-				return;
-			}
-		}
-	}
+
 }
 
 int makehandle(path, info, handle)
@@ -476,43 +555,14 @@ char *path;
 struct stat *info;
 struct filehandle *handle;
 {
-	int n;
 	
-	for (n=0; n<32; n++)
-	{
-		/* already got it */
-		if ((filetablemask & (1<<n)))
-		{
-			if (!strcmp(filetable[n], path))
-			{
-				fprintf(console, "  makehandle: found at slot%d\n",n);
-				break;
-			}
-		}
-		else
-		/* find a free slot */
-		{
-			strcpy(filetable[n], path);
-			filetablemask |= (1<<n);
-			break;
-		}
-	}
-
-	if (n < 32)
-	{
-		/* make a file handle */
-		memset(handle, 0, sizeof(struct filehandle));
-		handle->index = n;
-		handle->inode = info->st_ino;
-		handle->dev = info->st_dev;
-
-		return n;
-	}
-	else
-	{
-		/* TODO: not cached, so lookup using inode */
-		return -1;
-	}
+	/* make a file handle */
+	memset(handle, 0, sizeof(struct filehandle));
+	handle->inode = info->st_ino;
+	handle->dev = info->st_dev;
+	encodepath(path, handle->pathtokens);
+	
+	return 0;
 }
 
 int createudpsock(port)
@@ -690,8 +740,9 @@ struct conn *request;
 		case 1:
 			/* GetAttr */
 			fh = getfilehandle(request);
-			fprintf(console, "nfsd: getattr: %s\n", filetable[fh->index]);
-			if (stat(filetable[fh->index], &info) == 0)
+			decodepath(fh->pathtokens, filepath);
+			fprintf(console, "nfsd: getattr: %s\n",filepath);
+			if (stat(filepath, &info) == 0)
 			{
 				addint(&reply, NFS_OK);
 				addstat(&reply, &info);
@@ -712,9 +763,10 @@ struct conn *request;
 			/* Lookup */
 			fh = getfilehandle(request);
 			path = getstring(request);
-			strcpy(filepath, filetable[fh->index]);
+			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
+			fprintf(console, "nfsd: lookup = %s\n", filepath);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
@@ -722,7 +774,6 @@ struct conn *request;
 				addfilehandle(&reply, &handle);
 				addstat(&reply, &info);
 				
-				fprintf(console, "nfsd: lookup = %s => %d\n", filepath, handle.index);
 			}
 			else
 			{
@@ -739,13 +790,14 @@ struct conn *request;
 			offset = getuint(request);
 			count = getuint(request);
 			n = getuint(request);
-			if (stat(filetable[fh->index], &info) == 0)
+			decodepath(fh->pathtokens, filepath);
+			if (stat(filepath, &info) == 0)
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					/* TODO: file permissions */
 
-					fd = open(filetable[fh->index], O_RDONLY);
+					fd = open(filepath, O_RDONLY);
 					lseek(fd, offset, SEEK_SET);
 					
 					addint(&reply, NFS_OK);
@@ -797,8 +849,8 @@ struct conn *request;
 				
 			/* account for some wrapping costs */
 			count -= 32;
-			
-			d = opendir(filetable[fh->index]);
+			decodepath(fh->pathtokens, filepath);
+			d = opendir(filepath);
 			if (d)
 			{
 				n = 0;
