@@ -246,15 +246,13 @@ int len;
 	
 	addint(reply, len);
 	ptr = reply->buffer + reply->crp;
-	if (reply->crp + len < 4096-4)
-	{
-		memcpy(ptr, string, len);
-		ptr[len] = '\0';
-		ptr[len+1] = '\0';
-		ptr[len+2] = '\0';
-		len = (len + 3) & -4;
-		reply->crp += len;
-	}
+
+	memcpy(ptr, string, len);
+	ptr[len] = '\0';
+	ptr[len+1] = '\0';
+	ptr[len+2] = '\0';
+	len = (len + 3) & -4;
+	reply->crp += len;
 }
 
 void adddata(reply, data, len)
@@ -262,14 +260,34 @@ struct response *reply;
 unsigned char *data;
 int len;
 {
-	char *ptr = reply->buffer + reply->crp;
+	unsigned int *ptr;
+
+	addint(reply, len);
+	ptr = (unsigned int *)(reply->buffer + reply->crp);
 	
-	if (reply->crp + len < 4096)
-	{
-		memcpy(ptr, data, len);		
-		len = (len + 3) & -4;
-		reply->crp += len;
-	}
+	memcpy(ptr, data, len);
+	len = (len + 3) & -4;
+	reply->crp += len;
+}
+
+void addfromfile(reply, fd, len)
+struct response *reply;
+int fd;
+int len;
+{
+	unsigned int *ptr;
+
+	addint(reply, len);
+	ptr = (unsigned int *)(reply->buffer + reply->crp);
+	
+	if (len > (4096 - reply->crp))
+		len = 4096 - reply->crp;
+	
+	len = read(fd, ptr, len);
+	fprintf(console, "  addfile: read %d bytes\n", len);
+	ptr[-1] = htonl(len);				/* what we actually read */
+	len = (len + 3) & -4;
+	reply->crp += len;
 }
 
 void addstat(reply, info)
@@ -717,6 +735,33 @@ struct conn *request;
 			break;
 		case 6:
 			/* Read */
+			fh = getfilehandle(request);
+			offset = getuint(request);
+			count = getuint(request);
+			n = getuint(request);
+			if (stat(filetable[fh->index], &info) == 0)
+			{
+				if ((info.st_mode & S_IFREG) == S_IFREG)
+				{
+					/* TODO: file permissions */
+
+					fd = open(filetable[fh->index], O_RDONLY);
+					lseek(fd, offset, SEEK_SET);
+					
+					addint(&reply, NFS_OK);
+					addstat(&reply, &info);
+					addfromfile(&reply, fd, count);
+					close(fd);
+				}
+				else
+				{
+					addint(&reply, NFSERR_ISDIR);
+				}
+			}
+			else
+			{
+				addint(&reply, 2);	/* no such file */
+			}
 			break;
 		case 8:
 			/* Write */
@@ -746,6 +791,10 @@ struct conn *request;
 			count = getuint(request);
 			fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);
 			
+			/* clamp to our buffer size */
+			if (count > 4096)
+				count = 4096;
+				
 			/* account for some wrapping costs */
 			count -= 32;
 			
