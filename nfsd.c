@@ -213,7 +213,7 @@ char *path;
 
 /* cache of file handle entries */
 unsigned int filetablemask = 0;
-char filetable[4][1024];
+char filetable[32][256];
 
 void addint(reply, val)
 struct response *reply;
@@ -223,6 +223,18 @@ unsigned int val;
 
 	*ptr = htonl(val);
 	reply->crp += sizeof(val);
+}
+
+void addfilehandle(reply, fh)
+struct response *reply;
+struct filehandle *fh;
+{
+	unsigned int *ptr = (unsigned int *)(reply->buffer + reply->crp);
+	int len = sizeof(struct filehandle);
+
+	memcpy(ptr, fh, len);
+	len = (len + 3) & -4;
+	reply->crp += len;
 }
 
 void addstring(reply, string, len)
@@ -421,56 +433,67 @@ struct conn *request;
 	return name;
 }
 
-						
-int makehandle(path, handle, modefilter)
+void releasehandle(path)
 char *path;
-struct filehandle *handle;
-unsigned int modefilter;
 {
-	struct stat info;
 	int n;
 	
-	if (stat(path, &info) == 0 && ((info.st_mode & modefilter) == modefilter))
+	for (n=0; n<32; n++)
 	{
-		for (n=0; n<4; n++)
+		/* in use */
+		if ((filetablemask & (1<<n)))
 		{
-			/* already got it */
-			if ((filetablemask & (1<<n)))
+			if (!strcmp(filetable[n], path))
 			{
-				if (!strcmp(filetable[n], path))
-				{
-					fprintf(console, "  makehandle: found at slot%d\n",n);
-					break;
-				}
+				filetablemask &= ~(1<<n);
+				filetable[n][0] = '\0';
+				return;
 			}
-			else
-			/* find a free slot */
+		}
+	}
+}
+
+int makehandle(path, info, handle)
+char *path;
+struct stat *info;
+struct filehandle *handle;
+{
+	int n;
+	
+	for (n=0; n<32; n++)
+	{
+		/* already got it */
+		if ((filetablemask & (1<<n)))
+		{
+			if (!strcmp(filetable[n], path))
 			{
-				strcpy(filetable[n], path);
-				filetablemask |= (1<<n);
+				fprintf(console, "  makehandle: found at slot%d\n",n);
 				break;
 			}
 		}
-
-		if (n < 4)
-		{
-			/* make a file handle */
-			memset(handle, 0, sizeof(struct filehandle));
-			handle->index = n;
-			handle->inode = info.st_ino;
-			handle->dev = info.st_dev;
-
-			return n;
-		}
 		else
+		/* find a free slot */
 		{
-			/* TODO: not cached, so lookup using inode */
-			return -1;
+			strcpy(filetable[n], path);
+			filetablemask |= (1<<n);
+			break;
 		}
+	}
+
+	if (n < 32)
+	{
+		/* make a file handle */
+		memset(handle, 0, sizeof(struct filehandle));
+		handle->index = n;
+		handle->inode = info->st_ino;
+		handle->dev = info->st_dev;
+
+		return n;
 	}
 	else
 	{
-		return -errno;
+		/* TODO: not cached, so lookup using inode */
+		return -1;
 	}
 }
 
@@ -583,15 +606,16 @@ struct conn *request;
 		case 1:
 			/* Add Mount */
 			path = getstring(request);
-			if (makehandle(path, &handle, S_IFDIR) >= 0)
+			if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
 			{
+				makehandle(path, &info, &handle);
 				addint(&reply, NFS_OK);
-				adddata(&reply, (unsigned char *)&handle, sizeof(handle));
+				addfilehandle(&reply, &handle);
 				fprintf(console, "mountd: mount Path = %s\n",path);
 			}
 			else
 			{
-				addint(&reply, NFSERR_NOENT);	/* no such file */
+				addint(&reply, NFSERR_NOENT);	/* no such directory */
 				addint(&reply, 0);
 			}
 			break;
@@ -601,9 +625,9 @@ struct conn *request;
 		case 3:
 			/* Remove Mount */
 			path = getstring(request);
-			fprintf(console, "mountd: unmount Path = %s\n",path);
-			
+			releasehandle(path);
 			addint(&reply, NFS_OK);
+			fprintf(console, "mountd: unmount Path = %s\n",path);
 			break;
 	}
 
@@ -623,7 +647,7 @@ struct conn *request;
 	char *path;
 	char filepath[1024];
 	int disksize,freesize;
-	int n, count, offset;
+	int n, count, offset, fd;
 	struct filehandle handle;
 	struct filehandle *fh;
 	DIR *d;
@@ -673,11 +697,14 @@ struct conn *request;
 			strcpy(filepath, filetable[fh->index]);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			fprintf(console, "nfsd: lookup = %s\n", filepath);
-			if (makehandle(filepath, &handle, 0) >= 0)
+			if (stat(filepath, &info) == 0)
 			{
-				addint(&reply, SUCCESS);
-				adddata(&reply, (unsigned char *)&handle, sizeof(handle));
+				makehandle(filepath, &info, &handle);
+				addint(&reply, NFS_OK);
+				addfilehandle(&reply, &handle);
+				addstat(&reply, &info);
+				
+				fprintf(console, "nfsd: lookup = %s => %d\n", filepath, handle.index);
 			}
 			else
 			{
