@@ -310,7 +310,6 @@ char *path;
 		strcat(path, stringcache + subpathindex[encoded[n]]);
 		n++;
 	}
-	fprintf(console, "decodepath(%s)\n",path);
 }
 
 void addint(reply, val)
@@ -386,6 +385,29 @@ int len;
 	ptr[-1] = htonl(len);				/* what we actually read */
 	len = (len + 3) & -4;
 	reply->crp += len;
+}
+
+unsigned int nfsmode2unix(nfsmode)
+unsigned int nfsmode;
+{
+	unsigned int perms = 0;
+
+	/* translate from NFS bits */
+	if (nfsmode & ROWN)
+		perms |= S_IREAD;
+	if (nfsmode & WOWN)
+		perms |= S_IWRITE;
+	if (nfsmode & XOWN)
+		perms |= S_IEXEC;
+	if (nfsmode& ROTH)
+		perms |= S_IOREAD;
+	if (nfsmode & WOTH)
+		perms |= S_IOWRITE;
+	if (nfsmode & XOTH)
+		perms |= S_IOEXEC;
+
+	fprintf(console, "nfsmode2unix:  %4.4x => %4.4x\n", nfsmode,perms);
+	return perms;
 }
 
 void addstat(reply, info)
@@ -760,11 +782,11 @@ struct conn *request;
 			/* GetAttr */
 			fh = getfilehandle(request);
 			decodepath(fh->pathtokens, filepath);
-			fprintf(console, "nfsd: getattr: %s\n",filepath);
 			if (stat(filepath, &info) == 0)
 			{
 				addint(&reply, NFS_OK);
 				addstat(&reply, &info);
+				fprintf(console, "nfsd: getattr: %s\n",filepath);
 			}
 			else
 			{
@@ -785,14 +807,13 @@ struct conn *request;
 			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			fprintf(console, "nfsd: lookup = %s\n", filepath);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
 				addstat(&reply, &info);
-				
+				fprintf(console, "nfsd: lookup = %s\n", filepath);
 			}
 			else
 			{
@@ -856,7 +877,7 @@ struct conn *request;
 			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			unsigned int mode = getuint(request);
+			unsigned int mode = nfsmode2unix(getuint(request));
 			unsigned int uid = getuint(request);
 			unsigned int gid = getuint(request);
 			unsigned int size = getuint(request);
