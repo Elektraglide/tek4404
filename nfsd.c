@@ -12,7 +12,8 @@
 
 */
 
-#ifndef __clang__
+/* standard compiler define for Tektronix 440x */
+#ifdef tek
 
 #include <sys/sir.h>
 
@@ -33,11 +34,6 @@ struct sir sirbuf;
 //extern int wait();
 //extern int kill();
 #include <stdlib.h>
-
-// clashes with Uniflex, so use MacOS constants
-#define F_GETFL         3               /* get file status flags */
-#define F_SETFL         4               /* set file status flags */
-#define O_NONBLOCK      0x00000004      /* no delay */
 
 #define in_sockaddr sockaddr_in
 #define st_perm st_mode
@@ -181,10 +177,11 @@ enum {
 
 FILE *console;
 
-#ifndef __clang__
+#ifdef tek
 /* missing CRT */
-int mkdir(path)
+int mkdir(path, mode)
 char *path;
+unsigned int mode;
 {
 	char linkpath[256], linkdest[256];
 	char *pcVar1;
@@ -585,6 +582,28 @@ struct conn *request;
 	return name;
 }
 
+void getstat(request, info)
+struct conn *request;
+struct stat *info;
+{
+		info->st_mode = nfsmode2unix(getuint(request));
+		info->st_uid = getuint(request);
+#ifdef tek
+		getuint(request);	/* no group */
+#else
+		info->st_gid = getuint(request);
+#endif
+		info->st_size = getuint(request);
+#ifdef tek
+		getuint(request);	getuint(request);	/* no access time */
+#else
+		info->st_atime = getuint(request);	getuint(request);
+#endif
+		info->st_mtime = getuint(request);	getuint(request);
+}
+
+
+
 void releasehandle(path)
 char *path;
 {
@@ -756,7 +775,7 @@ struct conn *request;
 	char *path;
 	char filepath[1024];
 	int disksize,freesize;
-	int n, count, offset, fd;
+	int n, count, offset, fd, rc;
 	struct filehandle handle;
 	struct filehandle *fh;
 	DIR *d;
@@ -838,7 +857,7 @@ struct conn *request;
 					/* TODO: check file permissions */
 
 					fd = open(filepath, O_RDONLY);
-					lseek(fd, offset, SEEK_SET);
+					rc = lseek(fd, offset, SEEK_SET);
 					
 					addint(&reply, NFS_OK);
 					addstat(&reply, &info);
@@ -857,9 +876,68 @@ struct conn *request;
 			break;
 		case 8:
 			/* Write */
+			fh = getfilehandle(request);
+			n = getuint(request);
+			offset = getuint(request);
+			n = getuint(request);
+			decodepath(fh->pathtokens, filepath);
+			if (stat(filepath, &info) == 0)
+			{
+				if ((info.st_mode & S_IFREG) == S_IFREG)
+				{
+					/* TODO: check file permissions */
+
+					fd = open(filepath, O_WRONLY);
+					rc = lseek(fd, offset, SEEK_SET);
+					n = getuint(request);
+					rc = write(fd, request->buffer + request->crp, n);
+					close(fd);
+					if (rc == n)
+					{
+						/* update info with new length */
+						if (offset + n > info.st_size)
+							info.st_size = offset + n;
+							
+						addint(&reply, NFS_OK);
+						addstat(&reply, &info);
+					}
+					else
+					{
+						addint(&reply, NFSERR_IO);
+					}
+				}
+				else
+				{
+					addint(&reply, NFSERR_ISDIR);
+				}
+			}
+			else
+			{
+				addint(&reply, 2);	/* no such file */
+			}
 			break;
 		case 9:
 			/* Create */
+			fh = getfilehandle(request);
+			path = getstring(request);
+			decodepath(fh->pathtokens, filepath);
+			strcat(filepath, "/");
+			strcat(filepath, path);
+			getstat(request, &info);
+			fd = creat(filepath, info.st_mode);
+			lseek(fd, info.st_size, SEEK_SET);
+			if (stat(filepath, &info) == 0)
+			{
+				makehandle(filepath, &info, &handle);
+				addint(&reply, NFS_OK);
+				addfilehandle(&reply, &handle);
+				addstat(&reply, &info);
+				fprintf(console, "nfsd: create = %s\n", filepath);
+			}
+			else
+			{
+				addint(&reply, 2);	/* no such file */
+			}
 			break;
 		case 10:
 			/* Remove */
@@ -877,14 +955,9 @@ struct conn *request;
 			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			unsigned int mode = nfsmode2unix(getuint(request));
-			unsigned int uid = getuint(request);
-			unsigned int gid = getuint(request);
-			unsigned int size = getuint(request);
-			unsigned int atime = getuint(request);	getuint(request);
-			unsigned int mtime = getuint(request);	getuint(request);
-			mkdir(filepath, mode);
-			chown(filepath, uid, gid);
+			getstat(request, &info);
+			mkdir(filepath, info.st_mode);
+			chown(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
@@ -950,7 +1023,7 @@ struct conn *request;
 			addint(&reply, NFS_OK);
 			addint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
 			addint(&reply, BLOCK_SIZE);			/* Block size of FS */
-#ifdef __clang__
+#ifndef tek
 			/* fake some numbers */
 			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
 			freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
@@ -986,7 +1059,12 @@ char **argv;
 	int n;
 	
 	console = stderr;
-	
+
+#ifdef tek
+	if (geteuid() != 0)
+		exit(-1);
+#endif
+
 	/* we act as portmapd, mountd and nfsd... */
 	portmapsock = createudpsock(PORTMAPPERD_PORT);
 	mountsock = createudpsock(MOUNTD_PORT);
@@ -997,7 +1075,7 @@ char **argv;
 	{
 		struct conn request;
 		fd_set fd_in;
-		size_t fromSize = sizeof(request.from);
+		socklen_t fromSize = sizeof(request.from);
 		int n,count;
 
 		FD_ZERO(&fd_in);
