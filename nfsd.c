@@ -407,7 +407,7 @@ unsigned int nfsmode;
 	return perms;
 }
 
-void addstat(reply, info)
+void addfattr(reply, info)
 struct response *reply;
 struct stat *info;
 {
@@ -582,7 +582,7 @@ struct conn *request;
 	return name;
 }
 
-void getstat(request, info)
+void getsattr(request, info)
 struct conn *request;
 struct stat *info;
 {
@@ -804,7 +804,7 @@ struct conn *request;
 			if (stat(filepath, &info) == 0)
 			{
 				addint(&reply, NFS_OK);
-				addstat(&reply, &info);
+				addfattr(&reply, &info);
 				fprintf(console, "nfsd: getattr: %s\n",filepath);
 			}
 			else
@@ -831,7 +831,7 @@ struct conn *request;
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
-				addstat(&reply, &info);
+				addfattr(&reply, &info);
 				fprintf(console, "nfsd: lookup = %s\n", filepath);
 			}
 			else
@@ -860,7 +860,7 @@ struct conn *request;
 					rc = lseek(fd, offset, SEEK_SET);
 					
 					addint(&reply, NFS_OK);
-					addstat(&reply, &info);
+					addfattr(&reply, &info);
 					addfromfile(&reply, fd, count);
 					close(fd);
 				}
@@ -899,7 +899,7 @@ struct conn *request;
 							info.st_size = offset + n;
 							
 						addint(&reply, NFS_OK);
-						addstat(&reply, &info);
+						addfattr(&reply, &info);
 					}
 					else
 					{
@@ -923,7 +923,7 @@ struct conn *request;
 			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			getstat(request, &info);
+			getsattr(request, &info);
 			fd = creat(filepath, info.st_mode);
 			lseek(fd, info.st_size, SEEK_SET);
 			if (stat(filepath, &info) == 0)
@@ -931,7 +931,7 @@ struct conn *request;
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
-				addstat(&reply, &info);
+				addfattr(&reply, &info);
 				fprintf(console, "nfsd: create = %s\n", filepath);
 			}
 			else
@@ -955,7 +955,7 @@ struct conn *request;
 			decodepath(fh->pathtokens, filepath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			getstat(request, &info);
+			getsattr(request, &info);
 			mkdir(filepath, info.st_mode);
 			chown(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
@@ -963,7 +963,7 @@ struct conn *request;
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
-				addstat(&reply, &info);
+				addfattr(&reply, &info);
 			
 				fprintf(console, "nfsd: mkdir = %s\n", filepath);
 			}
@@ -1069,6 +1069,10 @@ char **argv;
 	portmapsock = createudpsock(PORTMAPPERD_PORT);
 	mountsock = createudpsock(MOUNTD_PORT);
 	nfssock = createudpsock(NFSD_PORT);
+
+	/* cannot continue */
+	if (portmapsock < 0 || mountsock < 0 || nfssock < 0)
+		exit(-2);
 
 	/* run loop */
 	while(1)
