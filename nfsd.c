@@ -397,12 +397,20 @@ unsigned int nfsmode;
 		perms |= S_IWRITE;
 	if (nfsmode & XOWN)
 		perms |= S_IEXEC;
-	if (nfsmode& ROTH)
+	if (nfsmode & ROTH)
 		perms |= S_IOREAD;
 	if (nfsmode & WOTH)
 		perms |= S_IOWRITE;
 	if (nfsmode & XOTH)
 		perms |= S_IOEXEC;
+#ifndef tek
+	if (nfsmode & RGRP)
+		perms |= S_IRGRP;
+	if (nfsmode & WGRP)
+		perms |= S_IWGRP;
+	if (nfsmode & XGRP)
+		perms |= S_IXGRP;
+#endif
 
 	fprintf(console, "nfsmode2unix:  %4.4x => %4.4x\n", nfsmode,perms);
 	return perms;
@@ -427,6 +435,14 @@ struct stat *info;
 		nfsperms |= WOTH;
 	if (info->st_perm & S_IOEXEC)
 		nfsperms |= XOTH;
+#ifndef tek
+	if (info->st_perm & S_IRGRP)
+		nfsperms |= RGRP;
+	if (info->st_perm & S_IWGRP)
+		nfsperms |= WGRP;
+	if (info->st_perm & S_IXGRP)
+		nfsperms |= XGRP;
+#endif
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
@@ -434,7 +450,11 @@ struct stat *info;
 		addint(reply, DIR_NFS | nfsperms);			/* info->st_perm */
 		addint(reply, info->st_nlink);
 		addint(reply, info->st_uid);
-		addint(reply, info->st_uid);	/* no group */
+#ifdef tek
+		addint(reply, info->st_uid);		/* no group */
+#else
+		addint(reply, info->st_gid);
+#endif
 		addint(reply, (unsigned int)info->st_size);
 		addint(reply, BLOCK_SIZE);
 		addint(reply, info->st_dev);
@@ -454,7 +474,11 @@ struct stat *info;
 		addint(reply, REG | nfsperms);
 		addint(reply, info->st_nlink);
 		addint(reply, info->st_uid);
-		addint(reply, info->st_uid);	/* no group */
+#ifdef tek
+		addint(reply, info->st_uid);		/* no group */
+#else
+		addint(reply, info->st_gid);
+#endif
 		addint(reply, (unsigned int)info->st_size);
 		addint(reply, BLOCK_SIZE);
 		addint(reply, info->st_dev);
@@ -927,6 +951,7 @@ struct conn *request;
 			getsattr(request, &info);
 			fd = creat(filepath, info.st_mode);
 			lseek(fd, info.st_size, SEEK_SET);
+			chown(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
