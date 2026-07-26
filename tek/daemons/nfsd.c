@@ -1073,7 +1073,11 @@ struct conn *request;
 						addint(&reply, 1);
 						
 						addint(&reply, n);
+#ifdef __linux__
+						addstring(&reply, dir->d_name, strlen(dir->d_name));
+#else
 						addstring(&reply, dir->d_name, dir->d_namlen);
+#endif
 						addint(&reply, offset + n);
 						/*fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);*/
 					}
@@ -1147,8 +1151,11 @@ char **argv;
 
 	/* cannot continue */
 	if (portmapsock < 0 || mountsock < 0 || nfssock < 0)
+	{
+		fprintf(console, "cannot bind sockets\n");
 		exit(-2);
-
+	}
+	
 	/* run loop */
 	while(1)
 	{
