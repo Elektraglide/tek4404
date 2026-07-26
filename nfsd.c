@@ -26,6 +26,7 @@
 
 #define  IPPROTO_UDP IPPR_UDP
 #define socklen_t unsigned int
+#define CHOWN(A,B,C) chown(A,B) /* does not have group id */
 
 struct sir sirbuf;
 
@@ -41,6 +42,8 @@ struct sir sirbuf;
 #define S_IOREAD         S_IROTH         /* backward compatability */
 #define S_IOWRITE        S_IWOTH         /* backward compatability */
 #define S_IOEXEC         S_IXOTH         /* backward compatability */
+
+#define CHOWN(A,B,C) chown(A,B,C)
 
 //#include "uniflexshim.h"
 #include <unistd.h>
@@ -153,13 +156,13 @@ struct filehandle {
 struct conn {
 	int sock;
 	struct in_sockaddr from;
-	char buffer[4096];
+	char buffer[TRANSFER_SIZE];
 	int crp,len;
 };
 
 /* needs to be dynamically resized? */
 struct response {
-	char buffer[4096];
+	char buffer[TRANSFER_SIZE];
 	int crp;
 };
 
@@ -187,6 +190,7 @@ unsigned int mode;
 	char linkpath[256], linkdest[256];
 	char *pcVar1;
 
+	/* TODO: convert mode to Uniflex */
 	mknod(path, 0x0800 + 0x38 + 0x07, 0x0000);
 	chown(path, 0);
 
@@ -262,7 +266,6 @@ char *path;
 	{
 		stringcachelen += stringcachelen / 2;
 		stringcache = realloc(stringcache, stringcachelen);
-		fprintf(console, "pathslen = %d\n",stringcachelen);
 	}
 	
 	return numsubpaths - 1;
@@ -362,7 +365,7 @@ int len;
 	reply->crp += len;
 }
 
-void addfromfile(reply, fd, len)
+int addfromfile(reply, fd, len)
 struct response *reply;
 int fd;
 int len;
@@ -372,14 +375,16 @@ int len;
 	addint(reply, len);
 	ptr = (unsigned int *)(reply->buffer + reply->crp);
 	
-	if (len > (4096 - reply->crp))
-		len = 4096 - reply->crp;
+	/* clamp to remaining space */
+	if (len > (TRANSFER_SIZE - reply->crp))
+		len = TRANSFER_SIZE - reply->crp;
 	
 	len = read(fd, ptr, len);
-	fprintf(console, "  addfile: read %d bytes\n", len);
 	ptr[-1] = htonl(len);				/* what we actually read */
 	len = (len + 3) & -4;
 	reply->crp += len;
+	
+	return len;
 }
 
 unsigned int nfsmode2unix(nfsmode)
@@ -387,28 +392,33 @@ unsigned int nfsmode;
 {
 	unsigned int perms = 0;
 
-	/* translate from NFS bits */
-	if (nfsmode & ROWN)
-		perms |= S_IREAD;
-	if (nfsmode & WOWN)
-		perms |= S_IWRITE;
-	if (nfsmode & XOWN)
-		perms |= S_IEXEC;
-	if (nfsmode & ROTH)
-		perms |= S_IOREAD;
-	if (nfsmode & WOTH)
-		perms |= S_IOWRITE;
-	if (nfsmode & XOTH)
-		perms |= S_IOEXEC;
+	if (nfsmode == -1)
+		perms = -1;
+	else
+	{
+		/* translate from NFS bits */
+		if (nfsmode & ROWN)
+			perms |= S_IREAD;
+		if (nfsmode & WOWN)
+			perms |= S_IWRITE;
+		if (nfsmode & XOWN)
+			perms |= S_IEXEC;
+		if (nfsmode & ROTH)
+			perms |= S_IOREAD;
+		if (nfsmode & WOTH)
+			perms |= S_IOWRITE;
+		if (nfsmode & XOTH)
+			perms |= S_IOEXEC;
 #ifndef tek
-	if (nfsmode & RGRP)
-		perms |= S_IRGRP;
-	if (nfsmode & WGRP)
-		perms |= S_IWGRP;
-	if (nfsmode & XGRP)
-		perms |= S_IXGRP;
+		if (nfsmode & RGRP)
+			perms |= S_IRGRP;
+		if (nfsmode & WGRP)
+			perms |= S_IWGRP;
+		if (nfsmode & XGRP)
+			perms |= S_IXGRP;
 #endif
-
+	}
+	
 	fprintf(console, "nfsmode2unix:  %4.4x => %4.4x\n", nfsmode,perms);
 	return perms;
 }
@@ -761,7 +771,7 @@ struct conn *request;
 				makehandle(path, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
-				fprintf(console, "mountd: mount Path = %s\n",path);
+				/*fprintf(console, "mountd: mount Path = %s\n",path);*/
 			}
 			else
 			{
@@ -777,7 +787,7 @@ struct conn *request;
 			path = getstring(request);
 			releasehandle(path);
 			addint(&reply, NFS_OK);
-			fprintf(console, "mountd: unmount Path = %s\n",path);
+			/*fprintf(console, "mountd: unmount Path = %s\n",path);*/
 			break;
 	}
 
@@ -827,7 +837,7 @@ struct conn *request;
 			{
 				addint(&reply, NFS_OK);
 				addfattr(&reply, &info);
-				fprintf(console, "nfsd: getattr: %s\n",filepath);
+				/*fprintf(console, "nfsd: getattr: %s  perm:%4.4x\n", filepath, info.st_mode);*/
 			}
 			else
 			{
@@ -837,6 +847,25 @@ struct conn *request;
 			break;
 		case 2:
 			/* SetAttr */
+			fh = getfilehandle(request);
+			decodepath(fh->pathtokens, filepath);
+			getsattr(request, &info);
+			if (info.st_mode != -1)
+				chmod(filepath, info.st_mode);
+			if (info.st_uid != -1)
+				CHOWN(filepath, info.st_uid, info.st_gid);
+			if (info.st_size == 0)
+				truncate(filepath, info.st_size);
+			if (stat(filepath, &info) == 0)
+			{
+				addint(&reply, NFS_OK);
+				addfattr(&reply, &info);
+				/*fprintf(console, "nfsd: setattr = %s\n", filepath);*/
+			}
+			else
+			{
+				addint(&reply, errno);
+			}
 			break;
 		case 3:
 			/* Root(). No-op. */
@@ -854,7 +883,7 @@ struct conn *request;
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
 				addfattr(&reply, &info);
-				fprintf(console, "nfsd: lookup = %s\n", filepath);
+				/*fprintf(console, "nfsd: lookup = %s\n", filepath);*/
 			}
 			else
 			{
@@ -911,16 +940,18 @@ struct conn *request;
 
 					fd = open(filepath, O_WRONLY);
 					rc = lseek(fd, offset, SEEK_SET);
-					n = getuint(request);
-					rc = write(fd, request->buffer + request->crp, n);
+					count = getuint(request);
+					rc = write(fd, request->buffer + request->crp, count);
+					/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
 					close(fd);
-					if (rc == n)
+					if (rc == count)
 					{
-						/* update info with new length */
-						if (offset + n > info.st_size)
-							info.st_size = offset + n;
-							
 						addint(&reply, NFS_OK);
+
+						/* quick update of stat */
+						if (offset+rc > info.st_size)
+							info.st_size = offset + rc;
+
 						addfattr(&reply, &info);
 					}
 					else
@@ -947,17 +978,20 @@ struct conn *request;
 			strcat(filepath, path);
 			getsattr(request, &info);
 			fd = creat(filepath, info.st_mode);
-			if (info.st_size >= 0)
-				lseek(fd, info.st_size, SEEK_SET);
-			if (info.st_uid >= 0 && info.st_gid >= 0)
-				chown(filepath, info.st_uid, info.st_gid);
+			close(fd);
+			if (info.st_mode != -1)
+				chmod(filepath, info.st_mode);
+			if (info.st_uid != -1)
+				CHOWN(filepath, info.st_uid, info.st_gid);
+			if (info.st_size == 0)
+				truncate(filepath, info.st_size);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
 				addfattr(&reply, &info);
-				fprintf(console, "nfsd: create = %s\n", filepath);
+				/*fprintf(console, "nfsd: create = %s perm:%4.4x\n", filepath, info.st_mode);*/
 			}
 			else
 			{
@@ -966,6 +1000,20 @@ struct conn *request;
 			break;
 		case 10:
 			/* Remove */
+			fh = getfilehandle(request);
+			path = getstring(request);
+			decodepath(fh->pathtokens, filepath);
+			strcat(filepath, "/");
+			strcat(filepath, path);
+			if (unlink(filepath) == 0)
+			{
+				addint(&reply, NFS_OK);
+				/*fprintf(console, "nfsd: remove = %s\n", filepath);*/
+			}
+			else
+			{
+				addint(&reply, errno);
+			}
 			break;
 		case 11:
 			/* Rename */
@@ -982,15 +1030,14 @@ struct conn *request;
 			strcat(filepath, path);
 			getsattr(request, &info);
 			mkdir(filepath, info.st_mode);
-			chown(filepath, info.st_uid, info.st_gid);
+			CHOWN(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
 			{
 				makehandle(filepath, &info, &handle);
 				addint(&reply, NFS_OK);
 				addfilehandle(&reply, &handle);
 				addfattr(&reply, &info);
-			
-				fprintf(console, "nfsd: mkdir = %s\n", filepath);
+				/*fprintf(console, "nfsd: mkdir = %s\n", filepath);*/
 			}
 			break;
 		case 15:
@@ -1001,11 +1048,11 @@ struct conn *request;
 			fh = getfilehandle(request);
 			offset = getuint(request);
 			count = getuint(request);
-			fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);
+			/*fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);*/
 			
 			/* clamp to our buffer size */
-			if (count > 4096)
-				count = 4096;
+			if (count > TRANSFER_SIZE)
+				count = TRANSFER_SIZE;
 				
 			/* account for some wrapping costs */
 			count -= 32;
@@ -1026,7 +1073,7 @@ struct conn *request;
 						addint(&reply, n);
 						addstring(&reply, dir->d_name, dir->d_namlen);
 						addint(&reply, offset + n);
-						fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);
+						/*fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);*/
 					}
 	
 					n++;
@@ -1063,7 +1110,6 @@ struct conn *request;
 			addint(&reply, disksize);					/* Total # of blocks (of the above size) */
 			addint(&reply, freesize);					/* Free blocks */
 			addint(&reply, freesize);					/* Free blocks available to non-priv. users */
-			fprintf(console, "nfsd: statfs: %d blocks (%d free)\n", disksize, freesize);
 			break;
 	}
 
