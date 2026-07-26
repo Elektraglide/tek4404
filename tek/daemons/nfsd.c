@@ -701,6 +701,8 @@ struct conn *request;
 	addint(&reply, 0);		/* opaque_verf */
 	addint(&reply, 0);		/* opaque_verf size */
 
+	/* I dont understand why it does not need SUCCESS here.. */
+
 	switch(ntohl(header->proc))
 	{
 		default:
