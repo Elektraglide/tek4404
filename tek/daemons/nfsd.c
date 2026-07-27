@@ -228,7 +228,7 @@ char *stringcache;
 short numsubpaths = 0;
 int subpathindex[256];
 
-int addsubpath(path)
+int add_subpath(path)
 char *path;
 {
 	short n;
@@ -284,7 +284,7 @@ unsigned char *encoded;
 	ptr = strtok(working, "/");
 	while(ptr)
 	{
-		encoded[n++] = addsubpath(ptr);
+		encoded[n++] = add_subpath(ptr);
 		ptr = strtok(NULL,  "/");
 	}
 	
@@ -310,7 +310,7 @@ char *path;
 	}
 }
 
-void addint(reply, val)
+void add_uint(reply, val)
 struct response *reply;
 unsigned int val;
 {
@@ -320,7 +320,7 @@ unsigned int val;
 	reply->crp += sizeof(val);
 }
 
-void addfilehandle(reply, fh)
+void add_filehandle(reply, fh)
 struct response *reply;
 struct filehandle *fh;
 {
@@ -332,14 +332,14 @@ struct filehandle *fh;
 	reply->crp += len;
 }
 
-void addstring(reply, string, len)
+void add_string(reply, string, len)
 struct response *reply;
 char *string;
 int len;
 {
 	char *ptr;
 	
-	addint(reply, len);
+	add_uint(reply, len);
 	ptr = reply->buffer + reply->crp;
 
 	memcpy(ptr, string, len);
@@ -350,14 +350,14 @@ int len;
 	reply->crp += len;
 }
 
-void adddata(reply, data, len)
+void add_data(reply, data, len)
 struct response *reply;
 unsigned char *data;
 int len;
 {
 	unsigned int *ptr;
 
-	addint(reply, len);
+	add_uint(reply, len);
 	ptr = (unsigned int *)(reply->buffer + reply->crp);
 	
 	memcpy(ptr, data, len);
@@ -365,14 +365,14 @@ int len;
 	reply->crp += len;
 }
 
-int addfromfile(reply, fd, len)
+int add_fromfile(reply, fd, len)
 struct response *reply;
 int fd;
 int len;
 {
 	unsigned int *ptr;
 
-	addint(reply, len);
+	add_uint(reply, len);
 	ptr = (unsigned int *)(reply->buffer + reply->crp);
 	
 	/* clamp to remaining space */
@@ -423,7 +423,7 @@ unsigned int nfsmode;
 	return perms;
 }
 
-void addfattr(reply, info)
+void add_fattr(reply, info)
 struct response *reply;
 struct stat *info;
 {
@@ -453,51 +453,51 @@ struct stat *info;
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
-		addint(reply, NFDIR);
-		addint(reply, DIR_NFS | nfsperms);			/* info->st_perm */
-		addint(reply, info->st_nlink);
-		addint(reply, info->st_uid);
+		add_uint(reply, NFDIR);
+		add_uint(reply, DIR_NFS | nfsperms);			/* info->st_perm */
+		add_uint(reply, info->st_nlink);
+		add_uint(reply, info->st_uid);
 #ifdef tek
-		addint(reply, info->st_uid);		/* no group */
+		add_uint(reply, info->st_uid);		/* no group */
 #else
-		addint(reply, info->st_gid);
+		add_uint(reply, info->st_gid);
 #endif
-		addint(reply, (unsigned int)info->st_size);
-		addint(reply, BLOCK_SIZE);
-		addint(reply, info->st_dev);
-		addint(reply, FDNPB);
-		addint(reply, 1);	/* fsid */
-		addint(reply, (unsigned int)info->st_ino);
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_size);
+		add_uint(reply, BLOCK_SIZE);
+		add_uint(reply, info->st_dev);
+		add_uint(reply, FDNPB);
+		add_uint(reply, 1);	/* fsid */
+		add_uint(reply, (unsigned int)info->st_ino);
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
 	}
 	else
 	{
-		addint(reply, NFREG);
-		addint(reply, REG | nfsperms);
-		addint(reply, info->st_nlink);
-		addint(reply, info->st_uid);
+		add_uint(reply, NFREG);
+		add_uint(reply, REG | nfsperms);
+		add_uint(reply, info->st_nlink);
+		add_uint(reply, info->st_uid);
 #ifdef tek
-		addint(reply, info->st_uid);		/* no group */
+		add_uint(reply, info->st_uid);		/* no group */
 #else
-		addint(reply, info->st_gid);
+		add_uint(reply, info->st_gid);
 #endif
-		addint(reply, (unsigned int)info->st_size);
-		addint(reply, BLOCK_SIZE);
-		addint(reply, info->st_dev);
-		addint(reply, ((unsigned int)info->st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
-		addint(reply, 1);	/* fsid */
-		addint(reply, (unsigned int)info->st_ino);
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
-		addint(reply, (unsigned int)info->st_mtime);
-		addint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_size);
+		add_uint(reply, BLOCK_SIZE);
+		add_uint(reply, info->st_dev);
+		add_uint(reply, ((unsigned int)info->st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
+		add_uint(reply, 1);	/* fsid */
+		add_uint(reply, (unsigned int)info->st_ino);
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
+		add_uint(reply, (unsigned int)info->st_mtime);
+		add_uint(reply, 0);	/* usec */
 	}
 }
 
@@ -515,12 +515,12 @@ int prognum;
 	if (ntohl(header->msg_type) != CALL)
 	{
 		/* corrupted */
-		addint(&reply, ntohl(header->xid));
-		addint(&reply, REPLY);
-		addint(&reply, MSG_ACCEPTED);
-		addint(&reply, 0);		/* opaque_verf */
-		addint(&reply, 0);		/* opaque_verf size */
-		addint(&reply, GARBAGE_ARGS);
+		add_uint(&reply, ntohl(header->xid));
+		add_uint(&reply, REPLY);
+		add_uint(&reply, MSG_ACCEPTED);
+		add_uint(&reply, 0);		/* opaque_verf */
+		add_uint(&reply, 0);		/* opaque_verf size */
+		add_uint(&reply, GARBAGE_ARGS);
 		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
@@ -528,12 +528,12 @@ int prognum;
 	if (ntohl(header->rpcvers) != 2)
 	{
 		/* not NFSv2 */
-		addint(&reply, ntohl(header->xid));
-		addint(&reply, REPLY);
-		addint(&reply, MSG_DENIED);
-		addint(&reply, PROG_MISMATCH);
-		addint(&reply, 2);
-		addint(&reply, 2);
+		add_uint(&reply, ntohl(header->xid));
+		add_uint(&reply, REPLY);
+		add_uint(&reply, MSG_DENIED);
+		add_uint(&reply, PROG_MISMATCH);
+		add_uint(&reply, 2);
+		add_uint(&reply, 2);
 		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
@@ -541,14 +541,14 @@ int prognum;
 	if (ntohl(header->prog) != prognum)
 	{
 		/* not correct service */
-		addint(&reply, ntohl(header->xid));
-		addint(&reply, REPLY);
-		addint(&reply, MSG_ACCEPTED);
-		addint(&reply, 0);		/* opaque_verf */
-		addint(&reply, 0);		/* opaque_verf size */
-		addint(&reply, PROG_MISMATCH);
-		addint(&reply, prognum);
-		addint(&reply, prognum);
+		add_uint(&reply, ntohl(header->xid));
+		add_uint(&reply, REPLY);
+		add_uint(&reply, MSG_ACCEPTED);
+		add_uint(&reply, 0);		/* opaque_verf */
+		add_uint(&reply, 0);		/* opaque_verf size */
+		add_uint(&reply, PROG_MISMATCH);
+		add_uint(&reply, prognum);
+		add_uint(&reply, prognum);
 		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
@@ -557,7 +557,7 @@ int prognum;
 	return 1;
 }
 
-unsigned int getuint(request)
+unsigned int get_uint(request)
 struct conn *request;
 {
 	unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
@@ -567,44 +567,47 @@ struct conn *request;
 	return val;
 }
 
-void verifier(request)
+void get_verifier(request)
 struct conn *request;
 {
-	unsigned int flavour = getuint(request);
-	unsigned int length = getuint(request);
+	unsigned int flavour = get_uint(request);
+	unsigned int length = get_uint(request);
 	request->crp += length;
 }
 
-void credentials(request)
+void get_credentials(request)
 struct conn *request;
 {
-	unsigned int flavour = getuint(request);
-	unsigned int length = getuint(request);
+	unsigned int flavour = get_uint(request);
+	unsigned int length = get_uint(request);
 
 	/* log AUTH_UNIX */
 	if (flavour == 1)
 	{
 		unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
-		/* fprintf(console, "credentials: AUTH_UNIX: %8.8x: %s\n", ptr[0], ptr+1); */
+		/* fprintf(console, "get_credentials: AUTH_UNIX: %8.8x: %s\n", ptr[0], ptr+1); */
 	}
 	
 	request->crp += length;
 }
 
-struct filehandle *getfilehandle(request)
+struct filehandle *get_filehandle(request, filepath)
 struct conn *request;
+char *filepath;
 {
 	struct filehandle *ptr = (struct filehandle *)(request->buffer + request->crp);
 	request->crp += sizeof(struct filehandle);
-	
+
+	decodepath(ptr->pathtokens, filepath);
+
 	return ptr;
 }
 
-char *getstring(request)
+char *get_string(request)
 struct conn *request;
 {
 	static char name[1024];
-	unsigned int len = getuint(request);
+	unsigned int len = get_uint(request);
 
 	memcpy(name, request->buffer + request->crp, len);
 	name[len] = '\0';
@@ -614,35 +617,35 @@ struct conn *request;
 	return name;
 }
 
-void getsattr(request, info)
+void get_sattr(request, info)
 struct conn *request;
 struct stat *info;
 {
-		info->st_mode = nfsmode2unix(getuint(request));
-		info->st_uid = getuint(request);
+		info->st_mode = nfsmode2unix(get_uint(request));
+		info->st_uid = get_uint(request);
 #ifdef tek
 		getuint(request);	/* no group */
 #else
-		info->st_gid = getuint(request);
+		info->st_gid = get_uint(request);
 #endif
-		info->st_size = getuint(request);
+		info->st_size = get_uint(request);
 #ifdef tek
 		getuint(request);	getuint(request);	/* no access time */
 #else
-		info->st_atime = getuint(request);	getuint(request);
+		info->st_atime = get_uint(request);	get_uint(request);
 #endif
-		info->st_mtime = getuint(request);	getuint(request);
+		info->st_mtime = get_uint(request);	get_uint(request);
 }
 
 
 
-void releasehandle(path)
+void release_filehandle(path)
 char *path;
 {
 
 }
 
-int makehandle(path, info, handle)
+int make_filehandle(path, info, handle)
 char *path;
 struct stat *info;
 struct filehandle *handle;
@@ -691,15 +694,15 @@ struct conn *request;
 	unsigned int prog, vers, prot, port, registeredport;
 	int n;
 	
-	credentials(request);
-	verifier(request);
+	get_credentials(request);
+	get_verifier(request);
 	
 	reply.crp = 0;
-	addint(&reply, ntohl(header->xid));
-	addint(&reply, REPLY);
-	addint(&reply, MSG_ACCEPTED);
-	addint(&reply, 0);		/* opaque_verf */
-	addint(&reply, 0);		/* opaque_verf size */
+	add_uint(&reply, ntohl(header->xid));
+	add_uint(&reply, REPLY);
+	add_uint(&reply, MSG_ACCEPTED);
+	add_uint(&reply, 0);		/* opaque_verf */
+	add_uint(&reply, 0);		/* opaque_verf size */
 
 	/* I dont understand why it does not need SUCCESS here.. */
 
@@ -707,25 +710,25 @@ struct conn *request;
 	{
 		default:
 		case 0:
-			addint(&reply, NFS_OK);
+			add_uint(&reply, NFS_OK);
 			break;
 		case 3:
 			/* GetPort */
-			prog = getuint(request);
-			vers = getuint(request);
-			prot = getuint(request);
-			port = getuint(request);
+			prog = get_uint(request);
+			vers = get_uint(request);
+			prot = get_uint(request);
+			port = get_uint(request);
 			registeredport = 0;
 			if (prog == NFSD && prot == IPPROTO_UDP) registeredport = NFSD_PORT;
 			if (prog == MOUNTD && prot == IPPROTO_UDP) registeredport = MOUNTD_PORT;
 			if (registeredport)
 			{
-				addint(&reply, NFS_OK);
-				addint(&reply, registeredport);
+				add_uint(&reply, NFS_OK);
+				add_uint(&reply, registeredport);
 			}
 			else
 			{
-				addint(&reply, PROG_UNAVAIL);
+				add_uint(&reply, PROG_UNAVAIL);
 			}
 			fprintf(console, "portmapd: prog:%d vers:%d prot:%d => registeredport:%d\n", prog, vers, prot, registeredport);
 			break;
@@ -749,16 +752,16 @@ struct conn *request;
 	struct filehandle handle;
 	int n;
 	
-	credentials(request);
-	verifier(request);
+	get_credentials(request);
+	get_verifier(request);
 	
 	reply.crp = 0;
-	addint(&reply, ntohl(header->xid));
-	addint(&reply, REPLY);
-	addint(&reply, MSG_ACCEPTED);
-	addint(&reply, 0);		/* opaque_verf */
-	addint(&reply, 0);		/* opaque_verf size */
-	addint(&reply, SUCCESS);
+	add_uint(&reply, ntohl(header->xid));
+	add_uint(&reply, REPLY);
+	add_uint(&reply, MSG_ACCEPTED);
+	add_uint(&reply, 0);		/* opaque_verf */
+	add_uint(&reply, 0);		/* opaque_verf size */
+	add_uint(&reply, SUCCESS);
 
 	switch(ntohl(header->proc))
 	{
@@ -767,18 +770,18 @@ struct conn *request;
 			break;
 		case 1:
 			/* Add Mount */
-			path = getstring(request);
+			path = get_string(request);
 			if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
 			{
-				makehandle(path, &info, &handle);
-				addint(&reply, NFS_OK);
-				addfilehandle(&reply, &handle);
+				make_filehandle(path, &info, &handle);
+				add_uint(&reply, NFS_OK);
+				add_filehandle(&reply, &handle);
 				/*fprintf(console, "mountd: mount Path = %s\n",path);*/
 			}
 			else
 			{
-				addint(&reply, NFSERR_NOENT);	/* no such directory */
-				addint(&reply, 0);
+				add_uint(&reply, NFSERR_NOENT);	/* no such directory */
+				add_uint(&reply, 0);
 			}
 			break;
 		case 2:
@@ -786,9 +789,9 @@ struct conn *request;
 			break;
 		case 3:
 			/* Remove Mount */
-			path = getstring(request);
-			releasehandle(path);
-			addint(&reply, NFS_OK);
+			path = get_string(request);
+			release_filehandle(path);
+			add_uint(&reply, NFS_OK);
 			/*fprintf(console, "mountd: unmount Path = %s\n",path);*/
 			break;
 	}
@@ -815,16 +818,16 @@ struct conn *request;
 	DIR *d;
 	struct direct *dir;
 	
-	credentials(request);
-	verifier(request);
+	get_credentials(request);
+	get_verifier(request);
 	
 	reply.crp = 0;
-	addint(&reply, ntohl(header->xid));
-	addint(&reply, REPLY);
-	addint(&reply, MSG_ACCEPTED);
-	addint(&reply, 0);		/* opaque_verf */
-	addint(&reply, 0);		/* opaque_verf size */
-	addint(&reply, SUCCESS);
+	add_uint(&reply, ntohl(header->xid));
+	add_uint(&reply, REPLY);
+	add_uint(&reply, MSG_ACCEPTED);
+	add_uint(&reply, 0);		/* opaque_verf */
+	add_uint(&reply, 0);		/* opaque_verf size */
+	add_uint(&reply, SUCCESS);
 
 	switch(ntohl(header->proc))
 	{
@@ -833,25 +836,23 @@ struct conn *request;
 			break;
 		case 1:
 			/* GetAttr */
-			fh = getfilehandle(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
 			if (stat(filepath, &info) == 0)
 			{
-				addint(&reply, NFS_OK);
-				addfattr(&reply, &info);
-				/*fprintf(console, "nfsd: getattr: %s  perm:%4.4x\n", filepath, info.st_mode);*/
+				add_uint(&reply, NFS_OK);
+				add_fattr(&reply, &info);
+				/*fprintf(console, "nfsd: get_attr: %s  perm:%4.4x\n", filepath, info.st_mode);*/
 			}
 			else
 			{
 				/* this should never happen.. */
-				addint(&reply, NFSERR_NOENT);
+				add_uint(&reply, NFSERR_NOENT);
 			}
 			break;
 		case 2:
 			/* SetAttr */
-			fh = getfilehandle(request);
-			decodepath(fh->pathtokens, filepath);
-			getsattr(request, &info);
+			fh = get_filehandle(request, filepath);
+			get_sattr(request, &info);
 			if (info.st_mode != -1)
 				chmod(filepath, info.st_mode);
 			if (info.st_uid != -1)
@@ -860,13 +861,13 @@ struct conn *request;
 				truncate(filepath, info.st_size);
 			if (stat(filepath, &info) == 0)
 			{
-				addint(&reply, NFS_OK);
-				addfattr(&reply, &info);
+				add_uint(&reply, NFS_OK);
+				add_fattr(&reply, &info);
 				/*fprintf(console, "nfsd: setattr = %s\n", filepath);*/
 			}
 			else
 			{
-				addint(&reply, errno);
+				add_uint(&reply, errno);
 			}
 			break;
 		case 3:
@@ -874,23 +875,22 @@ struct conn *request;
 			break;
 		case 4:
 			/* Lookup */
-			fh = getfilehandle(request);
-			path = getstring(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			if (stat(filepath, &info) == 0)
 			{
-				makehandle(filepath, &info, &handle);
-				addint(&reply, NFS_OK);
-				addfilehandle(&reply, &handle);
-				addfattr(&reply, &info);
+				make_filehandle(filepath, &info, &handle);
+				add_uint(&reply, NFS_OK);
+				add_filehandle(&reply, &handle);
+				add_fattr(&reply, &info);
 				/*fprintf(console, "nfsd: lookup = %s\n", filepath);*/
 			}
 			else
 			{
-				addint(&reply, 2);	/* no such file */
-				addint(&reply, 0);
+				add_uint(&reply, 2);	/* no such file */
+				add_uint(&reply, 0);
 			}
 			break;
 		case 5:
@@ -898,11 +898,10 @@ struct conn *request;
 			break;
 		case 6:
 			/* Read */
-			fh = getfilehandle(request);
-			offset = getuint(request);
-			count = getuint(request);
-			n = getuint(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			offset = get_uint(request);
+			count = get_uint(request);
+			n = get_uint(request);
 			if (stat(filepath, &info) == 0)
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
@@ -912,28 +911,27 @@ struct conn *request;
 					fd = open(filepath, O_RDONLY);
 					rc = lseek(fd, offset, SEEK_SET);
 					
-					addint(&reply, NFS_OK);
-					addfattr(&reply, &info);
-					addfromfile(&reply, fd, count);
+					add_uint(&reply, NFS_OK);
+					add_fattr(&reply, &info);
+					add_fromfile(&reply, fd, count);
 					close(fd);
 				}
 				else
 				{
-					addint(&reply, NFSERR_ISDIR);
+					add_uint(&reply, NFSERR_ISDIR);
 				}
 			}
 			else
 			{
-				addint(&reply, 2);	/* no such file */
+				add_uint(&reply, 2);	/* no such file */
 			}
 			break;
 		case 8:
 			/* Write */
-			fh = getfilehandle(request);
-			n = getuint(request);
-			offset = getuint(request);
-			n = getuint(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			n = get_uint(request);
+			offset = get_uint(request);
+			n = get_uint(request);
 			if (stat(filepath, &info) == 0)
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
@@ -942,43 +940,42 @@ struct conn *request;
 
 					fd = open(filepath, O_WRONLY);
 					rc = lseek(fd, offset, SEEK_SET);
-					count = getuint(request);
+					count = get_uint(request);
 					rc = write(fd, request->buffer + request->crp, count);
 					/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
 					close(fd);
 					if (rc == count)
 					{
-						addint(&reply, NFS_OK);
+						add_uint(&reply, NFS_OK);
 
 						/* quick update of stat */
 						if (offset+rc > info.st_size)
 							info.st_size = offset + rc;
 
-						addfattr(&reply, &info);
+						add_fattr(&reply, &info);
 					}
 					else
 					{
-						addint(&reply, NFSERR_IO);
+						add_uint(&reply, NFSERR_IO);
 					}
 				}
 				else
 				{
-					addint(&reply, NFSERR_ISDIR);
+					add_uint(&reply, NFSERR_ISDIR);
 				}
 			}
 			else
 			{
-				addint(&reply, 2);	/* no such file */
+				add_uint(&reply, 2);	/* no such file */
 			}
 			break;
 		case 9:
 			/* Create */
-			fh = getfilehandle(request);
-			path = getstring(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			getsattr(request, &info);
+			get_sattr(request, &info);
 			fd = creat(filepath, info.st_mode);
 			close(fd);
 			if (info.st_mode != -1)
@@ -989,32 +986,31 @@ struct conn *request;
 				truncate(filepath, info.st_size);
 			if (stat(filepath, &info) == 0)
 			{
-				makehandle(filepath, &info, &handle);
-				addint(&reply, NFS_OK);
-				addfilehandle(&reply, &handle);
-				addfattr(&reply, &info);
+				make_filehandle(filepath, &info, &handle);
+				add_uint(&reply, NFS_OK);
+				add_filehandle(&reply, &handle);
+				add_fattr(&reply, &info);
 				/*fprintf(console, "nfsd: create = %s perm:%4.4x\n", filepath, info.st_mode);*/
 			}
 			else
 			{
-				addint(&reply, 2);	/* no such file */
+				add_uint(&reply, 2);	/* no such file */
 			}
 			break;
 		case 10:
 			/* Remove */
-			fh = getfilehandle(request);
-			path = getstring(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			if (unlink(filepath) == 0)
 			{
-				addint(&reply, NFS_OK);
+				add_uint(&reply, NFS_OK);
 				/*fprintf(console, "nfsd: remove = %s\n", filepath);*/
 			}
 			else
 			{
-				addint(&reply, errno);
+				add_uint(&reply, errno);
 			}
 			break;
 		case 11:
@@ -1025,20 +1021,19 @@ struct conn *request;
 			break;
 		case 14:
 			/* MkDir */
-			fh = getfilehandle(request);
-			path = getstring(request);
-			decodepath(fh->pathtokens, filepath);
+			fh = get_filehandle(request, filepath);
+			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			getsattr(request, &info);
+			get_sattr(request, &info);
 			mkdir(filepath, info.st_mode);
 			CHOWN(filepath, info.st_uid, info.st_gid);
 			if (stat(filepath, &info) == 0)
 			{
-				makehandle(filepath, &info, &handle);
-				addint(&reply, NFS_OK);
-				addfilehandle(&reply, &handle);
-				addfattr(&reply, &info);
+				make_filehandle(filepath, &info, &handle);
+				add_uint(&reply, NFS_OK);
+				add_filehandle(&reply, &handle);
+				add_fattr(&reply, &info);
 				/*fprintf(console, "nfsd: mkdir = %s\n", filepath);*/
 			}
 			break;
@@ -1047,9 +1042,9 @@ struct conn *request;
 			break;
 		case 16:
 			/* ReadDir */
-			fh = getfilehandle(request);
-			offset = getuint(request);
-			count = getuint(request);
+			fh = get_filehandle(request, filepath);
+			offset = get_uint(request);
+			count = get_uint(request);
 			/*fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);*/
 			
 			/* clamp to our buffer size */
@@ -1058,27 +1053,26 @@ struct conn *request;
 				
 			/* account for some wrapping costs */
 			count -= 32;
-			decodepath(fh->pathtokens, filepath);
 			d = opendir(filepath);
 			if (d)
 			{
 				n = 0;
-				addint(&reply, NFS_OK);
+				add_uint(&reply, NFS_OK);
 				while ((dir = readdir(d)) != NULL)
 				{
 					/* skip if not past starting point */
 					if (n >= offset)
 					{
 						/* entry follows */
-						addint(&reply, 1);
+						add_uint(&reply, 1);
 						
-						addint(&reply, n);
+						add_uint(&reply, n);
 #ifdef __linux__
-						addstring(&reply, dir->d_name, strlen(dir->d_name));
+						add_string(&reply, dir->d_name, strlen(dir->d_name));
 #else
-						addstring(&reply, dir->d_name, dir->d_namlen);
+						add_string(&reply, dir->d_name, dir->d_namlen);
 #endif
-						addint(&reply, offset + n);
+						add_uint(&reply, offset + n);
 						/*fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);*/
 					}
 	
@@ -1090,17 +1084,17 @@ struct conn *request;
 				closedir(d);
 
 				/* no entry follows */
-				addint(&reply, 0);
+				add_uint(&reply, 0);
 
 				/* complete or run out of room? */
-				addint(&reply, (reply.crp > count) ? 0 : 1);
+				add_uint(&reply, (reply.crp > count) ? 0 : 1);
 			}
 			break;
 		case 17:
 			/* StatFS */
-			addint(&reply, NFS_OK);
-			addint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
-			addint(&reply, BLOCK_SIZE);			/* Block size of FS */
+			add_uint(&reply, NFS_OK);
+			add_uint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
+			add_uint(&reply, BLOCK_SIZE);			/* Block size of FS */
 #ifndef tek
 			/* fake some numbers */
 			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
@@ -1113,9 +1107,9 @@ struct conn *request;
 			disksize = (sirbuf.ssizfr[0] << 16) + (sirbuf.ssizfr[1] << 8) + (sirbuf.ssizfr[2] << 0);
 			freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
 #endif
-			addint(&reply, disksize);					/* Total # of blocks (of the above size) */
-			addint(&reply, freesize);					/* Free blocks */
-			addint(&reply, freesize);					/* Free blocks available to non-priv. users */
+			add_uint(&reply, disksize);					/* Total # of blocks (of the above size) */
+			add_uint(&reply, freesize);					/* Free blocks */
+			add_uint(&reply, freesize);					/* Free blocks available to non-priv. users */
 			break;
 	}
 
@@ -1149,8 +1143,8 @@ char **argv;
 	mountsock = createudpsock(MOUNTD_PORT);
 	nfssock = createudpsock(NFSD_PORT);
 
-	/* cannot continue */
-	if (portmapsock < 0 || mountsock < 0 || nfssock < 0)
+	/* cannot continue (not having portmapping is tolerable) */
+	if (mountsock < 0 || nfssock < 0)
 	{
 		fprintf(console, "cannot bind sockets\n");
 		exit(-2);
