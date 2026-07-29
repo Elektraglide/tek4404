@@ -613,6 +613,8 @@ char *filepath;
 	struct filehandle *ptr = (struct filehandle *)(request->buffer + request->crp);
 	request->crp += sizeof(struct filehandle);
 
+	/* TODO: if we have flushed the stringcache, return NFS3ERR_STALE */
+
 	decodepath(ptr->pathtokens, filepath);
 
 	return ptr;
@@ -866,6 +868,7 @@ struct conn *request;
 			break;
 		case 1:
 			/* GetAttr */
+			/* TODO: deal with NFS3ERR_STALE */
 			fh = get_filehandle(request, filepath);
 			if (stat(filepath, &info) == 0)
 			{
