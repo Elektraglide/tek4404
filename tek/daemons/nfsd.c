@@ -590,19 +590,35 @@ struct conn *request;
 	request->crp += length;
 }
 
-void get_credentials(request)
+void get_credentials(request, verbose)
 struct conn *request;
+int verbose;
 {
 	unsigned int flavour = get_uint(request);
 	unsigned int length = get_uint(request);
 
-	/* log AUTH_UNIX */
-	if (flavour == 1)
+	if (verbose)
 	{
-		unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
-		/* fprintf(console, "get_credentials: AUTH_UNIX: %8.8x: %s\n", ptr[0], ptr+1); */
+		if (flavour == AUTH_NULL)
+		{
+			fprintf(console, "get_credentials: %d AUTH_NULL\n", length);
+		}
+		else
+		if (flavour == AUTH_UNIX)
+		{
+			unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
+			int n;
+			n = ntohl(ptr[1]);
+			fprintf(console, "get_credentials: stamp:%8.8x machinename:'%*s'\n", ptr[0], n, ptr + 2);
+			ptr += n;
+			fprintf(console, "get_credentials: uid:%d gid:%d\n", ntohl(ptr[2]), ntohl(ptr[3]));
+			fprintf(console, "get_credentials: gids: [ ");
+			n = ntohl(ptr[4]);
+			while(n--)
+				fprintf(console, "%d ",ntohl(ptr[5+n]));
+			fprintf(console, "]\n");
+		}
 	}
-	
 	request->crp += length;
 }
 
@@ -712,7 +728,8 @@ struct conn *request;
 	unsigned int prog, vers, prot, port, registeredport;
 	int n;
 	
-	get_credentials(request);
+	/* expecting nullop credentials */
+	get_credentials(request, 0);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -770,7 +787,7 @@ struct conn *request;
 	struct filehandle handle;
 	int n;
 	
-	get_credentials(request);
+	get_credentials(request, 0);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -851,7 +868,7 @@ struct conn *request;
 	DIR *d;
 	struct direct *dir;
 	
-	get_credentials(request);
+	get_credentials(request, 1);
 	get_verifier(request);
 	
 	reply.cwp = 0;
