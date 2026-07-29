@@ -171,7 +171,7 @@ struct conn {
 /* needs to be dynamically resized? */
 struct response {
 	char buffer[TRANSFER_SIZE];
-	int crp;
+	int cwp;
 };
 
 /* well-known RPC prog names */
@@ -322,10 +322,10 @@ void add_uint(reply, val)
 struct response *reply;
 unsigned int val;
 {
-	unsigned int *ptr = (unsigned int *)(reply->buffer + reply->crp);
+	unsigned int *ptr = (unsigned int *)(reply->buffer + reply->cwp);
 
 	*ptr = htonl(val);
-	reply->crp += sizeof(val);
+	reply->cwp += sizeof(val);
 }
 
 
@@ -342,12 +342,12 @@ void add_filehandle(reply, fh)
 struct response *reply;
 struct filehandle *fh;
 {
-	unsigned int *ptr = (unsigned int *)(reply->buffer + reply->crp);
+	unsigned int *ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	int len = sizeof(struct filehandle);
 
 	memcpy(ptr, fh, len);
 	len = (len + 3) & -4;
-	reply->crp += len;
+	reply->cwp += len;
 }
 
 void add_string(reply, string, len)
@@ -358,14 +358,14 @@ int len;
 	char *ptr;
 	
 	add_uint(reply, len);
-	ptr = reply->buffer + reply->crp;
+	ptr = reply->buffer + reply->cwp;
 
 	memcpy(ptr, string, len);
 	ptr[len] = '\0';
 	ptr[len+1] = '\0';
 	ptr[len+2] = '\0';
 	len = (len + 3) & -4;
-	reply->crp += len;
+	reply->cwp += len;
 }
 
 void add_data(reply, data, len)
@@ -376,11 +376,11 @@ int len;
 	unsigned int *ptr;
 
 	add_uint(reply, len);
-	ptr = (unsigned int *)(reply->buffer + reply->crp);
+	ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	
 	memcpy(ptr, data, len);
 	len = (len + 3) & -4;
-	reply->crp += len;
+	reply->cwp += len;
 }
 
 int add_fromfile(reply, fd, len)
@@ -391,16 +391,16 @@ int len;
 	unsigned int *ptr;
 
 	add_uint(reply, len);
-	ptr = (unsigned int *)(reply->buffer + reply->crp);
+	ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	
 	/* clamp to remaining space */
-	if (len > (TRANSFER_SIZE - reply->crp))
-		len = TRANSFER_SIZE - reply->crp;
+	if (len > (TRANSFER_SIZE - reply->cwp))
+		len = TRANSFER_SIZE - reply->cwp;
 	
 	len = read(fd, ptr, len);
 	ptr[-1] = htonl(len);				/* what we actually read */
 	len = (len + 3) & -4;
-	reply->crp += len;
+	reply->cwp += len;
 	
 	return len;
 }
@@ -525,7 +525,7 @@ int prognum;
 	/* fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d\n", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc));
 	*/
 
-	reply.crp = 0;
+	reply.cwp = 0;
 	if (ntohl(header->msg_type) != CALL)
 	{
 		/* corrupted */
@@ -535,7 +535,7 @@ int prognum;
 		add_uint(&reply, 0);		/* opaque_verf */
 		add_uint(&reply, 0);		/* opaque_verf size */
 		add_uint(&reply, GARBAGE_ARGS);
-		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+		sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
 	else
@@ -548,7 +548,7 @@ int prognum;
 		add_uint(&reply, PROG_MISMATCH);
 		add_uint(&reply, 2);
 		add_uint(&reply, 2);
-		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+		sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
 	else
@@ -563,7 +563,7 @@ int prognum;
 		add_uint(&reply, PROG_MISMATCH);
 		add_uint(&reply, prognum);
 		add_uint(&reply, prognum);
-		sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+		sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 		return 0;
 	}
 	
@@ -695,7 +695,7 @@ int port;
 	serv_addr.sin_port = htons(port);
 	n = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
 	if (n < 0) {
-		fprintf(console, "bind: %s\n",strerror(errno));
+		fprintf(console, "bind: port %d: %s\n", port, strerror(errno));
 		close(sock);
 		return -2;
 	}
@@ -715,7 +715,7 @@ struct conn *request;
 	get_credentials(request);
 	get_verifier(request);
 	
-	reply.crp = 0;
+	reply.cwp = 0;
 	add_uint(&reply, ntohl(header->xid));
 	add_uint(&reply, REPLY);
 	add_uint(&reply, MSG_ACCEPTED);
@@ -753,8 +753,8 @@ struct conn *request;
 			
 	}
 
-	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
-	if(n != reply.crp)
+	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.cwp)
 	{
 			fprintf(console, "portmapd: sendto: %s\n",strerror(errno));
 	}
@@ -773,7 +773,7 @@ struct conn *request;
 	get_credentials(request);
 	get_verifier(request);
 	
-	reply.crp = 0;
+	reply.cwp = 0;
 	add_uint(&reply, ntohl(header->xid));
 	add_uint(&reply, REPLY);
 	add_uint(&reply, MSG_ACCEPTED);
@@ -796,11 +796,11 @@ struct conn *request;
 					make_filehandle(path, &info, &handle);
 					add_uint(&reply, NFS_OK);
 					add_filehandle(&reply, &handle);
-					fprintf(console, "mountd: mount Path = %s\n",path);
+					fprintf(console, "mountd: mount Path = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
 					if (header->vers == htonl(3))
 					{
-						add_uint(&reply, 2);
-						add_uint(&reply, AUTH_NULL);
+						add_uint(&reply, 1);	/* maxlen */
+						add_uint(&reply, 1);	/* len */
 						add_uint(&reply, AUTH_UNIX);
 					}
 				}
@@ -824,12 +824,13 @@ struct conn *request;
 			path = get_string(request);
 			release_filehandle(path);
 			add_uint(&reply, NFS_OK);
-			/*fprintf(console, "mountd: unmount Path = %s\n",path);*/
+			fprintf(console, "mountd: unmount Path = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
+			
 			break;
 	}
 
-	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
-	if(n != reply.crp)
+	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.cwp)
 	{
 			fprintf(console, "mountd: sendto: %s\n",strerror(errno));
 	}
@@ -853,7 +854,7 @@ struct conn *request;
 	get_credentials(request);
 	get_verifier(request);
 	
-	reply.crp = 0;
+	reply.cwp = 0;
 	add_uint(&reply, ntohl(header->xid));
 	add_uint(&reply, REPLY);
 	add_uint(&reply, MSG_ACCEPTED);
@@ -1111,7 +1112,7 @@ struct conn *request;
 	
 					n++;
 					
-					if (reply.crp > count)
+					if (reply.cwp > count)
 						break;
 				}
 				closedir(d);
@@ -1120,7 +1121,7 @@ struct conn *request;
 				add_uint(&reply, 0);
 
 				/* complete or run out of room? */
-				add_uint(&reply, (reply.crp > count) ? 0 : 1);
+				add_uint(&reply, (reply.cwp > count) ? 0 : 1);
 			}
 			break;
 		case 17:
@@ -1146,8 +1147,8 @@ struct conn *request;
 			break;
 	}
 
-	n = sendto(request->sock, reply.buffer, reply.crp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
-	if(n != reply.crp)
+	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.cwp)
 	{
 			fprintf(console, "nfsd: sendto: %s\n",strerror(errno));
 	}
@@ -1250,9 +1251,11 @@ char **argv;
 			if (request.len > 0)
 			{
 				/* validate */
-				if (validate(&request, NFSD))
+				n = validate(&request, NFSD);
+				if (n)
 				{
-					nfsprog(&request);
+					if (n == 2)
+						 nfsprog(&request);
 				}
 			}
 		}
