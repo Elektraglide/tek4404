@@ -135,7 +135,7 @@ enum modes
 	WOTH	= 2,
 	XOTH	= 1
 };
-		
+
 struct rpcheader {
 	unsigned int xid;
 	unsigned int msg_type;
@@ -146,7 +146,7 @@ struct rpcheader {
 };
 
 struct filehandle {
-	unsigned int index;
+	unsigned int length;		/* embedded length for NFSv3 support */
 	unsigned int inode;
 	unsigned int dev;
 	unsigned char pathtokens[20];
@@ -320,6 +320,16 @@ unsigned int val;
 	reply->crp += sizeof(val);
 }
 
+
+void add_nfstime(reply, seconds)
+struct response *reply;
+unsigned int seconds;
+{
+	
+	add_uint(reply, seconds);
+	add_uint(reply, 0);
+}
+
 void add_filehandle(reply, fh)
 struct response *reply;
 struct filehandle *fh;
@@ -387,7 +397,7 @@ int len;
 	return len;
 }
 
-unsigned int nfsmode2unix(nfsmode)
+unsigned int nfsmode2host(nfsmode)
 unsigned int nfsmode;
 {
 	unsigned int perms = 0;
@@ -419,42 +429,49 @@ unsigned int nfsmode;
 #endif
 	}
 	
-	fprintf(console, "nfsmode2unix:  %4.4x => %4.4x\n", nfsmode,perms);
+	fprintf(console, "nfsmode2host:  %4.4x => %4.4x\n", nfsmode,perms);
 	return perms;
+}
+
+unsigned int host2nfsmode(hostperms)
+unsigned int hostperms;
+{
+	unsigned int nfsperms = 0;
+
+	if (hostperms & S_IREAD)
+		nfsperms |= ROWN;
+	if (hostperms & S_IWRITE)
+		nfsperms |= WOWN;
+	if (hostperms & S_IEXEC)
+		nfsperms |= XOWN;
+	if (hostperms & S_IOREAD)
+		nfsperms |= ROTH;
+	if (hostperms & S_IOWRITE)
+		nfsperms |= WOTH;
+	if (hostperms & S_IOEXEC)
+		nfsperms |= XOTH;
+#ifndef tek
+	if (hostperms & S_IRGRP)
+		nfsperms |= RGRP;
+	if (hostperms & S_IWGRP)
+		nfsperms |= WGRP;
+	if (hostperms & S_IXGRP)
+		nfsperms |= XGRP;
+#endif
+
+	return nfsperms;
 }
 
 void add_fattr(reply, info)
 struct response *reply;
 struct stat *info;
 {
-	unsigned int nfsperms = 0;
-
-	/* translate to NFS bits */
-	if (info->st_perm & S_IREAD)
-		nfsperms |= ROWN;
-	if (info->st_perm & S_IWRITE)
-		nfsperms |= WOWN;
-	if (info->st_perm & S_IEXEC)
-		nfsperms |= XOWN;
-	if (info->st_perm & S_IOREAD)
-		nfsperms |= ROTH;
-	if (info->st_perm & S_IOWRITE)
-		nfsperms |= WOTH;
-	if (info->st_perm & S_IOEXEC)
-		nfsperms |= XOTH;
-#ifndef tek
-	if (info->st_perm & S_IRGRP)
-		nfsperms |= RGRP;
-	if (info->st_perm & S_IWGRP)
-		nfsperms |= WGRP;
-	if (info->st_perm & S_IXGRP)
-		nfsperms |= XGRP;
-#endif
+	unsigned int nfsperms = host2nfsmode(info->st_perm);
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
 		add_uint(reply, NFDIR);
-		add_uint(reply, DIR_NFS | nfsperms);			/* info->st_perm */
+		add_uint(reply, DIR_NFS | nfsperms);
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
 #ifdef tek
@@ -465,15 +482,7 @@ struct stat *info;
 		add_uint(reply, (unsigned int)info->st_size);
 		add_uint(reply, BLOCK_SIZE);
 		add_uint(reply, info->st_dev);
-		add_uint(reply, FDNPB);
-		add_uint(reply, 1);	/* fsid */
-		add_uint(reply, (unsigned int)info->st_ino);
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
+		add_uint(reply, BLOCK_SIZE / FDNPB);
 	}
 	else
 	{
@@ -490,15 +499,14 @@ struct stat *info;
 		add_uint(reply, BLOCK_SIZE);
 		add_uint(reply, info->st_dev);
 		add_uint(reply, ((unsigned int)info->st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
-		add_uint(reply, 1);	/* fsid */
-		add_uint(reply, (unsigned int)info->st_ino);
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
-		add_uint(reply, (unsigned int)info->st_mtime);
-		add_uint(reply, 0);	/* usec */
 	}
+	add_uint(reply, 1);	/* fsid */
+	add_uint(reply, (unsigned int)info->st_ino);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+}
+
 }
 
 int validate(request, prognum)
@@ -554,7 +562,8 @@ int prognum;
 	}
 	
 	request->crp += sizeof(struct rpcheader);
-	return 1;
+
+	return ntohl(header->vers);
 }
 
 unsigned int get_uint(request)
@@ -621,7 +630,7 @@ void get_sattr(request, info)
 struct conn *request;
 struct stat *info;
 {
-		info->st_mode = nfsmode2unix(get_uint(request));
+		info->st_mode = nfsmode2host(get_uint(request));
 		info->st_uid = get_uint(request);
 #ifdef tek
 		getuint(request);	/* no group */
@@ -653,6 +662,7 @@ struct filehandle *handle;
 	
 	/* make a file handle */
 	memset(handle, 0, sizeof(struct filehandle));
+	handle->length = htonl(sizeof(struct filehandle) - 4);
 	handle->inode = info->st_ino;
 	handle->dev = info->st_dev;
 	encodepath(path, handle->pathtokens);
@@ -771,16 +781,30 @@ struct conn *request;
 		case 1:
 			/* Add Mount */
 			path = get_string(request);
-			if (stat(path, &info) == 0 && ((info.st_mode & S_IFDIR) == S_IFDIR))
+			if (stat(path, &info) == 0)
 			{
-				make_filehandle(path, &info, &handle);
-				add_uint(&reply, NFS_OK);
-				add_filehandle(&reply, &handle);
-				/*fprintf(console, "mountd: mount Path = %s\n",path);*/
+				if ((info.st_mode & S_IFDIR) == S_IFDIR)
+				{
+					make_filehandle(path, &info, &handle);
+					add_uint(&reply, NFS_OK);
+					add_filehandle(&reply, &handle);
+					fprintf(console, "mountd: mount Path = %s\n",path);
+					if (header->vers == htonl(3))
+					{
+						add_uint(&reply, 2);
+						add_uint(&reply, AUTH_NULL);
+						add_uint(&reply, AUTH_UNIX);
+					}
+				}
+				else
+				{
+				add_uint(&reply, NFSERR_NOTDIR);
+				add_uint(&reply, 0);
+				}
 			}
 			else
 			{
-				add_uint(&reply, NFSERR_NOENT);	/* no such directory */
+				add_uint(&reply, NFSERR_NOENT);
 				add_uint(&reply, 0);
 			}
 			break;
@@ -889,7 +913,7 @@ struct conn *request;
 			}
 			else
 			{
-				add_uint(&reply, 2);	/* no such file */
+				add_uint(&reply, NFSERR_NOENT);	/* no such file */
 				add_uint(&reply, 0);
 			}
 			break;
@@ -1052,7 +1076,7 @@ struct conn *request;
 				count = TRANSFER_SIZE;
 				
 			/* account for some wrapping costs */
-			count -= 32;
+			count -= 12;
 			d = opendir(filepath);
 			if (d)
 			{
