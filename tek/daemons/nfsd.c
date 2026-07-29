@@ -82,6 +82,14 @@ enum accept_stat {
  	GARBAGE_ARGS = 4   /* procedure can't decode params */
 };
 
+enum auth_flavor {
+	AUTH_NULL       = 0,
+	AUTH_UNIX       = 1,
+	AUTH_SHORT      = 2,
+	AUTH_DES        = 3
+	/* and more to be defined */
+};
+         
 enum NFSStatus
 {
 		NFS_OK				= 0,
@@ -505,8 +513,6 @@ struct stat *info;
 	add_nfstime(reply, (unsigned int)info->st_mtime);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
-}
-
 }
 
 int validate(request, prognum)
