@@ -1611,7 +1611,7 @@ struct conn *request;
 					n = 0;
 					add_uint(&reply, NFS_OK);
 					add_post_fattr3(&reply, &info);
-					add_cookie3(&reply, cookieverf);
+					add_cookie3(&reply, cookieverf + 1);
 					while ((dir = readdir(d)) != NULL)
 					{
 						/* skip if not past starting point */
@@ -1620,13 +1620,13 @@ struct conn *request;
 							/* entry follows */
 							add_uint(&reply, 1);
 							
-							add_uint(&reply, n);
+							add_uint64(&reply, n);
 	#ifdef __linux__
 							add_string(&reply, dir->d_name, strlen(dir->d_name));
 	#else
 							add_string(&reply, dir->d_name, dir->d_namlen);
 	#endif
-							add_uint(&reply, offset + n);
+							add_uint64(&reply, offset + n);
 							/*fprintf(console, "nfsd: readdir3: %3d: %s\n", offset + n, dir->d_name);*/
 						}
 		
@@ -1652,9 +1652,9 @@ struct conn *request;
 			}
 			else
 			{
-				add_uint(&reply, NFSERR_EXIST);
+				add_uint(&reply, NFSERR_NOENT);
 				add_post_fattr3(&reply, &info);
-				fprintf(console, "nfsd: ReadDir: %s  NFS3ERR_EXIST\n", filepath);
+				fprintf(console, "nfsd: ReadDir: %s  NFSERR_NOENT\n", filepath);
 			}
 			break;
 		case 17:
