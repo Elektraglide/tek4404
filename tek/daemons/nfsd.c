@@ -435,6 +435,31 @@ int len;
 	return len;
 }
 
+int add_fromfile3(reply, fd, len)
+struct response *reply;
+int fd;
+int len;
+{
+	unsigned int *ptr;
+	int rc;
+	
+	add_uint(reply, len);
+	add_uint(reply, 0);
+	ptr = (unsigned int *)(reply->buffer + reply->cwp);
+	
+	/* clamp to remaining space */
+	if (len > (TRANSFER_SIZE - reply->cwp))
+		len = TRANSFER_SIZE - reply->cwp;
+	
+	rc = read(fd, ptr, len);
+	ptr[-2] = htonl(rc);				/* what we actually read */
+	ptr[-1] = (rc < len);					/* eof */
+	len = (len + 3) & -4;
+	reply->cwp += len;
+	
+	return len;
+}
+
 unsigned int nfsmode2host(nfsmode)
 unsigned int nfsmode;
 {
@@ -596,6 +621,28 @@ int fsid;
 	add_uint(reply, 1);
 	add_fattr3(reply, info, fsid);
 }
+
+void add_post_wccattr3(reply, info)
+struct response *reply;
+struct stat *info;
+{
+	add_uint(reply, 1);
+	add_uint64(reply, (unsigned int)info->st_size);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_ctime);
+}
+
+void add_wcc_data(reply, preinfo, postinfo)
+struct response *reply;
+struct stat *preinfo;
+struct stat *postinfo;
+{
+	add_post_wccattr3(reply, preinfo);
+
+	if (postinfo)
+		add_post_wccattr3(reply, postinfo);
+	else
+		add_uint(reply, 0);
 }
 
 int validate(request, prognum)
@@ -665,13 +712,15 @@ struct conn *request;
 	return val;
 }
 
-unsigned int get_cookie3(request)
+unsigned int get_uint64(request)
 struct conn *request;
 {
 	get_uint(request);
-	unsigned int cookie = get_uint(request);
-	return cookie;
+	unsigned int val = get_uint(request);
+	return val;
 }
+
+#define get_cookie3 get_uint64
 
 void get_verifier(request)
 struct conn *request;
@@ -710,6 +759,7 @@ int verbose;
 			fprintf(console, "]\n");
 		}
 	}
+
 	request->crp += length;
 }
 
@@ -778,6 +828,16 @@ struct stat *info;
 		info->st_atime = get_uint(request);	get_uint(request);
 #endif
 		info->st_mtime = get_uint(request);	get_uint(request);
+}
+
+void get_sattrguard3(request, info)
+struct conn *request;
+struct stat *info;
+{
+	if (get_uint(request))
+	{
+		info->st_ctime = get_uint(request);	get_uint(request);
+	}
 }
 
 void release_filehandle(path)
@@ -1000,7 +1060,7 @@ struct conn *request;
 {
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
-	struct stat info;
+	struct stat info,reqinfo;
 	char *path;
 	char filepath[1024];
 	int disksize,freesize;
@@ -1010,7 +1070,7 @@ struct conn *request;
 	DIR *d;
 	struct direct *dir;
 	
-	get_credentials(request, 1);
+	get_credentials(request, LOGCREDS);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -1045,13 +1105,14 @@ struct conn *request;
 		case 2:
 			/* SetAttr */
 			fh = get_filehandle(request, filepath);
-			get_sattr(request, &info);
-			if (info.st_mode != -1)
-				chmod(filepath, info.st_mode);
-			if (info.st_uid != -1)
-				CHOWN(filepath, info.st_uid, info.st_gid);
-			if (info.st_size == 0)
-				truncate(filepath, info.st_size);
+			get_sattr(request, &reqinfo);
+			if (reqinfo.st_mode != -1)
+				chmod(filepath, reqinfo.st_mode);
+			if (reqinfo.st_uid != -1)
+				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
+			if (reqinfo.st_size == 0)
+				truncate(filepath, reqinfo.st_size);
+
 			if (stat(filepath, &info) == 0)
 			{
 				add_uint(&reply, NFS_OK);
@@ -1100,15 +1161,20 @@ struct conn *request;
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
-					/* TODO: check file permissions */
-
-					fd = open(filepath, O_RDONLY);
-					rc = lseek(fd, offset, SEEK_SET);
-					
-					add_uint(&reply, NFS_OK);
-					add_fattr(&reply, &info);
-					add_fromfile(&reply, fd, count);
-					close(fd);
+					if (info.st_perm & S_IREAD)
+					{
+						fd = open(filepath, O_RDONLY);
+						rc = lseek(fd, offset, SEEK_SET);
+						
+						add_uint(&reply, NFS_OK);
+						add_fattr(&reply, &info, fh->fsid);
+						add_fromfile(&reply, fd, count);
+						close(fd);
+					}
+					else
+					{
+						add_uint(&reply, NFSERR_ACCES);
+					}
 				}
 				else
 				{
@@ -1130,27 +1196,32 @@ struct conn *request;
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
-					/* TODO: check file permissions */
-
-					fd = open(filepath, O_WRONLY);
-					rc = lseek(fd, offset, SEEK_SET);
-					count = get_uint(request);
-					rc = write(fd, request->buffer + request->crp, count);
-					/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
-					close(fd);
-					if (rc == count)
+					if (info.st_perm & S_IWRITE)
 					{
-						add_uint(&reply, NFS_OK);
+						fd = open(filepath, O_WRONLY);
+						rc = lseek(fd, offset, SEEK_SET);
+						count = get_uint(request);
+						rc = write(fd, request->buffer + request->crp, count);
+						/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
+						close(fd);
+						if (rc == count)
+						{
+							add_uint(&reply, NFS_OK);
 
-						/* quick update of stat */
-						if (offset+rc > info.st_size)
-							info.st_size = offset + rc;
+							/* quick update of stat */
+							if (offset+rc > info.st_size)
+								info.st_size = offset + rc;
 
-						add_fattr(&reply, &info);
+							add_fattr(&reply, &info, fh->fsid);
+						}
+						else
+						{
+							add_uint(&reply, NFSERR_IO);
+						}
 					}
 					else
 					{
-						add_uint(&reply, NFSERR_IO);
+							add_uint(&reply, NFSERR_ACCES);
 					}
 				}
 				else
@@ -1220,9 +1291,10 @@ struct conn *request;
 			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			get_sattr(request, &info);
-			mkdir(filepath, info.st_mode);
-			CHOWN(filepath, info.st_uid, info.st_gid);
+			get_sattr(request, &reqinfo);
+			mkdir(filepath, reqinfo.st_mode);
+			CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
+
 			if (stat(filepath, &info) == 0)
 			{
 				make_filehandle(filepath, &info, &handle);
@@ -1334,7 +1406,7 @@ struct conn *request;
 {
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
-	struct stat info;
+	struct stat info, reqinfo,preinfo;
 	char *path;
 	char dirpath[1024];
 	char filepath[1024];
@@ -1345,7 +1417,7 @@ struct conn *request;
 	DIR *d;
 	struct direct *dir;
 	
-	get_credentials(request, header->proc);
+	get_credentials(request, LOGCREDS && header->proc);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -1382,13 +1454,15 @@ struct conn *request;
 		case 2:
 			/* SetAttr */
 			fh = get_filehandle(request, filepath);
-			get_sattr3(request, &info);
-			if (info.st_mode != -1)
-				chmod(filepath, info.st_mode);
-			if (info.st_uid != -1)
-				CHOWN(filepath, info.st_uid, info.st_gid);
-			if (info.st_size == 0)
-				truncate(filepath, info.st_size);
+			get_sattr3(request, &reqinfo);
+			get_sattrguard3(request, &reqinfo);
+			if (reqinfo.st_mode != -1)
+				chmod(filepath, reqinfo.st_mode);
+			if (reqinfo.st_uid != -1)
+				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
+			if (reqinfo.st_size == 0)
+				truncate(filepath, reqinfo.st_size);
+
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
 			{
@@ -1461,32 +1535,34 @@ struct conn *request;
 		case 6:
 			/* Read */
 			fh = get_filehandle(request, filepath);
-			offset = get_uint(request);
+			offset = get_uint64(request);
 			count = get_uint(request);
-			n = get_uint(request);
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
 			{
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					/* TODO: check file permissions */
+			fprintf(console, "nfsd: read3 = %s off=%d count=%d size=%d on fsid=%d\n", filepath, offset,count, info.st_size, fh->fsid);
 
 					fd = open(filepath, O_RDONLY);
 					rc = lseek(fd, offset, SEEK_SET);
 					
 					add_uint(&reply, NFS_OK);
-					add_fattr(&reply, &info);
-					add_fromfile(&reply, fd, count);
+					add_post_fattr3(&reply, &info, fh->fsid);
+					add_fromfile3(&reply, fd, count);
 					close(fd);
 				}
 				else
 				{
 					add_uint(&reply, NFSERR_ISDIR);
+					add_uint(&reply, 0);
 				}
 			}
 			else
 			{
-				add_uint(&reply, 2);	/* no such file */
+				add_uint(&reply, NFSERR_NOENT);
+				add_uint(&reply, 0);
 			}
 			break;
 		case 7:
@@ -1535,12 +1611,21 @@ struct conn *request;
 			break;
 		case 8:
 			/* Create */
-			fh = get_filehandle(request, filepath);
+			fh = get_filehandle(request, dirpath);
+			if (stat(dirpath, &preinfo) < 0)
+			{
+				add_uint(&reply, NFSERR_NOENT);
+				add_uint(&reply, 0);
+				add_uint(&reply, 0);
+				fprintf(console, "nfsd: Create: %s  NFSERR_NOENT\n", dirpath);
+				break;
+			}
 			path = get_string(request);
+			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			how = get_uint(request);
-			get_sattr(request, &info);
+			get_sattr(request, &reqinfo);
 			if (how > UNCHECKED)
 			{
 				if (stat(filepath, &info) == 0)
@@ -1551,14 +1636,15 @@ struct conn *request;
 					break;
 				}
 			}
-			fd = creat(filepath, info.st_mode);
+			fd = creat(filepath, reqinfo.st_mode);
 			close(fd);
-			if (info.st_mode != -1)
-				chmod(filepath, info.st_mode);
-			if (info.st_uid != -1)
-				CHOWN(filepath, info.st_uid, info.st_gid);
-			if (info.st_size == 0)
-				truncate(filepath, info.st_size);
+			if (reqinfo.st_mode != -1)
+				chmod(filepath, reqinfo.st_mode);
+			if (reqinfo.st_uid != -1)
+				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
+			if (reqinfo.st_size == 0)
+				truncate(filepath, reqinfo.st_size);
+
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
 			{
@@ -1567,21 +1653,36 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_fattr3(&reply, &info, fh->fsid);
+
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
+				fprintf(console, "nfsd: create3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
 			}
 			else
 			{
-				add_uint(&reply, 2);	/* no such file */
+				add_uint(&reply, NFSERR_ACCES);
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
 			}
 			break;
 		case 9:
 			/* MkDir */
-			fh = get_filehandle(request, filepath);
+			fh = get_filehandle(request, dirpath);
+			if (stat(dirpath, &preinfo) < 0)
+			{
+				add_uint(&reply, NFSERR_NOENT);
+				add_uint(&reply, 0);
+				fprintf(console, "nfsd: MkDir: %s  NFSERR_NOENT\n", dirpath);
+				break;
+			}
 			path = get_string(request);
+			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			get_sattr(request, &info);
-			mkdir(filepath, info.st_mode);
-			CHOWN(filepath, info.st_uid, info.st_gid);
+			get_sattr(request, &reqinfo);
+			mkdir(filepath, reqinfo.st_mode);
+			CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
+			
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
 			{
@@ -1590,6 +1691,16 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_post_fattr3(&reply, &info, fh->fsid);
+
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
+				fprintf(console, "nfsd: mkdir3 = %s on fsid=%d\n", filepath, fh->fsid);
+			}
+			else
+			{
+				add_uint(&reply, NFSERR_ACCES);
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
 			}
 			break;
 		case 10:
@@ -1632,7 +1743,7 @@ struct conn *request;
 			offset = get_cookie3(request);
 			cookieverf = get_cookie3(request);
 			count = get_uint(request);
-			fprintf(console, "nfsd: readdir3: offset = %d count = %d\n", offset, count);
+			fprintf(console, "nfsd: readdir3: offset = %d count = %d on fsid=%d\n", offset, count, fh->fsid);
 			
 			/* clamp to our buffer size */
 			if (count > TRANSFER_SIZE)
