@@ -805,9 +805,9 @@ struct stat *info;
 #ifdef tek
 		getuint(request);	getuint(request);	/* no access time */
 #else
-		info->st_atime = get_uint(request);	get_uint(request);
+		get_uint(request); info->st_atime = get_uint(request);
 #endif
-		info->st_mtime = get_uint(request);	get_uint(request);
+		get_uint(request); info->st_mtime = get_uint(request);
 }
 
 void get_sattr3(request, info)
@@ -825,9 +825,9 @@ struct stat *info;
 #ifdef tek
 		getuint(request);	getuint(request);	/* no access time */
 #else
-		info->st_atime = get_uint(request);	get_uint(request);
+		get_uint(request); info->st_atime = get_uint(request);
 #endif
-		info->st_mtime = get_uint(request);	get_uint(request);
+		get_uint(request); info->st_mtime = get_uint(request);
 }
 
 void get_sattrguard3(request, info)
@@ -836,7 +836,7 @@ struct stat *info;
 {
 	if (get_uint(request))
 	{
-		info->st_ctime = get_uint(request);	get_uint(request);
+		get_uint(request); info->st_ctime = get_uint(request);
 	}
 }
 
