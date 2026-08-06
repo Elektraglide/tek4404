@@ -102,6 +102,9 @@ enum NFSStatus
 		NFSERR_NODEV		= 19,
 		NFSERR_NOTDIR		= 20,
 		NFSERR_ISDIR		= 21,
+		
+		NFS3ERR_INVAL		= 22,
+		
 		NFSERR_FBIG			= 27,
 		NFSERR_NOSPC		= 28,
 		NFSERR_ROFS			= 30,
@@ -154,6 +157,15 @@ GUARDED = 1,
 EXCLUSIVE = 2
 };
 
+enum time_how {
+DONT_CHANGE = 0,
+SET_TO_SERVER_TIME = 1,
+SET_TO_CLIENT_TIME = 2
+};
+
+#define NFS_TRUE 1
+#define NFS_FALSE 0
+
 struct rpcheader {
 	unsigned int xid;
 	unsigned int msg_type;
@@ -197,6 +209,8 @@ enum {
 #define MOUNTD_PORT 6135
 #define NFSD_PORT 21049
 
+/* logging credential details */
+#define LOGCREDS 0
 
 FILE *console;
 
@@ -380,6 +394,14 @@ struct filehandle *fh;
 	reply->cwp += len;
 }
 
+void add_post_filehandle(reply, fh)
+struct response *reply;
+struct filehandle *fh;
+{
+	add_uint(reply, 1);
+	add_filehandle(reply, fh);
+}
+
 void add_string(reply, string, len)
 struct response *reply;
 char *string;
@@ -419,6 +441,7 @@ int fd;
 int len;
 {
 	unsigned int *ptr;
+	int rc;
 
 	add_uint(reply, len);
 	ptr = (unsigned int *)(reply->buffer + reply->cwp);
@@ -427,12 +450,12 @@ int len;
 	if (len > (TRANSFER_SIZE - reply->cwp))
 		len = TRANSFER_SIZE - reply->cwp;
 	
-	len = read(fd, ptr, len);
-	ptr[-1] = htonl(len);				/* what we actually read */
-	len = (len + 3) & -4;
-	reply->cwp += len;
+	rc = read(fd, ptr, len);
+	ptr[-1] = htonl(rc);				/* what we actually read */
+	rc = (rc + 3) & -4;
+	reply->cwp += rc;
 	
-	return len;
+	return rc;
 }
 
 int add_fromfile3(reply, fd, len)
@@ -445,6 +468,7 @@ int len;
 	
 	add_uint(reply, len);
 	add_uint(reply, 0);
+	add_uint(reply, 0);
 	ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	
 	/* clamp to remaining space */
@@ -452,12 +476,15 @@ int len;
 		len = TRANSFER_SIZE - reply->cwp;
 	
 	rc = read(fd, ptr, len);
-	ptr[-2] = htonl(rc);				/* what we actually read */
-	ptr[-1] = (rc < len);					/* eof */
-	len = (len + 3) & -4;
-	reply->cwp += len;
+	ptr[-3] = htonl(rc);				/* what we actually read */
+	ptr[-2] = (rc < len);				/* eof */
 	
-	return len;
+	/* variable length array */
+	ptr[-1] = htonl(rc);
+	rc = (rc + 3) & -4;
+	reply->cwp += rc;
+	
+	return rc;
 }
 
 unsigned int nfsmode2host(nfsmode)
@@ -640,7 +667,7 @@ struct stat *postinfo;
 	add_post_wccattr3(reply, preinfo);
 
 	if (postinfo)
-		add_post_wccattr3(reply, postinfo);
+		add_post_fattr3(reply, postinfo);
 	else
 		add_uint(reply, 0);
 }
@@ -814,20 +841,52 @@ void get_sattr3(request, info)
 struct conn *request;
 struct stat *info;
 {
+	int time_how;
+	
+	info->st_mode = -1;
+	if (get_uint(request))
 		info->st_mode = nfsmode2host(get_uint(request));
+		
+	info->st_uid = -1;
+	if (get_uint(request))
 		info->st_uid = get_uint(request);
+	if (get_uint(request))
 #ifdef tek
-		getuint(request);	/* no group */
+			getuint(request);	/* no group */
 #else
-		info->st_gid = get_uint(request);
+			info->st_gid = get_uint(request);
 #endif
+
+	info->st_size = -1;
+	if (get_uint(request))
+	{
 		get_uint(request); info->st_size = get_uint(request);
+	}
+	
+	time_how = get_uint(request);
 #ifdef tek
+	if (time_how == SET_TO_CLIENT_TIME)
+	{
 		getuint(request);	getuint(request);	/* no access time */
+	}
 #else
+	if (time_how == SET_TO_SERVER_TIME)
+		info->st_atime = time(NULL);
+	else
+	if (time_how == SET_TO_CLIENT_TIME)
+	{
 		get_uint(request); info->st_atime = get_uint(request);
+	}
 #endif
+	
+	time_how = get_uint(request);
+	if (time_how == SET_TO_SERVER_TIME)
+		info->st_mtime = time(NULL);
+	else
+	if (time_how == SET_TO_CLIENT_TIME)
+	{
 		get_uint(request); info->st_mtime = get_uint(request);
+	}
 }
 
 void get_sattrguard3(request, info)
@@ -1088,7 +1147,7 @@ struct conn *request;
 			break;
 		case 1:
 			/* GetAttr */
-			/* TODO: deal with NFS3ERR_STALE */
+			/* TODO: deal with NFSERR_STALE */
 			fh = get_filehandle(request, filepath);
 			if (stat(filepath, &info) == 0)
 			{
@@ -1499,7 +1558,8 @@ struct conn *request;
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);	/* no such file */
-				add_uint(&reply, 0);
+				stat(dirpath, &info);
+				add_post_fattr3(&reply, &info, fh->fsid);
 			}
 			break;
 		case 4:
@@ -1518,7 +1578,12 @@ struct conn *request;
 						rc &= ~(ACCESS3_READ | ACCESS3_LOOKUP);
 					if (!(info.st_perm & S_IWRITE))
 						rc &= ~(ACCESS3_MODIFY | ACCESS3_EXTEND);
-						
+
+					if ((info.st_mode & S_IFDIR) == S_IFDIR)
+					{
+						rc |= (ACCESS3_READ | ACCESS3_LOOKUP);
+					}
+
 					add_uint(&reply, rc );
 					fprintf(console, "nfsd: access3 = %s perm=%4.4x on fsid=%d\n", filepath, n, fh->fsid);
 			}
@@ -1531,6 +1596,8 @@ struct conn *request;
 			break;
 		case 5:
 			/* ReadLink */
+			add_uint(&reply, NFS3ERR_NOTSUPP);
+			add_uint(&reply, 0);
 			break;
 		case 6:
 			/* Read */
@@ -1555,7 +1622,7 @@ struct conn *request;
 				}
 				else
 				{
-					add_uint(&reply, NFSERR_ISDIR);
+					add_uint(&reply, NFS3ERR_INVAL);
 					add_uint(&reply, 0);
 				}
 			}
@@ -1568,35 +1635,50 @@ struct conn *request;
 		case 7:
 			/* Write */
 			fh = get_filehandle(request, filepath);
-			n = get_uint(request);
-			offset = get_uint(request);
-			n = get_uint(request);
+			offset = get_uint64(request);
+			count = get_uint(request);
+			how = get_uint(request);
 			memset(&info, 0, sizeof(info));
-			if (stat(filepath, &info) == 0)
+			if (stat(filepath, &preinfo) == 0)
 			{
-				if ((info.st_mode & S_IFREG) == S_IFREG)
+				if ((preinfo.st_mode & S_IFREG) == S_IFREG)
 				{
-					/* TODO: check file permissions */
-
-					fd = open(filepath, O_WRONLY);
-					rc = lseek(fd, offset, SEEK_SET);
-					count = get_uint(request);
-					rc = write(fd, request->buffer + request->crp, count);
-					/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
-					close(fd);
-					if (rc == count)
+					if (how == 0)	/* UNSTABLE */
 					{
-						add_uint(&reply, NFS_OK);
+						fprintf(console, "UNSTABLE mode ignored\n");
+					}
+				
+					if (info.st_perm & S_IWRITE)
+					{
+						rc = 0;
+						if (count > 0)
+						{
+							fd = open(filepath, O_WRONLY);
+							rc = lseek(fd, offset, SEEK_SET);
+							rc = write(fd, request->buffer + request->crp, count);
+							/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
+							close(fd);
+						}
+						if (rc >= 0)
+						{
+							add_uint(&reply, NFS_OK);
 
-						/* quick update of stat */
-						if (offset+rc > info.st_size)
-							info.st_size = offset + rc;
-
-						add_fattr(&reply, &info, fh->fsid);
+							stat(filepath, &info);
+							add_wcc_data(&reply, &preinfo, &info);
+							add_uint64(&reply, rc);
+							add_uint(&reply, 2);			/* FILE_SYNC */
+							add_uint64(&reply, 0);		/* writeverf3 */
+						}
+						else
+						{
+							add_uint(&reply, NFSERR_IO);
+						}
 					}
 					else
 					{
-						add_uint(&reply, NFSERR_IO);
+							add_uint(&reply, NFSERR_ACCES);
+							add_uint(&reply, 0);
+							add_uint(&reply, 0);
 					}
 				}
 				else
@@ -1617,7 +1699,7 @@ struct conn *request;
 				add_uint(&reply, NFSERR_NOENT);
 				add_uint(&reply, 0);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: Create: %s  NFSERR_NOENT\n", dirpath);
+				fprintf(console, "nfsd: Create3: %s  NFSERR_NOENT\n", dirpath);
 				break;
 			}
 			path = get_string(request);
@@ -1625,24 +1707,37 @@ struct conn *request;
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			how = get_uint(request);
-			get_sattr(request, &reqinfo);
-			if (how > UNCHECKED)
+			if (how != EXCLUSIVE)
+			{
+				get_sattr3(request, &reqinfo);
+				fprintf(console, "CREATE3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
+			}
+			else
+			{
+				add_uint(&reply, NFS3ERR_NOTSUPP);
+				add_uint(&reply, 0);
+				fprintf(console, "nfsd: Create3: %s  NFS3ERR_NOTSUPP\n", dirpath);
+				break;
+			}
+
+			if (how == GUARDED)
 			{
 				if (stat(filepath, &info) == 0)
 				{
 					add_uint(&reply, NFSERR_EXIST);
 					add_post_fattr3(&reply, &info, fh->fsid);
-					fprintf(console, "nfsd: Create: %s  NFS3ERR_EXIST\n", filepath);
+					fprintf(console, "nfsd: Create3: %s  NFS3ERR_EXIST\n", filepath);
 					break;
 				}
 			}
+
 			fd = creat(filepath, reqinfo.st_mode);
 			close(fd);
 			if (reqinfo.st_mode != -1)
 				chmod(filepath, reqinfo.st_mode);
 			if (reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size == 0)
+			if (reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			memset(&info, 0, sizeof(info));
@@ -1651,12 +1746,12 @@ struct conn *request;
 				make_filehandle(filepath, &info, &handle);
 				handle.fsid = fh->fsid;
 				add_uint(&reply, NFS_OK);
-				add_filehandle(&reply, &handle);
-				add_fattr3(&reply, &info, fh->fsid);
+				add_post_filehandle(&reply, &handle);
+				add_post_fattr3(&reply, &info, fh->fsid);
+				fprintf(console, "nfsd: create3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
 
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info);
-				fprintf(console, "nfsd: create3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
 			}
 			else
 			{
@@ -1679,7 +1774,7 @@ struct conn *request;
 			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			get_sattr(request, &reqinfo);
+			get_sattr3(request, &reqinfo);
 			mkdir(filepath, reqinfo.st_mode);
 			CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
 			
@@ -1689,7 +1784,7 @@ struct conn *request;
 				make_filehandle(filepath, &info, &handle);
 				handle.fsid = fh->fsid;
 				add_uint(&reply, NFS_OK);
-				add_filehandle(&reply, &handle);
+				add_post_filehandle(&reply, &handle);
 				add_post_fattr3(&reply, &info, fh->fsid);
 
 				stat(dirpath, &info);
@@ -1705,27 +1800,35 @@ struct conn *request;
 			break;
 		case 10:
 			/* SymLink */
+			add_uint(&reply, NFS3ERR_NOTSUPP);
+			add_uint(&reply, 0);
 			break;
 		case 11:
 			/* MkNod */
+			add_uint(&reply, NFS3ERR_NOTSUPP);
+			add_uint(&reply, 0);
 			break;
 		case 12:
 			/* Remove */
-			fh = get_filehandle(request, filepath);
+			fh = get_filehandle(request, dirpath);
 			path = get_string(request);
+			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
 			if (unlink(filepath) == 0)
 			{
 				add_uint(&reply, NFS_OK);
+
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
 				
-				add_post_fattr3(&reply, &info, fh->fsid);
 				fprintf(console, "nfsd: remove = %s on fsid=%d\n", filepath, fh->fsid);
 			}
 			else
 			{
 				add_uint(&reply, errno);
-				add_uint(&reply, 0);
+				stat(dirpath, &info);
+				add_wcc_data(&reply, &preinfo, &info);
 			}
 			break;
 		case 13:
@@ -1844,7 +1947,7 @@ struct conn *request;
 				add_uint64(&reply, freefdns);					/* Free FDNs */
 				add_uint64(&reply, freefdns);					/* Free FDNs available to non-priv. users */
 				add_uint64(&reply, 1);								/* volatile */
-				fprintf(console, "nfsd: FsStat3: %s\n", filepath);
+				/*fprintf(console, "nfsd: FsStat3: %s\n", filepath);*/
 			}
 			else
 			{
@@ -1859,10 +1962,6 @@ struct conn *request;
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
 			{
-				/* client logs "Stale NFS file handle"...   WHY? Is it timestamps expected to be updated? */
-				info.st_atime = time(NULL);
-				logtimes(&info);
-			
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info), fh->fsid;
 				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* rtmax */
@@ -1914,8 +2013,9 @@ struct conn *request;
 			break;
 		case 21:
 			/* Commit */
-			add_uint(&reply, NFS_OK);
-			fprintf(console, "nfsd: COMMIT\n");
+			fh = get_filehandle(request, filepath);
+ 			add_uint(&reply, NFS3ERR_NOTSUPP);
+			fprintf(console, "nfsd: COMMIT: %s\n", filepath);
 			break;
 	}
 
