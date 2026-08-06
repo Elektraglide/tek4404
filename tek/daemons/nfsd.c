@@ -1815,18 +1815,27 @@ struct conn *request;
 			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
 			strcat(filepath, path);
-			if (unlink(filepath) == 0)
+			if (stat(filepath, &preinfo) == 0)
 			{
-				add_uint(&reply, NFS_OK);
+				if (unlink(filepath) == 0)
+				{
+					add_uint(&reply, NFS_OK);
 
-				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
-				
-				fprintf(console, "nfsd: remove = %s on fsid=%d\n", filepath, fh->fsid);
+					stat(dirpath, &info);
+					add_wcc_data(&reply, &preinfo, &info);
+					
+					fprintf(console, "nfsd: remove = %s on fsid=%d\n", filepath, fh->fsid);
+				}
+				else
+				{
+					add_uint(&reply, errno);
+					stat(dirpath, &info);
+					add_wcc_data(&reply, &preinfo, &info);
+				}
 			}
 			else
 			{
-				add_uint(&reply, errno);
+				add_uint(&reply, NFSERR_NOENT);
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info);
 			}
