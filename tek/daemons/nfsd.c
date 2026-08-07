@@ -855,13 +855,14 @@ struct stat *info;
 {
 	int time_how;
 	
-	info->st_mode = -1;
+	info->st_mode = 0xffff;
 	if (get_uint(request))
 		info->st_mode = nfsmode2host(get_uint(request));
 		
 	info->st_uid = -1;
 	if (get_uint(request))
 		info->st_uid = get_uint(request);
+
 	if (get_uint(request))
 #ifdef tek
 			getuint(request);	/* no group */
@@ -1237,11 +1238,11 @@ struct conn *request;
 			/* SetAttr */
 			fh = get_filehandle(request, filepath);
 			get_sattr(request, &reqinfo);
-			if (reqinfo.st_mode != -1)
+			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if (reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size == 0)
+			if (reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			if (stat(filepath, &info) == 0)
@@ -1374,11 +1375,11 @@ struct conn *request;
 			get_sattr(request, &info);
 			fd = creat(filepath, info.st_mode);
 			close(fd);
-			if (info.st_mode != -1)
+			if (info.st_mode != 0xffff)
 				chmod(filepath, info.st_mode);
 			if (info.st_uid != -1)
 				CHOWN(filepath, info.st_uid, info.st_gid);
-			if (info.st_size == 0)
+			if (info.st_size != -1)
 				truncate(filepath, info.st_size);
 			if (stat(filepath, &info) == 0)
 			{
@@ -1587,11 +1588,12 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			if (reqinfo.st_mode != -1)
+			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
+			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if (reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size == 0)
+			if (reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			memset(&info, 0, sizeof(info));
@@ -1810,7 +1812,7 @@ struct conn *request;
 
 			fd = creat(filepath, reqinfo.st_mode);
 			close(fd);
-			if (reqinfo.st_mode != -1)
+			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if (reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
