@@ -1574,13 +1574,14 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: get_attr3: %s  perm:%4.4x\n", filepath, info.st_mode);
+				fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x\n", filepath, info.st_mode);
 			}
 			else
 			{
 				/* this should never happen.. */
-				add_uint(&reply, NFSERR_NOENT);
+				add_uint(&reply, NFS3ERR_BADHANDLE);
 				add_uint(&reply, 0);
+				fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x FAILED\n", filepath, info.st_mode);
 			}
 			break;
 		case 2:
@@ -1601,7 +1602,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: setattr3 = %s\n", filepath);
+				fprintf(console, "nfsd: SETATTR3 = %s mode=%4.4x size=%d\n", filepath, info.st_perm, info.st_size);
 			}
 			else
 			{
@@ -1627,7 +1628,7 @@ struct conn *request;
 
 				stat(dirpath, &info);
 				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: lookup3 = %s on fsid=%d\n", filepath, fh->fsid);
+				fprintf(console, "nfsd: LOOKUP3 = %s on fsid=%d\n", filepath, fh->fsid);
 			}
 			else
 			{
@@ -1659,7 +1660,7 @@ struct conn *request;
 					}
 
 					add_uint(&reply, rc );
-					fprintf(console, "nfsd: access3 = %s perm=%4.4x on fsid=%d\n", filepath, n, fh->fsid);
+					fprintf(console, "nfsd: ACCESS3 = %s perm=%4.4x on fsid=%d\n", filepath, n, fh->fsid);
 			}
 			else
 			{
@@ -1683,7 +1684,7 @@ struct conn *request;
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					/* TODO: check file permissions */
-			fprintf(console, "nfsd: read3 = %s off=%d count=%d size=%d on fsid=%d\n", filepath, offset,count, info.st_size, fh->fsid);
+			fprintf(console, "nfsd: READ3 = %s off=%d count=%d size=%d on fsid=%d\n", filepath, offset,count, info.st_size, fh->fsid);
 
 					fd = open(filepath, O_RDONLY);
 					rc = lseek(fd, offset, SEEK_SET);
@@ -1718,7 +1719,7 @@ struct conn *request;
 				{
 					if (how == 0)	/* UNSTABLE */
 					{
-						fprintf(console, "UNSTABLE mode ignored\n");
+						fprintf(console, "nfsd: WRITE3: UNSTABLE mode ignored\n");
 					}
 				
 					if (preinfo.st_perm & S_IWRITE)
@@ -1729,9 +1730,10 @@ struct conn *request;
 							fd = open(filepath, O_WRONLY);
 							rc = lseek(fd, offset, SEEK_SET);
 							rc = write(fd, request->buffer + request->crp, count);
-							/*fprintf(console, "  write: %d bytes at %d\n", rc, offset);*/
 							close(fd);
+							fprintf(console, "nfsd: WRITE3: %d bytes at %d\n", rc, offset);
 						}
+
 						if (rc >= 0)
 						{
 							add_uint(&reply, NFS_OK);
@@ -1778,7 +1780,7 @@ struct conn *request;
 				add_uint(&reply, NFSERR_NOENT);
 				add_uint(&reply, 0);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: Create3: %s  NFSERR_NOENT\n", dirpath);
+				fprintf(console, "nfsd: CREATE3: %s  NFSERR_NOENT\n", dirpath);
 				break;
 			}
 			path = get_string(request);
@@ -1789,13 +1791,13 @@ struct conn *request;
 			if (how != EXCLUSIVE)
 			{
 				get_sattr3(request, &reqinfo);
-				fprintf(console, "CREATE3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
+				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
 			}
 			else
 			{
 				add_uint(&reply, NFS3ERR_NOTSUPP);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: Create3: %s  NFS3ERR_NOTSUPP\n", dirpath);
+				fprintf(console, "nfsd: CREATE3: %s  NFS3ERR_NOTSUPP\n", dirpath);
 				break;
 			}
 
@@ -1827,7 +1829,7 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				add_post_filehandle(&reply, &handle);
 				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: create3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
+				fprintf(console, "nfsd: CREATE3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
 
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info);
@@ -1846,7 +1848,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFSERR_NOENT);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: MkDir: %s  NFSERR_NOENT\n", dirpath);
+				fprintf(console, "nfsd: MKDIR3: %s  NFSERR_NOENT\n", dirpath);
 				break;
 			}
 			path = get_string(request);
@@ -1868,7 +1870,7 @@ struct conn *request;
 
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info);
-				fprintf(console, "nfsd: mkdir3 = %s on fsid=%d\n", filepath, fh->fsid);
+				fprintf(console, "nfsd: MKDIR3 = %s on fsid=%d\n", filepath, fh->fsid);
 			}
 			else
 			{
@@ -1910,7 +1912,7 @@ struct conn *request;
 					stat(dirpath, &info);
 					add_wcc_data(&reply, &preinfo, &info);
 					
-					fprintf(console, "nfsd: remove = %s on fsid=%d\n", filepath, fh->fsid);
+					fprintf(console, "nfsd: REMOVE3 = %s on fsid=%d\n", filepath, fh->fsid);
 				}
 				else
 				{
@@ -1941,7 +1943,7 @@ struct conn *request;
 			offset = get_cookie3(request);
 			cookieverf = get_cookie3(request);
 			count = get_uint(request);
-			fprintf(console, "nfsd: readdir3: offset = %d count = %d on fsid=%d\n", offset, count, fh->fsid);
+			fprintf(console, "nfsd: READDIR3: offset = %d count = %d on fsid=%d\n", offset, count, fh->fsid);
 			
 			/* clamp to our buffer size */
 			if (count > TRANSFER_SIZE)
@@ -1993,20 +1995,20 @@ struct conn *request;
 				{
 					add_uint(&reply, errno);
 					add_post_fattr3(&reply, &info, fh->fsid);
-					fprintf(console, "nfsd: ReadDir: %s  opendir FAIL\n", filepath);
+					fprintf(console, "nfsd: READDIR3: %s  opendir FAIL\n", filepath);
 				}
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);
-				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: ReadDir: %s  NFSERR_NOENT\n", filepath);
+				add_post_fattr3(&reply, NULL, fh->fsid);
+				fprintf(console, "nfsd: READDIR3: %s  NFSERR_NOENT\n", filepath);
 			}
 			break;
 		case 17:
 			/* ReadDirPlus */
-			fh = get_filehandle(request, filepath);
-			fprintf(console, "nfsd: ReadDirPlus3: %s\n", filepath);
+			fh = get_filehandle(request, dirpath);
+			fprintf(console, "nfsd: READDIRPLUS3: %s\n", dirpath);
 			add_uint(&reply, NFS3ERR_NOTSUPP);
 			add_uint(&reply, 0);
 			break;
