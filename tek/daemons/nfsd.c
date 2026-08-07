@@ -647,8 +647,15 @@ struct response *reply;
 struct stat *info;
 int fsid;
 {
-	add_uint(reply, 1);
-	add_fattr3(reply, info, fsid);
+	if (info)
+	{
+		add_uint(reply, 1);
+		add_fattr3(reply, info, fsid);
+	}
+	else
+	{
+	add_uint(reply, 0);
+	}
 }
 
 void add_post_wccattr3(reply, info)
@@ -666,7 +673,10 @@ struct response *reply;
 struct stat *preinfo;
 struct stat *postinfo;
 {
-	add_post_wccattr3(reply, preinfo);
+	if (preinfo)
+		add_post_wccattr3(reply, preinfo);
+	else
+		add_uint(reply, 0);
 
 	if (postinfo)
 		add_post_fattr3(reply, postinfo);
@@ -1594,7 +1604,7 @@ struct conn *request;
 			else
 			{
 				add_uint(&reply, errno);
-				add_uint(&reply, 0);
+				add_post_fattr3(&reply, NULL, fh->fsid);
 			}
 			break;
 		case 3:
@@ -1652,8 +1662,7 @@ struct conn *request;
 			else
 			{
 					add_uint(&reply, NFSERR_NOENT);
-					add_uint(&reply, 0);
-					
+					add_post_fattr3(&reply, NULL, fh->fsid);
 			}
 			break;
 		case 5:
@@ -1685,13 +1694,13 @@ struct conn *request;
 				else
 				{
 					add_uint(&reply, NFS3ERR_INVAL);
-					add_uint(&reply, 0);
+					add_post_fattr3(&reply, &info, fh->fsid);
 				}
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);
-				add_uint(&reply, 0);
+				add_post_fattr3(&reply, NULL, fh->fsid);
 			}
 			break;
 		case 7:
@@ -1710,7 +1719,7 @@ struct conn *request;
 						fprintf(console, "UNSTABLE mode ignored\n");
 					}
 				
-					if (info.st_perm & S_IWRITE)
+					if (preinfo.st_perm & S_IWRITE)
 					{
 						rc = 0;
 						if (count > 0)
@@ -1727,30 +1736,36 @@ struct conn *request;
 
 							stat(filepath, &info);
 							add_wcc_data(&reply, &preinfo, &info);
-							add_uint64(&reply, rc);
+							add_uint(&reply, rc);
 							add_uint(&reply, 2);			/* FILE_SYNC */
 							add_uint64(&reply, 0);		/* writeverf3 */
 						}
 						else
 						{
 							add_uint(&reply, NFSERR_IO);
+							stat(filepath, &info);
+							add_wcc_data(&reply, &preinfo, &info);
+							fprintf(console, "nfsd: WRITE3: NFSERR_IO\n");
 						}
 					}
 					else
 					{
-							add_uint(&reply, NFSERR_ACCES);
-							add_uint(&reply, 0);
-							add_uint(&reply, 0);
+						add_uint(&reply, NFSERR_ACCES);
+						add_wcc_data(&reply, &preinfo, &preinfo);
+						fprintf(console, "nfsd: WRITE3: NFSERR_ACCES\n");
 					}
 				}
 				else
 				{
 					add_uint(&reply, NFSERR_ISDIR);
+					add_wcc_data(&reply, &preinfo, NULL);
+					fprintf(console, "nfsd: WRITE3: NFSERR_ISDIR\n");
 				}
 			}
 			else
 			{
-				add_uint(&reply, 2);	/* no such file */
+				add_uint(&reply, NFSERR_NOENT);
+				add_wcc_data(&reply, NULL, NULL);
 			}
 			break;
 		case 8:
@@ -1873,6 +1888,13 @@ struct conn *request;
 		case 12:
 			/* Remove */
 			fh = get_filehandle(request, dirpath);
+			if (stat(dirpath, &preinfo) < 0)
+			{
+				add_uint(&reply, NFSERR_NOENT);
+				add_uint(&reply, 0);
+				fprintf(console, "nfsd: REMOVE3: %s  NFSERR_NOENT\n", dirpath);
+				break;
+			}
 			path = get_string(request);
 			strcpy(filepath, dirpath);
 			strcat(filepath, "/");
@@ -1899,7 +1921,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFSERR_NOENT);
 				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
+				add_wcc_data(&reply, NULL, &info);
 			}
 			break;
 		case 13:
@@ -2023,7 +2045,7 @@ struct conn *request;
 			else
 			{
 				add_uint(&reply, NFS3ERR_BADHANDLE);
-				add_post_fattr3(&reply, &info, fh->fsid);
+				add_uint(&reply, 0);
 				fprintf(console, "nfsd: FsStat3: %s  FAIL\n", filepath);
 			}
 			break;
@@ -2052,7 +2074,7 @@ struct conn *request;
 			else
 			{
 				add_uint(&reply, NFS3ERR_BADHANDLE);
-				add_post_fattr3(&reply, &info, fh->fsid);
+				add_uint(&reply, 0);
 				fprintf(console, "nfsd: FsInfo3: %s  FAIL\n", filepath);
 			}
 			break;
@@ -2077,7 +2099,7 @@ struct conn *request;
 			{
 				/* this should never happen.. */
 				add_uint(&reply, NFSERR_STALE);
-				add_post_fattr3(&reply, &info, fh->fsid);
+				add_uint(&reply, 0);
 				fprintf(console, "nfsd: PathConf: %s  STALE\n", filepath);
 			}
 
