@@ -482,8 +482,8 @@ int len;
 	ptr[-2] = (rc < len);				/* eof */
 	
 	/* variable length array */
-	ptr[-1] = htonl(rc);
 	rc = (rc + 3) & -4;
+	ptr[-1] = htonl(rc);
 	reply->cwp += rc;
 	
 	return rc;
