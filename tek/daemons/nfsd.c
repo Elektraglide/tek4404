@@ -201,13 +201,15 @@ struct response {
 enum {
 	PORTMAPPERD = 100000,
 	NFSD = 100003,
-	MOUNTD = 100005
+	MOUNTD = 100005,
+	LOCKD = 100024
 } progs;
 
 /* ports for RPC progs */
 #define PORTMAPPERD_PORT 111
 #define MOUNTD_PORT 6135
 #define NFSD_PORT 21049
+#define LOCKD_PORT 41045
 
 /* logging credential details */
 #define LOGCREDS 0
@@ -937,7 +939,8 @@ struct filehandle *handle;
 	return result;
 }
 
-int create_UDP_sock(port)
+int create_UDP_sock(daemonname, port)
+char *daemonname;
 int port;
 {
 	struct in_sockaddr serv_addr;
@@ -945,7 +948,7 @@ int port;
 		
 	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
-		fprintf(console, "socket: %s\n",strerror(errno));
+		fprintf(console, "socket: %s: %s\n",daemonname, strerror(errno));
 		return -1;
 	}
 
@@ -954,12 +957,12 @@ int port;
 	serv_addr.sin_port = htons(port);
 	n = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
 	if (n < 0) {
-		fprintf(console, "bind: port %d: %s\n", port, strerror(errno));
+		fprintf(console, "bind: %s: port %d: %s\n", daemonname, port, strerror(errno));
 		close(sock);
 		return -2;
 	}
-	fprintf(console,"listen on %d\n", port);
 
+	fprintf(console,"%s listening on %d\n", daemonname, port);
 	return sock;
 }
 
@@ -1014,8 +1017,13 @@ struct conn *request;
 			prot = get_uint(request);
 			port = get_uint(request);
 			registeredport = 0;
-			if (prog == NFSD && prot == IPPROTO_UDP) registeredport = NFSD_PORT;
-			if (prog == MOUNTD && prot == IPPROTO_UDP) registeredport = MOUNTD_PORT;
+			if (prot == IPPROTO_UDP)
+			{
+				if (prog == NFSD) registeredport = NFSD_PORT;
+				if (prog == MOUNTD) registeredport = MOUNTD_PORT;
+				if (prog == LOCKD && vers == 4) registeredport = LOCKD_PORT;
+			}
+
 			if (registeredport)
 			{
 				add_uint(&reply, NFS_OK);
@@ -1104,6 +1112,60 @@ struct conn *request;
 			add_uint(&reply, NFS_OK);
 			fprintf(console, "mountd: unmount Path = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
 			
+			break;
+	}
+
+	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+	if(n != reply.cwp)
+	{
+			fprintf(console, "mountd: sendto: %s\n",strerror(errno));
+	}
+}
+
+void lockprog(request)
+struct conn *request;
+{
+	struct rpcheader *header = (struct rpcheader *)request->buffer;
+	struct response reply;
+	struct stat info;
+	char *path;
+	struct filehandle handle;
+	int n;
+	
+	get_credentials(request, 0);
+	get_verifier(request);
+	
+	reply.cwp = 0;
+	add_uint(&reply, ntohl(header->xid));
+	add_uint(&reply, REPLY);
+	add_uint(&reply, MSG_ACCEPTED);
+	add_uint(&reply, 0);		/* opaque_verf */
+	add_uint(&reply, 0);		/* opaque_verf size */
+	add_uint(&reply, SUCCESS);
+
+	switch(ntohl(header->proc))
+	{
+		case 0:
+			/* NULL-op */
+			break;
+		case 1:
+			/* Test */
+			add_uint(&reply, NFS_OK);
+			break;
+		case 2:
+			/* Lock */
+			path = get_string(request);
+			add_uint(&reply, NFS_OK);
+			break;
+		case 3:
+			/* Cancel */
+			path = get_string(request);
+			add_uint(&reply, NFS_OK);
+			break;
+		case 4:
+			/* Unlock */
+			path = get_string(request);
+			add_uint(&reply, NFS_OK);
 			break;
 	}
 
@@ -2040,7 +2102,7 @@ int main(argc, argv)
 int argc;
 char **argv;
 {
-	int portmapsock, mountsock, nfssock;
+	int portmapsock, mountsock, locksock, nfssock;
 	int n;
 	
 	console = stderr;
@@ -2053,12 +2115,13 @@ char **argv;
 	umask(0);
 	
 	/* we act as portmapd, mountd and nfsd... */
-	portmapsock = create_UDP_sock(PORTMAPPERD_PORT);
-	mountsock = create_UDP_sock(MOUNTD_PORT);
-	nfssock = create_UDP_sock(NFSD_PORT);
+	portmapsock = create_UDP_sock("portmapd", PORTMAPPERD_PORT);
+	mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
+	locksock = create_UDP_sock("lockd", LOCKD_PORT);
+	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
 
 	/* cannot continue (not having portmapping is tolerable) */
-	if (mountsock < 0 || nfssock < 0)
+	if (mountsock < 0 || locksock < 0 || nfssock < 0)
 	{
 		fprintf(console, "cannot bind sockets\n");
 		exit(-2);
@@ -2081,6 +2144,9 @@ char **argv;
 		FD_SET(mountsock, &fd_in);
 		if (mountsock > n)
 			n = mountsock;
+		FD_SET(locksock, &fd_in);
+		if (locksock > n)
+			n = locksock;
 		FD_SET(nfssock, &fd_in);
 		if (nfssock > n)
 			n = nfssock;
@@ -2120,6 +2186,21 @@ char **argv;
 				if (validate(&request, MOUNTD))
 				{
 					mountprog(&request);
+				}
+			}
+		}
+		else
+		if (FD_ISSET(locksock, &fd_in))
+		{
+			request.sock = locksock;
+			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr *)&request.from, &fromSize);
+			if (request.len > 0)
+			{
+				/* validate */
+				n = validate(&request, LOCKD);
+				if (n)
+				{
+					lockprog(&request);
 				}
 			}
 		}
