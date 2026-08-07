@@ -2062,10 +2062,10 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info), fh->fsid;
 				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* rtmax */
-				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* rtpref */
+				add_uint(&reply, TRANSFER_SIZE);			/* rtpref */
 				add_uint(&reply, TRANSFER_SIZE);			/* rtmult */
 				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* wtmax */
-				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* wtpref */
+				add_uint(&reply,  TRANSFER_SIZE);			/* wtpref */
 				add_uint(&reply, TRANSFER_SIZE);			/* wtmult */
 				add_uint(&reply, TRANSFER_SIZE);			/* dtpref */
 				add_uint64(&reply, 1<<23);		/* maxfilesize 8MB */
