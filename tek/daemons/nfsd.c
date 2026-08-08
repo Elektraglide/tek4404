@@ -691,10 +691,11 @@ struct stat *info;
 	add_nfstime(reply, (unsigned int)info->st_ctime);
 }
 
-void add_wcc_data(reply, preinfo, postinfo)
+void add_wcc_data(reply, preinfo, postinfo, fsid)
 struct response *reply;
 struct stat *preinfo;
 struct stat *postinfo;
+int fsid;
 {
 	if (preinfo)
 		add_post_wccattr3(reply, preinfo);
@@ -702,7 +703,7 @@ struct stat *postinfo;
 		add_uint(reply, 0);
 
 	if (postinfo)
-		add_post_fattr3(reply, postinfo);
+		add_post_fattr3(reply, postinfo, fsid);
 	else
 		add_uint(reply, 0);
 }
