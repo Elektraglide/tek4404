@@ -1627,13 +1627,14 @@ struct conn *request;
 			if (stat(filepath, &info) == 0)
 			{
 				add_uint(&reply, NFS_OK);
-				add_post_fattr3(&reply, &info, fh->fsid);
+				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 				fprintf(console, "nfsd: SETATTR3 = %s mode=%4.4x size=%d\n", filepath, info.st_perm, info.st_size);
 			}
 			else
 			{
 				add_uint(&reply, errno);
-				add_post_fattr3(&reply, NULL, fh->fsid);
+				add_wcc_data(&reply, &preinfo, NULL, fh->fsid);
+				fprintf(console, "nfsd: SETATTR3 = %s FAIL *****\n", filepath);
 			}
 			break;
 		case 3:
@@ -1766,7 +1767,7 @@ struct conn *request;
 							add_uint(&reply, NFS_OK);
 
 							stat(filepath, &info);
-							add_wcc_data(&reply, &preinfo, &info);
+							add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 							add_uint(&reply, rc);
 							add_uint(&reply, 2);			/* FILE_SYNC */
 							add_uint64(&reply, 0);		/* writeverf3 */
@@ -1775,28 +1776,28 @@ struct conn *request;
 						{
 							add_uint(&reply, NFSERR_IO);
 							stat(filepath, &info);
-							add_wcc_data(&reply, &preinfo, &info);
+							add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 							fprintf(console, "nfsd: WRITE3: NFSERR_IO\n");
 						}
 					}
 					else
 					{
 						add_uint(&reply, NFSERR_ACCES);
-						add_wcc_data(&reply, &preinfo, &preinfo);
+						add_wcc_data(&reply, &preinfo, &preinfo, fh->fsid);
 						fprintf(console, "nfsd: WRITE3: NFSERR_ACCES\n");
 					}
 				}
 				else
 				{
 					add_uint(&reply, NFSERR_ISDIR);
-					add_wcc_data(&reply, &preinfo, NULL);
+					add_wcc_data(&reply, &preinfo, NULL, fh->fsid);
 					fprintf(console, "nfsd: WRITE3: NFSERR_ISDIR\n");
 				}
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);
-				add_wcc_data(&reply, NULL, NULL);
+				add_wcc_data(&reply, NULL, NULL, fh->fsid);
 			}
 			break;
 		case 8:
@@ -1859,13 +1860,13 @@ struct conn *request;
 				fprintf(console, "nfsd: CREATE3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
 
 				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
+				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_ACCES);
 				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
+				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 			}
 			break;
 		case 9:
@@ -1896,14 +1897,14 @@ struct conn *request;
 				add_post_fattr3(&reply, &info, fh->fsid);
 
 				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
+				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 				fprintf(console, "nfsd: MKDIR3 = %s on fsid=%d\n", filepath, fh->fsid);
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_ACCES);
 				stat(dirpath, &info);
-				add_wcc_data(&reply, &preinfo, &info);
+				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 			}
 			break;
 		case 10:
@@ -1937,7 +1938,7 @@ struct conn *request;
 					add_uint(&reply, NFS_OK);
 
 					stat(dirpath, &info);
-					add_wcc_data(&reply, &preinfo, &info);
+					add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 					
 					fprintf(console, "nfsd: REMOVE3 = %s on fsid=%d\n", filepath, fh->fsid);
 				}
@@ -1945,14 +1946,14 @@ struct conn *request;
 				{
 					add_uint(&reply, errno);
 					stat(dirpath, &info);
-					add_wcc_data(&reply, &preinfo, &info);
+					add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 				}
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);
 				stat(dirpath, &info);
-				add_wcc_data(&reply, NULL, &info);
+				add_wcc_data(&reply, NULL, &info, fh->fsid);
 			}
 			break;
 		case 13:
