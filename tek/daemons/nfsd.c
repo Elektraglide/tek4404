@@ -468,9 +468,9 @@ int len;
 	unsigned int *ptr;
 	int rc;
 	
-	add_uint(reply, len);
-	add_uint(reply, 0);
-	add_uint(reply, 0);
+	add_uint(reply, len);	/* bytes read */
+	add_uint(reply, 0);		/* is EOF */
+	add_uint(reply, 0);		/* variable length array */
 	ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	
 	/* clamp to remaining space */
@@ -508,6 +508,8 @@ unsigned int nfsmode;
 			perms |= S_IFCHR;
 		if (nfsmode & BLK)
 			perms |= S_IFBLK;
+		if (nfsmode & LNK)
+			perms |= S_IFLNK;
 	
 		/* translate from NFS bits */
 		if (nfsmode & ROWN)
@@ -552,6 +554,8 @@ unsigned int hostperms;
 		nfsperms |= CHR;
 	if ((hostperms & S_IFBLK) == S_IFBLK)
 		nfsperms |= BLK;
+	if ((hostperms & S_IFLNK) == S_IFLNK)
+		nfsperms |= LNK;
 
 	if (hostperms & S_IREAD)
 		nfsperms |= ROWN;
@@ -1656,7 +1660,7 @@ struct conn *request;
 
 				stat(dirpath, &info);
 				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: LOOKUP3 = %s on fsid=%d\n", filepath, fh->fsid);
+				/*fprintf(console, "nfsd: LOOKUP3 = %s on fsid=%d\n", filepath, fh->fsid);*/
 			}
 			else
 			{
@@ -1688,7 +1692,7 @@ struct conn *request;
 					}
 
 					add_uint(&reply, rc );
-					fprintf(console, "nfsd: ACCESS3 = %s perm=%4.4x on fsid=%d\n", filepath, n, fh->fsid);
+					/*fprintf(console, "nfsd: ACCESS3 = %s perm=%4.4x on fsid=%d\n", filepath, n, fh->fsid);*/
 			}
 			else
 			{
@@ -1712,7 +1716,6 @@ struct conn *request;
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					/* TODO: check file permissions */
-			fprintf(console, "nfsd: READ3 = %s off=%d count=%d size=%d on fsid=%d\n", filepath, offset,count, info.st_size, fh->fsid);
 
 					fd = open(filepath, O_RDONLY);
 					rc = lseek(fd, offset, SEEK_SET);
@@ -1760,7 +1763,6 @@ struct conn *request;
 							rc = lseek(fd, offset, SEEK_SET);
 							rc = write(fd, request->buffer + request->crp, count);
 							close(fd);
-							fprintf(console, "nfsd: WRITE3: %d bytes at %d\n", rc, offset);
 						}
 
 						if (rc >= 0)
@@ -1836,7 +1838,7 @@ struct conn *request;
 				{
 					add_uint(&reply, NFSERR_EXIST);
 					add_post_fattr3(&reply, &info, fh->fsid);
-					fprintf(console, "nfsd: Create3: %s  NFS3ERR_EXIST\n", filepath);
+					fprintf(console, "nfsd: CREATE3: %s  NFS3ERR_EXIST\n", filepath);
 					break;
 				}
 			}
@@ -1899,7 +1901,7 @@ struct conn *request;
 
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
-				fprintf(console, "nfsd: MKDIR3 = %s on fsid=%d\n", filepath, fh->fsid);
+				/*fprintf(console, "nfsd: MKDIR3 = %s on fsid=%d\n", filepath, fh->fsid);*/
 			}
 			else
 			{
@@ -1941,7 +1943,7 @@ struct conn *request;
 					stat(dirpath, &info);
 					add_wcc_data(&reply, &preinfo, &info, fh->fsid);
 					
-					fprintf(console, "nfsd: REMOVE3 = %s on fsid=%d\n", filepath, fh->fsid);
+					/*fprintf(console, "nfsd: REMOVE3 = %s on fsid=%d\n", filepath, fh->fsid);*/
 				}
 				else
 				{
@@ -1972,7 +1974,7 @@ struct conn *request;
 			offset = get_cookie3(request);
 			cookieverf = get_cookie3(request);
 			count = get_uint(request);
-			fprintf(console, "nfsd: READDIR3: offset = %d count = %d on fsid=%d\n", offset, count, fh->fsid);
+			/*fprintf(console, "nfsd: READDIR3: offset = %d count = %d on fsid=%d\n", offset, count, fh->fsid);*/
 			
 			/* clamp to our buffer size */
 			if (count > TRANSFER_SIZE)
