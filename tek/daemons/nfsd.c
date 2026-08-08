@@ -677,7 +677,7 @@ int fsid;
 	}
 	else
 	{
-	add_uint(reply, 0);
+		add_uint(reply, 0);
 	}
 }
 
@@ -886,6 +886,7 @@ struct stat *info;
 	if (get_uint(request))
 		info->st_uid = get_uint(request);
 
+	info->st_gid = -1;
 	if (get_uint(request))
 #ifdef tek
 			getuint(request);	/* no group */
@@ -929,6 +930,7 @@ void get_sattrguard3(request, info)
 struct conn *request;
 struct stat *info;
 {
+	info->st_ctime = -1;
 	if (get_uint(request))
 	{
 		get_uint(request); info->st_ctime = get_uint(request);
@@ -1613,7 +1615,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
+			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d gid=%d size=%ld ctime=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size, reqinfo.st_ctime);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
