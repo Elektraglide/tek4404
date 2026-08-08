@@ -1240,9 +1240,9 @@ struct conn *request;
 			get_sattr(request, &reqinfo);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
-			if (reqinfo.st_uid != -1)
+			if ((int)reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size != -1)
+			if ((int)reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			if (stat(filepath, &info) == 0)
@@ -1377,10 +1377,11 @@ struct conn *request;
 			close(fd);
 			if (info.st_mode != 0xffff)
 				chmod(filepath, info.st_mode);
-			if (info.st_uid != -1)
+			if ((int)info.st_uid != -1)
 				CHOWN(filepath, info.st_uid, info.st_gid);
-			if (info.st_size != -1)
+			if ((int)info.st_size != -1)
 				truncate(filepath, info.st_size);
+
 			if (stat(filepath, &info) == 0)
 			{
 				make_filehandle(filepath, &info, &handle);
@@ -1592,9 +1593,9 @@ struct conn *request;
 			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
-			if (reqinfo.st_uid != -1)
+			if ((int)reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size != -1)
+			if ((int)reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			memset(&info, 0, sizeof(info));
@@ -1816,9 +1817,9 @@ struct conn *request;
 			close(fd);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
-			if (reqinfo.st_uid != -1)
+			if ((int)reqinfo.st_uid != -1)
 				CHOWN(filepath, reqinfo.st_uid, reqinfo.st_gid);
-			if (reqinfo.st_size != -1)
+			if ((int)reqinfo.st_size != -1)
 				truncate(filepath, reqinfo.st_size);
 
 			memset(&info, 0, sizeof(info));
@@ -1938,7 +1939,7 @@ struct conn *request;
 			/* Link */
 			break;
 		case 16:
-			/* ReadDir */
+			/* ReadDir3 */
 			fh = get_filehandle(request, filepath);
 			offset = get_cookie3(request);
 			cookieverf = get_cookie3(request);
