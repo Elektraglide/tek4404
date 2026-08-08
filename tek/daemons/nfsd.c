@@ -498,6 +498,17 @@ unsigned int nfsmode;
 		perms = -1;
 	else
 	{
+		if (nfsmode & SUID)
+			perms |= S_ISUID;
+		if (nfsmode & DIR_NFS)
+			perms |= S_IFDIR;
+		if (nfsmode & REG)
+			perms |= S_IFREG;
+		if (nfsmode & CHR)
+			perms |= S_IFCHR;
+		if (nfsmode & BLK)
+			perms |= S_IFBLK;
+	
 		/* translate from NFS bits */
 		if (nfsmode & ROWN)
 			perms |= S_IREAD;
@@ -529,6 +540,18 @@ unsigned int host2nfsmode(hostperms)
 unsigned int hostperms;
 {
 	unsigned int nfsperms = 0;
+
+	if ((hostperms & S_ISUID) == S_ISUID)
+		nfsperms |= SUID;
+
+	if ((hostperms & S_IFDIR) == S_IFDIR)
+		nfsperms |= DIR_NFS;
+	if ((hostperms & S_IFREG) == S_IFREG)
+		nfsperms |= REG;
+	if ((hostperms & S_IFCHR) == S_IFCHR)
+		nfsperms |= CHR;
+	if ((hostperms & S_IFBLK) == S_IFBLK)
+		nfsperms |= BLK;
 
 	if (hostperms & S_IREAD)
 		nfsperms |= ROWN;
