@@ -1736,6 +1736,7 @@ struct conn *request;
 			offset = get_uint64(request);
 			count = get_uint(request);
 			how = get_uint(request);
+			n = get_uint(request);
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &preinfo) == 0)
 			{
