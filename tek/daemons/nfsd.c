@@ -669,6 +669,7 @@ int fsid;
 	add_nfstime(reply, (unsigned int)info->st_ctime);
 }
 
+/* USES: 88 */
 void add_post_fattr3(reply, info, fsid)
 struct response *reply;
 struct stat *info;
@@ -838,7 +839,8 @@ char *filepath;
 	request->crp += sizeof(struct filehandle);
 
 	/* TODO: if we have flushed the stringcache, return NFS3ERR_STALE */
-	decodepath(ptr->pathtokens, filepath);
+	if (filepath)
+		decodepath(ptr->pathtokens, filepath);
 
 	return ptr;
 }
