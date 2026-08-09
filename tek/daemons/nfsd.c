@@ -1226,7 +1226,7 @@ struct conn *request;
 	char *path;
 	char filepath[1024];
 	int disksize,freesize;
-	int n, count, offset, fd, rc;
+	int n, count, offset, fd, rc, len;
 	struct filehandle handle;
 	struct filehandle *fh;
 	DIR *d;
@@ -1499,10 +1499,11 @@ struct conn *request;
 						
 						add_uint(&reply, n);
 #ifdef __linux__
-						add_string(&reply, dir->d_name, strlen(dir->d_name));
+						len = strlen(dir->d_name);
 #else
-						add_string(&reply, dir->d_name, dir->d_namlen);
+						len = dir->d_namlen;
 #endif
+						add_string(&reply, dir->d_name, len);
 						add_uint(&reply, offset + n);
 						/*fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);*/
 					}
@@ -1574,7 +1575,7 @@ struct conn *request;
 	char dirpath[1024];
 	char filepath[1024];
 	int disksize,freesize,totalfdns,freefdns;
-	int n, count, offset, fd, rc, how, cookieverf;
+	int n, count, offset, fd, rc, how, cookieverf, len, maxcount;
 	struct filehandle handle;
 	struct filehandle *fh;
 	DIR *d;
@@ -1970,7 +1971,7 @@ struct conn *request;
 			break;
 		case 16:
 			/* ReadDir3 */
-			fh = get_filehandle(request, filepath);
+			fh = get_filehandle(request, dirpath);
 			offset = get_cookie3(request);
 			cookieverf = get_cookie3(request);
 			count = get_uint(request);
@@ -1980,11 +1981,11 @@ struct conn *request;
 			if (count > TRANSFER_SIZE)
 				count = TRANSFER_SIZE;
 				
-			if (stat(filepath, &info) == 0)
+			if (stat(dirpath, &info) == 0)
 			{
 				/* account for some wrapping costs */
 				count -= 32;
-				d = opendir(filepath);
+				d = opendir(dirpath);
 				if (d)
 				{
 					n = 0;
@@ -2001,10 +2002,12 @@ struct conn *request;
 							
 							add_uint64(&reply, n);
 	#ifdef __linux__
-							add_string(&reply, dir->d_name, strlen(dir->d_name));
+							len = strlen(dir->d_name);
 	#else
-							add_string(&reply, dir->d_name, dir->d_namlen);
+							len = dir->d_namlen;
 	#endif
+							add_string(&reply, dir->d_name, len);
+
 							add_uint64(&reply, offset + n);
 							/*fprintf(console, "nfsd: readdir3: %3d: %s\n", offset + n, dir->d_name);*/
 						}
@@ -2026,14 +2029,14 @@ struct conn *request;
 				{
 					add_uint(&reply, errno);
 					add_post_fattr3(&reply, &info, fh->fsid);
-					fprintf(console, "nfsd: READDIR3: %s  opendir FAIL\n", filepath);
+					fprintf(console, "nfsd: READDIR3: %s  opendir FAIL\n", dirpath);
 				}
 			}
 			else
 			{
 				add_uint(&reply, NFSERR_NOENT);
 				add_post_fattr3(&reply, NULL, fh->fsid);
-				fprintf(console, "nfsd: READDIR3: %s  NFSERR_NOENT\n", filepath);
+				fprintf(console, "nfsd: READDIR3: %s  NFSERR_NOENT\n", dirpath);
 			}
 			break;
 		case 17:
