@@ -1476,7 +1476,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			offset = get_uint(request);
 			count = get_uint(request);
-			/*fprintf(console, "nfsd: readdir: offset = %d count = %d\n", offset, count);*/
+			fprintf(console, "nfsd: READDIR: offset = %d count = %d\n", offset, count);
 			
 			/* clamp to our buffer size */
 			if (count > TRANSFER_SIZE)
@@ -1491,27 +1491,31 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				while ((dir = readdir(d)) != NULL)
 				{
+					n++;
+
 					/* skip if not past starting point */
-					if (n >= offset)
+					if (n > offset)
 					{
-						/* entry follows */
-						add_uint(&reply, 1);
-						
-						add_uint(&reply, n);
 #ifdef __linux__
 						len = strlen(dir->d_name);
 #else
 						len = dir->d_namlen;
 #endif
+						/* enough space? */
+						if (reply.cwp + ((len + 3) & -4) + 16 > count)
+						{
+							count = 0;
+							break;
+						}
+						
+						/* entry follows */
+						add_uint(&reply, 1);
+						
+						add_uint(&reply, n);
 						add_string(&reply, dir->d_name, len);
 						add_uint(&reply, offset + n);
-						/*fprintf(console, "nfsd: readdir: %3d: %s\n", offset + n, dir->d_name);*/
+						fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
 					}
-	
-					n++;
-					
-					if (reply.cwp > count)
-						break;
 				}
 				closedir(d);
 
@@ -1519,7 +1523,8 @@ struct conn *request;
 				add_uint(&reply, 0);
 
 				/* complete or run out of room? */
-				add_uint(&reply, (reply.cwp > count) ? 0 : 1);
+				add_uint(&reply, (count) ? 1 : 0);
+				fprintf(console, "nfsd: READDIR: eof(%d): cwp(%d)\n", (count) ? 1 : 0, reply.cwp);
 			}
 			break;
 		case 17:
@@ -1983,6 +1988,15 @@ struct conn *request;
 				
 			if (stat(dirpath, &info) == 0)
 			{
+				/* verify cookie */
+				if (cookieverf && (cookieverf != (unsigned int)info.st_mtime))
+				{
+					fprintf(console, "nfsd: READDIR3: verify FAIL %d %d\n",cookieverf, (unsigned int)info.st_mtime);
+					add_uint(&reply, NFS3ERR_BAD_COOKIE);
+					add_post_fattr3(&reply, NULL, fh->fsid);
+					break;
+				}
+
 				/* account for some wrapping costs */
 				count -= 32;
 				d = opendir(dirpath);
@@ -1991,31 +2005,35 @@ struct conn *request;
 					n = 0;
 					add_uint(&reply, NFS_OK);
 					add_post_fattr3(&reply, &info, fh->fsid);
-					add_cookie3(&reply, cookieverf + 1);
+					add_cookie3(&reply, (unsigned int)info.st_mtime);
 					while ((dir = readdir(d)) != NULL)
 					{
+		
+						n++;
+
 						/* skip if not past starting point */
-						if (n >= offset)
+						if (n > offset)
 						{
-							/* entry follows */
-							add_uint(&reply, 1);
-							
-							add_uint64(&reply, n);
 	#ifdef __linux__
 							len = strlen(dir->d_name);
 	#else
 							len = dir->d_namlen;
 	#endif
-							add_string(&reply, dir->d_name, len);
+							/* enough space? */
+							if (reply.cwp + ((len + 3) & -4) + 24 > count)
+							{
+								count = 0;
+								break;
+							}
 
+							/* entry follows */
+							add_uint(&reply, 1);
+							
+							add_uint64(&reply, n);
+							add_string(&reply, dir->d_name, len);
 							add_uint64(&reply, offset + n);
 							/*fprintf(console, "nfsd: readdir3: %3d: %s\n", offset + n, dir->d_name);*/
 						}
-		
-						n++;
-						
-						if (reply.cwp > count)
-							break;
 					}
 					closedir(d);
 
@@ -2023,7 +2041,7 @@ struct conn *request;
 					add_uint(&reply, 0);
 
 					/* complete or run out of room? */
-					add_uint(&reply, (reply.cwp > count) ? 0 : 1);
+					add_uint(&reply, (count) ? 1 : 0);
 				}
 				else
 				{
@@ -2042,9 +2060,110 @@ struct conn *request;
 		case 17:
 			/* ReadDirPlus */
 			fh = get_filehandle(request, dirpath);
-			fprintf(console, "nfsd: READDIRPLUS3: %s\n", dirpath);
+			offset = get_cookie3(request);
+			cookieverf = get_cookie3(request);
+			count = get_uint(request);
+			maxcount = get_uint(request);
+			fprintf(console, "nfsd: READDIRPLUS3: offset:%d cookie:%d count=%d maxcount:%d on fsid=%d\n", offset, cookieverf, count, maxcount, fh->fsid);
+#if 0
+			/* uNFS skips support because of lack of atomicity of getting info.. do we care`? */
 			add_uint(&reply, NFS3ERR_NOTSUPP);
 			add_uint(&reply, 0);
+#else
+			/* clamp to our buffer size */
+			if (maxcount > TRANSFER_SIZE)
+				maxcount = TRANSFER_SIZE;
+				
+			if (stat(dirpath, &info) == 0)
+			{
+				/* verify cookie */
+				if (cookieverf && (cookieverf != (unsigned int)info.st_mtime))
+				{
+					fprintf(console, "nfsd: READDIRPLUS3: verify FAIL %d %d\n",cookieverf, (unsigned int)info.st_mtime);
+					add_uint(&reply, NFS3ERR_BAD_COOKIE);
+					add_post_fattr3(&reply, NULL, fh->fsid);
+					break;
+				}
+
+				/* account for some wrapping costs */
+				maxcount -= 32;
+
+				d = opendir(dirpath);
+				if (d)
+				{
+					n = 0;
+					
+					add_uint(&reply, NFS_OK);
+					add_post_fattr3(&reply, &info, fh->fsid);
+					add_cookie3(&reply, (unsigned int)info.st_mtime);
+					while ((dir = readdir(d)) != NULL)
+					{
+		
+						n++;
+						
+						/* skip if not past starting point */
+						if (n > offset)
+						{
+	#ifdef __linux__
+							len = strlen(dir->d_name);
+	#else
+							len = dir->d_namlen;
+	#endif
+							/* enough space? */
+							if (reply.cwp + ((len + 3) & -4) + 152 > maxcount)
+							{
+								count = 0;
+								break;
+							}
+								
+							/* entry follows */
+							add_uint(&reply, 1);
+							
+							add_uint64(&reply, n);
+							add_string(&reply, dir->d_name, len);
+							add_uint64(&reply, offset + n);
+							
+							strcpy(filepath, dirpath);
+							strcat(filepath, "/");
+							strncat(filepath, dir->d_name, len);
+							if (stat(filepath, &info) == 0)
+							{
+								make_filehandle(filepath, &info, &handle);
+								handle.fsid = fh->fsid;
+								add_post_fattr3(&reply, &info, fh->fsid);
+								add_post_filehandle(&reply, &handle);
+								fprintf(console, "nfsd: READDIRPLUS3: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
+							}
+							else
+							{
+								add_uint(&reply, 0);	/* post_fattr3 */
+								add_uint(&reply, 0);	/* post_filehandle */
+							}
+						}
+					}
+					closedir(d);
+
+					/* no entry follows */
+					add_uint(&reply, 0);
+
+					/* complete or run out of room? */
+					add_uint(&reply, (count) ? 1 : 0);
+					fprintf(console, "nfsd: READDIRPLUS3: eof(%d) cwp(%d)\n",(count) ? 1 : 0, reply.cwp);
+				}
+				else
+				{
+					add_uint(&reply, errno);
+					add_post_fattr3(&reply, &info, fh->fsid);
+					fprintf(console, "nfsd: READDIRPLUS3: %s  opendir FAIL\n", dirpath);
+				}
+			}
+			else
+			{
+				add_uint(&reply, NFSERR_NOENT);
+				add_post_fattr3(&reply, NULL, fh->fsid);
+				fprintf(console, "nfsd: READDIRPLUS3: %s  NFSERR_NOENT\n", dirpath);
+			}
+#endif
 			break;
 		case 18:
 			/* FSStat */
