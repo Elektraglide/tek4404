@@ -28,8 +28,12 @@
 #define socklen_t unsigned int
 #define CHOWN(A,B,C) chown(A,B) /* does not have group id */
 
-#define st_ctime st_mtime	/* does not have */
-#define st_atime st_mtime	/* does not have */
+#define st_ctime st_spr	/* does not have */
+#define st_atime st_spr	/* does not have */
+
+#define NO_GROUPS	/* does not have */
+
+#define ONLY_MTIME  /* does not have atimne or ctime */
 
 struct sir sirbuf;
 
@@ -604,8 +608,8 @@ int fsid;
 		add_uint(reply, DIR_NFS | nfsperms);
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
-#ifdef tek
-		add_uint(reply, info->st_uid);		/* no group */
+#ifdef NO_GROUPS
+		add_uint(reply, info->st_uid);
 #else
 		add_uint(reply, info->st_gid);
 #endif
@@ -620,8 +624,8 @@ int fsid;
 		add_uint(reply, REG | nfsperms);
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
-#ifdef tek
-		add_uint(reply, info->st_uid);		/* no group */
+#ifdef NO_GROUPS
+		add_uint(reply, info->st_uid);
 #else
 		add_uint(reply, info->st_gid);
 #endif
@@ -632,9 +636,15 @@ int fsid;
 	}
 	add_uint(reply, fsid);
 	add_uint(reply, (unsigned int)info->st_ino);
+#ifdef ONLY_MTIME
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+#else
 	add_nfstime(reply, (unsigned int)info->st_atime);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
 	add_nfstime(reply, (unsigned int)info->st_ctime);
+#endif
 }
 
 void add_fattr3(reply, info, fsid)
@@ -649,8 +659,8 @@ int fsid;
 		add_uint(reply, nfsperms);			/* info->st_perm */
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
-#ifdef tek
-		add_uint(reply, info->st_uid);		/* no group */
+#ifdef NO_GROUPS
+		add_uint(reply, info->st_uid);
 #else
 		add_uint(reply, info->st_gid);
 #endif
@@ -663,8 +673,8 @@ int fsid;
 		add_uint(reply, nfsperms);
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
-#ifdef tek
-		add_uint(reply, info->st_uid);		/* no group */
+#ifdef NO_GROUPS
+		add_uint(reply, info->st_uid);
 #else
 		add_uint(reply, info->st_gid);
 #endif
@@ -674,9 +684,15 @@ int fsid;
 	add_uint64(reply, 0);														/* specdata3 */
 	add_uint64(reply, fsid);
 	add_uint64(reply, (unsigned int)info->st_ino);	/* fileid */
+#ifdef ONLY_MTIME
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+#else
 	add_nfstime(reply, (unsigned int)info->st_atime);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
 	add_nfstime(reply, (unsigned int)info->st_ctime);
+#endif
 }
 
 /* USES: 88 */
@@ -703,7 +719,11 @@ struct stat *info;
 	add_uint(reply, 1);
 	add_uint64(reply, (unsigned int)info->st_size);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
+#ifdef ONLY_TIME
+	add_nfstime(reply, (unsigned int)info->st_mtime);
+#else
 	add_nfstime(reply, (unsigned int)info->st_ctime);
+#endif
 }
 
 void add_wcc_data(reply, preinfo, postinfo, fsid)
@@ -876,12 +896,13 @@ struct stat *info;
 {
 		info->st_mode = nfsmode2host(get_uint(request));
 		info->st_uid = get_uint(request);
-#ifdef tek
-		getuint(request);	/* no group */
+#ifdef NO_GROUPS
+		getuint(request);
 #else
 		info->st_gid = get_uint(request);
 #endif
 		info->st_size = get_uint(request);
+
 #ifdef tek
 		getuint(request);	getuint(request);	/* no access time */
 #else
@@ -904,13 +925,12 @@ struct stat *info;
 	if (get_uint(request))
 		info->st_uid = get_uint(request);
 
-#ifndef tek
-	info->st_gid = -1;
-#endif
+#ifdef NO_GROUPS
 	if (get_uint(request))
-#ifdef tek
-			getuint(request);	/* no group */
+			getuint(request);
 #else
+	info->st_gid = -1;
+	if (get_uint(request))
 			info->st_gid = get_uint(request);
 #endif
 
@@ -950,11 +970,18 @@ void get_sattrguard3(request, info)
 struct conn *request;
 struct stat *info;
 {
+#ifdef ONLY_MTIME
+	if (get_uint(request))
+	{
+		get_uint(request); get_uint(request);
+	}
+#else
 	info->st_ctime = -1;
 	if (get_uint(request))
 	{
 		get_uint(request); info->st_ctime = get_uint(request);
 	}
+#endif
 }
 
 void release_filehandle(path)
@@ -1020,23 +1047,6 @@ int port;
 
 	fprintf(console,"%s listening on %d\n", daemonname, port);
 	return sock;
-}
-
-void logtimes(info)
-struct stat *info;
-{
-	struct tm *ts;
-
-	ts = localtime(&info->st_atime);
-	fprintf(console, "atime: %2.2d-%2.2d-%4.4d %2.2d:%2.2d\n",
-			ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900, ts->tm_hour, ts->tm_min);
-	ts = localtime(&info->st_mtime);
-	fprintf(console, "mtime: %2.2d-%2.2d-%4.4d %2.2d:%2.2d\n",
-			ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900, ts->tm_hour, ts->tm_min);
-	ts = localtime(&info->st_ctime);
-	fprintf(console, "ctime: %2.2d-%2.2d-%4.4d %2.2d:%2.2d\n",
-			ts->tm_mday, ts->tm_mon+1, ts->tm_year+1900, ts->tm_hour, ts->tm_min);
-
 }
 
 void portmapperprog(request)
@@ -1641,7 +1651,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld ctime=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size, reqinfo.st_ctime);
+			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
@@ -1843,7 +1853,7 @@ struct conn *request;
 			if (how != EXCLUSIVE)
 			{
 				get_sattr3(request, &reqinfo);
-				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,,reqinfo.st_size);
+				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size);
 			}
 			else
 			{
