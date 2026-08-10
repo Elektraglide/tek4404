@@ -384,6 +384,9 @@ unsigned int cookie;
 	add_uint(reply, cookie);
 }
 
+/* always 4 byte boundary */
+#define ROUNDLEN(A) ((A + 3) & -4)
+
 void add_filehandle(reply, fh)
 struct response *reply;
 struct filehandle *fh;
@@ -392,7 +395,7 @@ struct filehandle *fh;
 	int len = sizeof(struct filehandle);
 
 	memcpy(ptr, fh, len);
-	len = (len + 3) & -4;
+	len = ROUNDLEN(len);
 	reply->cwp += len;
 }
 
@@ -418,7 +421,7 @@ int len;
 	ptr[len] = '\0';
 	ptr[len+1] = '\0';
 	ptr[len+2] = '\0';
-	len = (len + 3) & -4;
+	len = ROUNDLEN(len);
 	reply->cwp += len;
 }
 
@@ -433,7 +436,7 @@ int len;
 	ptr = (unsigned int *)(reply->buffer + reply->cwp);
 	
 	memcpy(ptr, data, len);
-	len = (len + 3) & -4;
+	len = ROUNDLEN(len);
 	reply->cwp += len;
 }
 
@@ -454,7 +457,7 @@ int len;
 	
 	rc = read(fd, ptr, len);
 	ptr[-1] = htonl(rc);				/* what we actually read */
-	rc = (rc + 3) & -4;
+	rc = ROUNDLEN(rc);
 	reply->cwp += rc;
 	
 	return rc;
@@ -482,7 +485,7 @@ int len;
 	ptr[-2] = (rc < len);				/* eof */
 	
 	/* variable length array */
-	rc = (rc + 3) & -4;
+	rc = ROUNDLEN(rc);
 	ptr[-1] = htonl(rc);
 	reply->cwp += rc;
 	
@@ -853,7 +856,7 @@ struct conn *request;
 
 	memcpy(name, request->buffer + request->crp, len);
 	name[len] = '\0';
-	len = (len + 3) & -4;
+	len = ROUNDLEN(len);
 	request->crp += len;
 	
 	return name;
@@ -1504,7 +1507,7 @@ struct conn *request;
 						len = dir->d_namlen;
 #endif
 						/* enough space? */
-						if (reply.cwp + ((len + 3) & -4) + 16 > count)
+						if (reply.cwp + ROUNDLEN(len) + 16 > count)
 						{
 							count = 0;
 							break;
@@ -2022,7 +2025,7 @@ struct conn *request;
 							len = dir->d_namlen;
 	#endif
 							/* enough space? */
-							if (reply.cwp + ((len + 3) & -4) + 24 > count)
+							if (reply.cwp + ROUNDLEN(len) + 24 > count)
 							{
 								count = 0;
 								break;
@@ -2112,7 +2115,7 @@ struct conn *request;
 							len = dir->d_namlen;
 	#endif
 							/* enough space? */
-							if (reply.cwp + ((len + 3) & -4) + 152 > maxcount)
+							if (reply.cwp + ROUNDLEN(len) + 152 > maxcount)
 							{
 								count = 0;
 								break;
