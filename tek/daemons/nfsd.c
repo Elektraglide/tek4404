@@ -1516,9 +1516,9 @@ struct conn *request;
 						/* entry follows */
 						add_uint(&reply, 1);
 						
-						add_uint(&reply, n);
+						add_uint(&reply, n);	/* fileid */
 						add_string(&reply, dir->d_name, len);
-						add_uint(&reply, offset + n);
+						add_uint(&reply, n);
 						fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
 					}
 				}
@@ -2034,9 +2034,9 @@ struct conn *request;
 							/* entry follows */
 							add_uint(&reply, 1);
 							
-							add_uint64(&reply, n);
+							add_uint64(&reply, n);	/* fileid */
 							add_string(&reply, dir->d_name, len);
-							add_uint64(&reply, offset + n);
+							add_uint64(&reply, n);
 							/*fprintf(console, "nfsd: readdir3: %3d: %s\n", offset + n, dir->d_name);*/
 						}
 					}
@@ -2124,15 +2124,15 @@ struct conn *request;
 							/* entry follows */
 							add_uint(&reply, 1);
 							
-							add_uint64(&reply, n);
-							add_string(&reply, dir->d_name, len);
-							add_uint64(&reply, offset + n);
-							
 							strcpy(filepath, dirpath);
 							strcat(filepath, "/");
 							strncat(filepath, dir->d_name, len);
 							if (stat(filepath, &info) == 0)
 							{
+								add_uint64(&reply, (unsigned int)info.st_ino);
+								add_string(&reply, dir->d_name, len);
+								add_uint64(&reply, n);
+								
 								make_filehandle(filepath, &info, &handle);
 								handle.fsid = fh->fsid;
 								add_post_fattr3(&reply, &info, fh->fsid);
@@ -2141,6 +2141,10 @@ struct conn *request;
 							}
 							else
 							{
+								add_uint64(&reply, 0);
+								add_string(&reply, dir->d_name, len);
+								add_uint64(&reply, n);
+								
 								add_uint(&reply, 0);	/* post_fattr3 */
 								add_uint(&reply, 0);	/* post_filehandle */
 							}
