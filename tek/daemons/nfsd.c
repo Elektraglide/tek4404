@@ -28,6 +28,9 @@
 #define socklen_t unsigned int
 #define CHOWN(A,B,C) chown(A,B) /* does not have group id */
 
+#define st_ctime st_mtime	/* does not have */
+#define st_atime st_mtime	/* does not have */
+
 struct sir sirbuf;
 
 #else
@@ -116,7 +119,7 @@ enum NFSStatus
 		
 		NFS3ERR_BADHANDLE = 10001,
 		NFS3ERR_BAD_COOKIE = 10003,
-		NFS3ERR_NOTSUPP = 10004,
+		NFS3ERR_NOTSUPP = 10004
 };
 
 enum ftype
@@ -511,9 +514,11 @@ unsigned int nfsmode;
 			perms |= S_IFCHR;
 		if (nfsmode & BLK)
 			perms |= S_IFBLK;
+#ifndef tek
 		if (nfsmode & LNK)
 			perms |= S_IFLNK;
-	
+#endif
+
 		/* translate from NFS bits */
 		if (nfsmode & ROWN)
 			perms |= S_IREAD;
@@ -557,8 +562,10 @@ unsigned int hostperms;
 		nfsperms |= CHR;
 	if ((hostperms & S_IFBLK) == S_IFBLK)
 		nfsperms |= BLK;
+#ifndef tek
 	if ((hostperms & S_IFLNK) == S_IFLNK)
 		nfsperms |= LNK;
+#endif
 
 	if (hostperms & S_IREAD)
 		nfsperms |= ROWN;
@@ -625,9 +632,9 @@ int fsid;
 	}
 	add_uint(reply, fsid);
 	add_uint(reply, (unsigned int)info->st_ino);
+	add_nfstime(reply, (unsigned int)info->st_atime);
 	add_nfstime(reply, (unsigned int)info->st_mtime);
-	add_nfstime(reply, (unsigned int)info->st_mtime);
-	add_nfstime(reply, (unsigned int)info->st_mtime);
+	add_nfstime(reply, (unsigned int)info->st_ctime);
 }
 
 void add_fattr3(reply, info, fsid)
@@ -786,8 +793,9 @@ struct conn *request;
 unsigned int get_uint64(request)
 struct conn *request;
 {
+	unsigned int val;
 	get_uint(request);
-	unsigned int val = get_uint(request);
+	val = get_uint(request);
 	return val;
 }
 
@@ -896,7 +904,9 @@ struct stat *info;
 	if (get_uint(request))
 		info->st_uid = get_uint(request);
 
+#ifndef tek
 	info->st_gid = -1;
+#endif
 	if (get_uint(request))
 #ifdef tek
 			getuint(request);	/* no group */
@@ -1542,7 +1552,7 @@ struct conn *request;
 			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
 			freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
 #else
-			n = open(devname, O_RDONLY);
+			n = open("/dev/disk", O_RDONLY);
 			lseek(n, BLOCK_SIZE, SEEK_SET);
 			read(n, &sirbuf, sizeof(sirbuf));
 			close(n);
@@ -1631,7 +1641,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d gid=%d size=%ld ctime=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size, reqinfo.st_ctime);
+			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld ctime=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size, reqinfo.st_ctime);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
@@ -1833,7 +1843,7 @@ struct conn *request;
 			if (how != EXCLUSIVE)
 			{
 				get_sattr3(request, &reqinfo);
-				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d gid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_gid,reqinfo.st_size);
+				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,,reqinfo.st_size);
 			}
 			else
 			{
