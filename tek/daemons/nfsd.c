@@ -258,6 +258,23 @@ unsigned int mode;
 	strcat(linkdest,"/..");
 	link(linkpath,linkdest);
 }
+
+int truncate(filepath, len)
+char *filepath;
+int len;
+{
+	int fd;
+
+	fd = open(filepath, O_RDWR);
+	if (fd > 0)
+	{
+		lseek(fd, len, SEEK_SET);
+		truncf(fd);
+		close(fd);
+	}
+
+	return fd;
+}
 #endif
 
 /* cache of file handle entries */
