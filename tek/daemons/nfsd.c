@@ -914,14 +914,14 @@ struct stat *info;
 		info->st_mode = nfsmode2host(get_uint(request));
 		info->st_uid = get_uint(request);
 #ifdef NO_GROUPS
-		getuint(request);
+		get_uint(request);
 #else
 		info->st_gid = get_uint(request);
 #endif
 		info->st_size = get_uint(request);
 
 #ifdef tek
-		getuint(request);	getuint(request);	/* no access time */
+		get_uint(request);	get_uint(request);	/* no access time */
 #else
 		get_uint(request); info->st_atime = get_uint(request);
 #endif
@@ -944,7 +944,7 @@ struct stat *info;
 
 #ifdef NO_GROUPS
 	if (get_uint(request))
-			getuint(request);
+			get_uint(request);
 #else
 	info->st_gid = -1;
 	if (get_uint(request))
@@ -961,7 +961,7 @@ struct stat *info;
 #ifdef tek
 	if (time_how == SET_TO_CLIENT_TIME)
 	{
-		getuint(request);	getuint(request);	/* no access time */
+		get_uint(request);	get_uint(request);	/* no access time */
 	}
 #else
 	if (time_how == SET_TO_SERVER_TIME)
@@ -2056,11 +2056,11 @@ struct conn *request;
 						/* skip if not past starting point */
 						if (n > offset)
 						{
-	#ifdef __linux__
+#ifdef __linux__
 							len = strlen(dir->d_name);
-	#else
+#else
 							len = dir->d_namlen;
-	#endif
+#endif
 							/* enough space? */
 							if (reply.cwp + ROUNDLEN(len) + 24 > count)
 							{
@@ -2146,11 +2146,11 @@ struct conn *request;
 						/* skip if not past starting point */
 						if (n > offset)
 						{
-	#ifdef __linux__
+#ifdef __linux__
 							len = strlen(dir->d_name);
-	#else
+#else
 							len = dir->d_namlen;
-	#endif
+#endif
 							/* enough space? */
 							if (reply.cwp + ROUNDLEN(len) + 152 > maxcount)
 							{
@@ -2219,14 +2219,14 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info, fh->fsid);
-	#ifndef tek
+#ifndef tek
 				/* fake some numbers */
 				disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
 				freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
 				totalfdns = 16384;
 				freefdns = 2048;
-	#else
-				n = open(devname, O_RDONLY);
+#else
+				n = open("/dev/disk", O_RDONLY);
 				lseek(n, BLOCK_SIZE, SEEK_SET);
 				read(n, &sirbuf, sizeof(sirbuf));
 				close(n);
@@ -2234,7 +2234,7 @@ struct conn *request;
 				freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
 				totalfdns = sirbuf.sszfdn;
 				freefdns = sirbuf.sfdnc;
-	#endif
+#endif
 				add_uint64(&reply, disksize);					/* Total # of blocks (of the above size) */
 				add_uint64(&reply, freesize);					/* Free blocks */
 				add_uint64(&reply, freesize);					/* Free blocks available to non-priv. users */
