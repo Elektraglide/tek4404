@@ -74,15 +74,6 @@ void setsid() {}
 
 #define MSG_FDBROADCAST 0
 
-char *nget_str(char *name)
-{
-  if (!strcmp(name, "my_name"))
-    return "MBPm1";
-		
-  return "unknown";
-}
-
-
 #endif
 
 extern int rand();
@@ -183,22 +174,11 @@ int len;
 int my_inet_addr(name)
 char *name;
 {
-  int i,p;
-  int addr = 0;
 
-  for(i=0;  i<4; i++)
-  {
-   p = 0;
-   while (p <= 255 && *name != '.' && *name != '\0')
-   {
-      p *= 10;
-      p += (*name++ - '0') & 15;
-   }
-   name++;
-     
-   addr <<= 8;
-   addr |= p & 255;
-  }
+  int addr;
+
+	/* return a struct in_addr, so we need to dereference */
+	addr = ((struct in_addr *)inet_addr(name))->s_addr;
 
   return addr;
 }
@@ -502,7 +482,6 @@ char **argv;
   socklen_t src_addr_len;
   dhcp_t *dhcp;
 
-  alarm(5);
 
   for(i=1; i<argc; i++)
   {
