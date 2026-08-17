@@ -108,8 +108,6 @@ char **argv;
   ntp_packet packet;
   int i,verbose;
 
-  alarm(5);
-  
   verbose = 0;
   setclock = 0;
   for(i=1; i<argc; i++)
@@ -146,16 +144,15 @@ char **argv;
 
   memset( ( char* ) &serv_addr, 0, sizeof( serv_addr ) );
   serv_addr.sin_family = AF_INET;
-
-  memcpy( ( char* )&serv_addr.sin_addr.s_addr, ( char* )server->h_addr, server->h_length );
+	serv_addr.sin_addr.s_addr = *(unsigned int *)server->h_addr;
   serv_addr.sin_port = htons( portno );
   if (verbose)
     fprintf(stderr, "Sending to %s : %d\n", inet_ntoa(serv_addr.sin_addr.s_addr), ntohs(serv_addr.sin_port));
 
+#if 0
   if ( connect( sockfd, ( struct sockaddr * ) &serv_addr, sizeof( serv_addr) ) < 0 )
     error( "ERROR connecting" );
 
-#if 1
   /* blast out 3 requests.. Uniflex seems to lose first one! */
   n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
   if ( n < 0 )
@@ -164,13 +161,15 @@ char **argv;
   n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
   if ( n < 0 )
     error( "ERROR send to socket" );
-
 #endif
-  n = send( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 );
+
+  n = sendto( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0 , (struct sockaddr *)&serv_addr, sizeof(serv_addr));
   if ( n < 0 )
     error( "ERROR send to socket" );
 
-  n = read( sockfd, ( char* ) &packet, sizeof( ntp_packet ) );
+  alarm(15);
+  
+  n = recvfrom( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0,  (struct sockaddr *)&serv_addr, sizeof(serv_addr));
   if ( n < 0 )
     error( "ERROR reading from socket" );
 
