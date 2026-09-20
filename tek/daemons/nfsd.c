@@ -205,12 +205,10 @@ struct response {
 };
 
 /* well-known RPC prog names */
-enum {
-	PORTMAPPERD = 100000,
-	NFSD = 100003,
-	MOUNTD = 100005,
-	LOCKD = 100024
-} progs;
+#define	PORTMAPPERD 100000
+#define	NFSD 100003
+#define	MOUNTD 100005
+#define	LOCKD 100024
 
 /* ports for RPC progs */
 #define PORTMAPPERD_PORT 111
@@ -767,12 +765,12 @@ int prognum;
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
 
-	/* fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d\n", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc));
-	*/
-
+/*	fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d msg:%d\015\012", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc), ntohl(header->msg_type));
+*/
 	reply.cwp = 0;
 	if (ntohl(header->msg_type) != CALL)
 	{
+		fprintf(console, "validate: corrupt call %d\015\012", ntohl(header->msg_type));
 		/* corrupted */
 		add_uint(&reply, ntohl(header->xid));
 		add_uint(&reply, REPLY);
@@ -786,6 +784,7 @@ int prognum;
 	else
 	if (ntohl(header->rpcvers) != 2)
 	{
+		fprintf(console, "validate: wrong ver %d\015\012", ntohl(header->rpcvers));
 		/* not NFSv2 or NFSv3 */
 		add_uint(&reply, ntohl(header->xid));
 		add_uint(&reply, REPLY);
@@ -799,6 +798,7 @@ int prognum;
 	else
 	if (ntohl(header->prog) != prognum)
 	{
+		fprintf(console, "validate: wrong prognum %d  wanted %d\015\012", ntohl(header->prog), prognum);
 		/* not correct service */
 		add_uint(&reply, ntohl(header->xid));
 		add_uint(&reply, REPLY);
@@ -1518,7 +1518,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			offset = get_uint(request);
 			count = get_uint(request);
-			fprintf(console, "nfsd: READDIR: offset = %d count = %d\n", offset, count);
+			/* fprintf(console, "nfsd: READDIR: offset = %d count = %d\n", offset, count); */
 			
 			/* clamp to our buffer size */
 			if (count > TRANSFER_SIZE)
@@ -1556,7 +1556,7 @@ struct conn *request;
 						add_uint(&reply, n);	/* fileid */
 						add_string(&reply, dir->d_name, len);
 						add_uint(&reply, n);
-						fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
+						/* fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name); */
 					}
 				}
 				closedir(d);
@@ -1566,7 +1566,7 @@ struct conn *request;
 
 				/* complete or run out of room? */
 				add_uint(&reply, (count) ? 1 : 0);
-				fprintf(console, "nfsd: READDIR: eof(%d): cwp(%d)\n", (count) ? 1 : 0, reply.cwp);
+				/* fprintf(console, "nfsd: READDIR: eof(%d): cwp(%d)\n", (count) ? 1 : 0, reply.cwp); */
 			}
 			break;
 		case 17:
@@ -1597,7 +1597,6 @@ struct conn *request;
 	{
 			fprintf(console, "nfsd: sendto: %s\n",strerror(errno));
 	}
-	
 }
 
 #define FSF3_LINK 0x0001
@@ -1653,7 +1652,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x\n", filepath, info.st_mode);
+				/* fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x\n", filepath, info.st_mode); */
 			}
 			else
 			{
@@ -1668,7 +1667,7 @@ struct conn *request;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size);
+			/* fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size); */
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
@@ -1681,7 +1680,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
-				fprintf(console, "nfsd: SETATTR3 = %s mode=%4.4x size=%d\n", filepath, info.st_perm, info.st_size);
+				/* fprintf(console, "nfsd: SETATTR3 = %s mode=%4.4x size=%d\n", filepath, info.st_perm, info.st_size); */
 			}
 			else
 			{
@@ -1870,7 +1869,7 @@ struct conn *request;
 			if (how != EXCLUSIVE)
 			{
 				get_sattr3(request, &reqinfo);
-				fprintf(console, "nfsd: CREATE3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size);
+				/* fprintf(console, "nfsd: CREATE3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size); */
 			}
 			else
 			{
@@ -1908,7 +1907,7 @@ struct conn *request;
 				add_uint(&reply, NFS_OK);
 				add_post_filehandle(&reply, &handle);
 				add_post_fattr3(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: CREATE3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid);
+				/* fprintf(console, "nfsd: CREATE3 = %s perm:%4.4x on fsid=%d\n", filepath, info.st_mode, fh->fsid); */
 
 				stat(dirpath, &info);
 				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
@@ -2106,7 +2105,7 @@ struct conn *request;
 			cookieverf = get_cookie3(request);
 			count = get_uint(request);
 			maxcount = get_uint(request);
-			fprintf(console, "nfsd: READDIRPLUS3: offset:%d cookie:%d count=%d maxcount:%d on fsid=%d\n", offset, cookieverf, count, maxcount, fh->fsid);
+			/* fprintf(console, "nfsd: READDIRPLUS3: offset:%d cookie:%d count=%d maxcount:%d on fsid=%d\n", offset, cookieverf, count, maxcount, fh->fsid); */
 #if 0
 			/* uNFS skips support because of lack of atomicity of getting info.. do we care`? */
 			add_uint(&reply, NFS3ERR_NOTSUPP);
@@ -2174,7 +2173,7 @@ struct conn *request;
 								handle.fsid = fh->fsid;
 								add_post_fattr3(&reply, &info, fh->fsid);
 								add_post_filehandle(&reply, &handle);
-								fprintf(console, "nfsd: READDIRPLUS3: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
+								/* fprintf(console, "nfsd: READDIRPLUS3: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name); */
 							}
 							else
 							{
@@ -2194,7 +2193,7 @@ struct conn *request;
 
 					/* complete or run out of room? */
 					add_uint(&reply, (count) ? 1 : 0);
-					fprintf(console, "nfsd: READDIRPLUS3: eof(%d) cwp(%d)\n",(count) ? 1 : 0, reply.cwp);
+					/* fprintf(console, "nfsd: READDIRPLUS3: eof(%d) cwp(%d)\n",(count) ? 1 : 0, reply.cwp);*/
 				}
 				else
 				{
