@@ -39,6 +39,8 @@
 #include <net/socket.h>
 #include <net/netdb.h>
 
+typedef int socklen_t;
+
 #define uint8_t unsigned char
 #define uint32_t unsigned int
 
@@ -103,6 +105,7 @@ char **argv;
   char* host_name = "ntp.org"; /* NTP server host-name. */
 
   struct sockaddr_in serv_addr;
+  socklen_t src_addr_len;
   struct hostent *server;
   time_t txTm;
   ntp_packet packet;
@@ -169,7 +172,7 @@ char **argv;
 
   alarm(15);
   
-  n = recvfrom( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0,  (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  n = recvfrom( sockfd, ( char* ) &packet, sizeof( ntp_packet ), 0,  (struct sockaddr *)&serv_addr, &src_addr_len);
   if ( n < 0 )
     error( "ERROR reading from socket" );
 
