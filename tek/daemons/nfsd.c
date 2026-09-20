@@ -2271,7 +2271,7 @@ struct conn *request;
 				add_uint(&reply, 0);			/* timedelta usec */
 				add_uint(&reply, FSF3_LINK | FSF3_SYMLINK | FSF3_HOMOGENEOUS | FSF3_CANSETTIME);
 				
-				fprintf(console, "nfsd: FsInfo3: %s\n", filepath);
+				/* fprintf(console, "nfsd: FsInfo3: %s\n", filepath); */
 			}
 			else
 			{
@@ -2295,7 +2295,7 @@ struct conn *request;
 				add_uint(&reply, 0);
 				add_uint(&reply, 1);
 				
-				fprintf(console, "nfsd: PathConf: %s  perm:%4.4x\n", filepath, info.st_mode);
+				/* fprintf(console, "nfsd: PathConf: %s  perm:%4.4x\n", filepath, info.st_mode); */
 			}
 			else
 			{
