@@ -357,17 +357,20 @@ int sig;
   signal(sig, testsig);
 }
 
-void writewithlf(socket, buffer, len)
+int writewithlf(socket, buffer, len)
 int socket;
 char *buffer;
 int len;
 {
-char  *cwp, *nlp;
-int n;
-        
-         /* insert linefeeds */
+char *cwp, *nlp;
+int rc,n,remain;
+
+buffer[len] = 0;
+
+  /* insert linefeeds */
+  remain = len;
   cwp = buffer;
-  while(len > 0)
+  while(remain > 0)
   {
     nlp = strchr(cwp, '\n');
    if(!nlp)
@@ -378,16 +381,23 @@ int n;
    {
       nlp++;
       n = (int)nlp - (int)cwp;
-      write(socket, cwp, n);
-      write(socket, &linefeed, sizeof(linefeed));
+      rc = write(socket, cwp, n);
+      if (rc < 0)
+          return len - remain;
+      rc = write(socket, &linefeed, sizeof(linefeed));
       cwp = nlp;
-      len -= n;
+      remain -= n;
    }
- }
-         
- if (len > 0)
-   write(socket, cwp, len);
+  }
 
+  if (remain > 0)
+  {
+    rc = write(socket, cwp, remain);
+    if (rc < 0)
+      return len - remain;
+  }
+
+  return len;
 }
 
 int telnet_session(din,dout,from)
