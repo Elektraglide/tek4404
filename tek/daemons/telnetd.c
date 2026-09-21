@@ -815,7 +815,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     /* ioctl(0, TIOCSCTTY, 1); */
 
     /* Now the original file descriptor is useless */
-    /* close(fdslave);  */
+    close(fdslave);
 
     /* Execution of the program */
     {
@@ -824,7 +824,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
          use our sessionargv friendly naming
       */
       rc = execve(istelnet ? telnetprocess[0] : shellprocess[0], 
-                  sessionargv,
+                  istelnet ? telnetprocess : sessionargv,
                   envp);
       if (rc < 0)
       {
