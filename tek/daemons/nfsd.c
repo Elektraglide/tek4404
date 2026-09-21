@@ -1574,17 +1574,17 @@ struct conn *request;
 			add_uint(&reply, NFS_OK);
 			add_uint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
 			add_uint(&reply, BLOCK_SIZE);			/* Block size of FS */
-#ifndef tek
-			/* fake some numbers */
-			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
-			freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
-#else
+#ifdef tek
 			n = open("/dev/disk", O_RDONLY);
 			lseek(n, BLOCK_SIZE, SEEK_SET);
 			read(n, &sirbuf, sizeof(sirbuf));
 			close(n);
 			disksize = (sirbuf.ssizfr[0] << 16) + (sirbuf.ssizfr[1] << 8) + (sirbuf.ssizfr[2] << 0);
 			freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
+#else
+			/* fake some numbers */
+			disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
+			freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
 #endif
 			add_uint(&reply, disksize);					/* Total # of blocks (of the above size) */
 			add_uint(&reply, freesize);					/* Free blocks */
@@ -2218,13 +2218,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info, fh->fsid);
-#ifndef tek
-				/* fake some numbers */
-				disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
-				freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
-				totalfdns = 16384;
-				freefdns = 2048;
-#else
+#ifdef tek
 				n = open("/dev/disk", O_RDONLY);
 				lseek(n, BLOCK_SIZE, SEEK_SET);
 				read(n, &sirbuf, sizeof(sirbuf));
@@ -2233,6 +2227,12 @@ struct conn *request;
 				freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
 				totalfdns = sirbuf.sszfdn;
 				freefdns = sirbuf.sfdnc;
+#else
+				/* fake some numbers */
+				disksize = 40 * 1024 * 1024 / BLOCK_SIZE;
+				freesize = 10 * 1024 * 1024 / BLOCK_SIZE;
+				totalfdns = 16384;
+				freefdns = 2048;
 #endif
 				add_uint64(&reply, disksize);					/* Total # of blocks (of the above size) */
 				add_uint64(&reply, freesize);					/* Free blocks */
