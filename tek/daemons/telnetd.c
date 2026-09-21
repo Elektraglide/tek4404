@@ -13,7 +13,7 @@
 #include <net/inet.h>
 #include <net/nerrno.h>
 
-#ifndef __clang__
+#ifdef tek
 #include <net/in.h>
 #include <net/socket.h>
 
@@ -72,7 +72,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define USE_PACKETMODExx
-#define DEBUGxx
+#define DEBUG
 #define DEBUGCONSOLExx
 /***********************************/
 
@@ -107,11 +107,11 @@ char hexascii[] = "0123456789ABCDEF";
 char copyright[] = "Telnet Server Version 1.2 Copyright (C) 2024 By Adam Billyard\n";
 char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
 char linefeed[] = "\012";
-int sock = -1;
-int state = STOPPED;
-int sessionsock = 0;
-int sessionpty = 0;
-int sessionpid = 0;
+
+int server_sock = -1;
+int session_state = STOPPED;
+int session_pty = 0;
+int session_cmd_pid = 0;
 
 int off = 0;
 int on = 1;
@@ -124,7 +124,7 @@ char ruser[32],rhost[32];
 char sessionname[64];
 
 struct buffer {
-  unsigned char data[4096];
+  unsigned char data[1024];     /* Uniflex ptty buffers are 256 bytes!! */
   unsigned char *start;
   unsigned char *end;
 };
@@ -321,17 +321,23 @@ void
 cleanup_child(sig)
 int sig;
 {
-  
-#ifdef DEBUGCONSOLE
+  int n;
+
+    /* is our child alive? */
+    n = kill(session_cmd_pid, 0);
+
+#ifdef DEBUG
     fprintf(console,"pid(%d): cleanup telnet session on %d\015\012",getpid(), sig);
-    fprintf(console,"child pid(%d)\015\012", sessionpid);
+    fprintf(console,"child pid(%d) status(%d)\015\012", session_cmd_pid, n);
 #endif
 
-  /* SIGDEAD is *after* process has died so nothing to do here */
+    /* SIGDEAD is *after* process has died so nothing to do here */
 
-  state = STOPPED;
+/*
+    if (n == 0)
+      state = STOPPED;
+*/
 
-  signal(sig, cleanup_child);
 }
 
 void
@@ -341,16 +347,14 @@ int sig;
   int result;
   
   fprintf(console,"signal(%d) for pid(%d)\015\012",sig, getpid());
-  fprintf(console,"sessionpid(%d)\015\012", sessionpid);
+  fprintf(console,"session_cmd_pid(%d)\015\012", session_cmd_pid);
 
-  state = STOPPED;
+  session_state = STOPPED;
 
 #if 0
-  close(sessionsock);
-  close(sessionpty);
+  close(session_pty);
 #ifdef DEBUGCONSOLE
-  fprintf(console,"sessionsock(%d) closed\015\012",sessionsock);
-  fprintf(console,"sessionpty(%d) closed\015\012",sessionpty);
+  fprintf(console,"session_pty(%d) closed\015\012",session_pty);
 #endif
 #endif
   
@@ -453,12 +457,10 @@ char *from;
   fdslave = ptfd[0];
   fdmaster = ptfd[1];
 
-  sessionsock = din;
-  sessionpty = fdmaster;
-#ifdef DEBUGCONSOLE
+  session_pty = fdmaster;
+#ifdef DEBUG
   fprintf(console, "pid(%d): connect from %s\015\012", getpid(), from);
-  fprintf(console, "sessionsock(%d)\015\012", sessionsock);
-  fprintf(console, "sessionpty(%d)\015\012", sessionpty);
+  fprintf(console, "session_pty(%d)\015\012", session_pty);
 #endif
 
   signal(SIGEMT, testsig);
@@ -469,17 +471,20 @@ char *from;
   signal(SIGQUIT, SIG_IGN);
   signal(SIGTERM, SIG_IGN);
 
-  sessionpid = fork();
-  if (sessionpid)
+  session_cmd_pid = fork();
+  if (session_cmd_pid)
   {
-#ifdef DEBUGCONSOLE
-    fprintf(console, "ptty slave pid(%d)\015\012", sessionpid);
-#endif      
+#ifdef DEBUG
+    fprintf(console, "pid(%d): ptty slave\015\012", session_cmd_pid);
+#endif
 
     /* PARENT */
     n = control_pty(fdmaster, PTY_INQUIRY, 0);
     
     n &= ~(PTY_READ_WAIT);
+
+
+    n |= (PTY_READ_WAIT);
 
 #if 0
     /* do not process input for Ctrl-C etc */
@@ -490,6 +495,9 @@ char *from;
     n |= PTY_PACKET_MODE;
 #endif
     control_pty(fdmaster, PTY_SET_MODE, n );
+
+    /* needed? */
+    control_pty(fdmaster, PTY_START_OUTPUT, 0);
 
    /* quiet if in r-cmd mode */
    if (istelnet != 0)
@@ -521,19 +529,19 @@ char *from;
 
 /* getting spurious SIGDEADs...
    Exiting child causes a SIGDEAD, but then other connections get SIGDEAD too..
-   Check PTY_EOF instead..
+   Check PTY_EOF instead..*/
+
     signal(SIGDEAD, cleanup_child);
-*/
     
     last_was_cr = 0;
     /* we want to immediately check if there is any initial output */
-    last_read = 5;
-    while(state != STOPPED)
+    last_read = 1;
+    while(session_state != STOPPED)
     {
+        errno = 0;
+
         /* Uniflex select appears to only expect actual socket fds */
         /* having stdin in the FD_SET wreaks havoc */
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
         FD_ZERO(&fd_in);
         n = 0;
         
@@ -541,28 +549,39 @@ char *from;
         if (din > n)
           n = din;
 
-#ifdef __clang__
+        /* Uniflex select returns immediately when adding fdmaster to the FDSET..*always* saying its ready to read..buts its not */
+
+        /* Uniflex schedules using a quantum of 0.1s, so is having a smaller timeout stopping slave ever being run? */
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+#ifdef tek
+        /* Uniflex select, for reasons unknown but appears to be related to when lots of writes to ptty, */
+        /* sometimes does not timeout(!), so if there is pending output, avoid doing a select().. */
+        ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+        if (ptystatus & PTY_OUTPUT_QUEUED)
+        {
+            fprintf(console, "pid(%d): select NULL timeout n(%d)\015\012", getpid(), n + 1);
+            rc = select(n + 1, &fd_in, NULL, NULL, NULL);
+        }
+        else
+        {
+            if (last_read > 0)
+            {
+                /* if there is slave output, for a few loops use a short timeout */
+                timeout.tv_sec = 0;
+                timeout.tv_usec = 50000;
+                last_read--;
+            }
+
+            fprintf(console, "pid(%d): select n(%d)\015\012", getpid(), n + 1);
+            rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+            fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d 0x%4.4x\015\012", getpid(), n + 1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc, ptystatus);
+        }
+#else
         FD_SET(fdmaster, &fd_in);
         if (fdmaster > n)
           n = fdmaster;
-#else
-        if(last_read > 0)
-        {
-          /* if there is slave output, for a few loops use a short timeout */
-          timeout.tv_sec = 0;
-          timeout.tv_usec = 20000;
-          last_read--;
-        }
-#endif
-
-#ifdef DEBUGCONSOLE
-fprintf(console, "pid(%d): select n(%d) for pty(%d)\015\012", getpid(), n+1, sessionpty);
-#endif
-        errno = 0;
         rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
-        
-#ifdef DEBUGCONSOLE
-fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", getpid(), n+1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc);
 #endif
 
         if (rc < 0)
@@ -575,7 +594,8 @@ fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", getpid(),
               break;
             }
 
-            fprintf(console,"continuing on %d\015\012",errno);
+            fprintf(console,"continuing on %d with state = %d\015\012",errno, session_state);
+            errno = 0;
             continue;
         }
         else
@@ -589,6 +609,7 @@ fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d\015\012", getpid(),
         /* read any socket input (din) and send to slave input */
         if (FD_ISSET(din, &fd_in))
         {
+          /* we have no input data still pending to be written, read some more */
           if (ts.bi.start == ts.bi.end)
           {
 #ifdef DEBUGCONSOLE_
@@ -652,10 +673,10 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
                  control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
                  write(dout, "SIGHUP\015", 8);
 
-                 fprintf(console, "sent SIGHUP to pid(%d)\015\012", sessionpid);
-                 kill(sessionpid, SIGHUP);
+                 fprintf(console, "sent SIGHUP to pid(%d)\015\012", session_cmd_pid);
+                 kill(session_cmd_pid, SIGHUP);
 
-				 break;
+                 break;
              }
 
              ts.bi.start += n;
@@ -666,33 +687,32 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
         /* select says bytes to read but read busy waits forever.. */
         /* select just doesn't work with pty descriptors */
         
-#ifdef __clang__
-        if (FD_ISSET(fdmaster, &fd_in))
-#else
+#ifdef tek
         ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
-        if (ptystatus & PTY_EOF)
-        {
-#ifdef DEBUGCONSOLE_
-          fprintf(console,"pid(%d): PTY_EOF\015\012",sessionpid);
-#endif
-          break;	
-        }
         while (ptystatus & PTY_OUTPUT_QUEUED)
+#else
+        if (FD_ISSET(fdmaster, &fd_in))
 #endif
         {
-          /* Data arrived from application */
+          /* Data available from application */
+
+          /* we have no ouput data still pending to be written, read some more */
           if (ts.bo.start == ts.bo.end)
           {
-#ifdef DEBUGCONSOLE_
-fprintf(console, "**Read master\015\012");
+#ifdef DEBUG
+            fprintf(console, "** TRY Read fdmaster %d bytes\015\012", sizeof(ts.bo.data));
 #endif
-            n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
+              /* Q: is there a bug in uniflex ptty buffering?  when reading max amount (224), select() then does not timeout..  */
+              n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
+#ifdef DEBUG
+            fprintf(console, "**Read fdmaster %d bytes\015\012", n);
+#endif
             if (n < 0)
             {
               fprintf(console, "fdmaster read() error %s\015\012", strerror(errno));
               if (errno != EINTR && errno != EWOULDBLOCK)
               {
-              	state = STOPPED;              	
+              	session_state = STOPPED;
                 break;
               }
 
@@ -731,45 +751,75 @@ fprintf(console, "**Read master\015\012");
             last_read = 5;
 #endif
           }
+          else
+          {
+              fprintf(console, "still pending output %d bytes\015\012", ts.bo.end - ts.bo.start);
+          }
         
+          /* send all pending output */
           while (ts.bo.start != ts.bo.end)
           {
-#ifdef DEBUGCONSOLE_
-fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
-#endif
             n = (int)write(dout, ts.bo.start, ts.bo.end - ts.bo.start);
             if (n > 0 && n < ts.bo.end - ts.bo.start)
             {
               fprintf(console, "output choked\015\012");
             }
+#ifdef DEBUG
+            fprintf(console, "**Wrote dout %d bytes \015\012", n);
+#endif
 
             if (n < 0)
             {
-#ifdef DEBUGCONSOLE
+#ifdef DEBUG
               fprintf(console, "dout write() error %s\015\012", strerror(errno));
 #endif
               if (errno && errno != EINTR && errno != EWOULDBLOCK)
               {
-              	state = STOPPED;
+              	session_state = STOPPED;
                 break;
               }
 
               /* keep trying to output */
               continue;
             }
+            else
+            if (n == 0)
+            {
+#ifdef DEBUG
+                fprintf(console, "dout write() ZERO %s\015\012", strerror(errno));
+#endif
+                break;
+            }
 
             ts.bo.start += n;
           }
+#ifdef tek
+          ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+          if (ptystatus & PTY_OUTPUT_QUEUED)
+              fprintf(console, "pid(%d): STILL PTY_OUTPUT_QUEUED\015\012", session_cmd_pid);
+
+#endif
         }
+
+#ifdef tek
+        /* check EOF */
+        if (ptystatus & PTY_EOF)
+        {
+#ifdef DEBUG
+            fprintf(console, "pid(%d): PTY_EOF\015\012", session_cmd_pid);
+#endif
+            break;
+        }
+#endif
       }
     
-      kill(sessionpid, SIGQUIT);
+      kill(session_cmd_pid, SIGQUIT);
 
       /* collect child process */
       n = wait(&rc);
-#ifdef DEBUGCONSOLE
+#ifdef DEBUG
       fprintf(console, "Collect ptty slave pid(%d) => %d\015\012", n, rc);
-#endif      
+#endif
   }
   else
   {
@@ -810,7 +860,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     sessionargv[1] = from;
     sessionargv[2] = NULL;
       
-#ifndef __clang__
+#ifdef tek
     /* calls pty_make_controlling_terminal */
     system_control(2, fdslave);
 #endif
@@ -846,7 +896,7 @@ fprintf(console, "**Write dout %d bytes \015\012", ts.bo.end - ts.bo.start);
     return errno;
   }
 
-#ifdef DEBUGCONSOLE
+#ifdef DEBUG
   fprintf(console, "EXIT telnet_session\015\012");
 #endif
   return errno;
@@ -859,8 +909,8 @@ int sig;
 #ifdef DEBUG
   fprintf(console,"cleanup telnetd on %d\015",sig);
 #endif
-  close(sock);
-  state = STOPPED;
+  close(server_sock);
+  session_state = STOPPED;
 }
 void
 cleanup_session(sig)
@@ -900,7 +950,7 @@ char **argv;
   struct in_sockaddr serv_addr;
   struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
-#ifndef __clang__
+#ifdef tek
   socketopt opt;
 #endif
   int reuse = 1;
@@ -914,30 +964,30 @@ char **argv;
   /* used this to break into select because timeout sometimes fails to work */
   signal(SIGALRM, SIG_IGN);
 
-  state = RUNNING;
+  session_state = RUNNING;
 
    /* listen for connections too? */
   if (argc > 1 && !strcmp(argv[1],"-s"))
   {
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
+    server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_sock < 0) {
       fprintf(console, "socket: %s\n",strerror(errno));
       return 1;
     }
 
-#ifndef __clang__
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &reusesize);
+#ifdef tek
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &reusesize);
 #else
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reusesize));
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reusesize));
 #endif
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(IPO_TELNET);
-    rc = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
+    rc = bind(server_sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
     if (rc < 0) {
       fprintf(console, "bind: %s\n",strerror(errno));
-      close(sock);
+      close(server_sock);
       return errno;
     }
 
@@ -947,20 +997,20 @@ char **argv;
      signal(SIGTERM, cleanup_and_exit);
      signal(SIGDEAD, cleanup_session);
 
-    rc = listen(sock, 5);
+    rc = listen(server_sock, 5);
     if (rc < 0) {
       fprintf(console, "listen: %s\n",strerror(errno));
-      close(sock);
+      close(server_sock);
       return errno;
     }
 
     fprintf(console, "telnetd started\n");
-    while (state == RUNNING)
+    while (session_state == RUNNING)
     {
       newsock = 0;
-      while (state == RUNNING && newsock <= 0)
+      while (session_state == RUNNING && newsock <= 0)
       {
-        newsock = accept(sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
+        newsock = accept(server_sock, (struct sockaddr *) & cli_addr, &cli_addr_len);
         if (newsock < 0){
           if (errno == EINTR) continue;
           if (errno == ETIMEDOUT) continue;
@@ -971,14 +1021,14 @@ char **argv;
           if (errno == ENOPROTOOPT) continue;
 
           fprintf(console, "error %d (%s) in accept\n", errno, strerror(errno));
-          close(sock);
+          close(server_sock);
           return errno;
         }
       }
       
-      if (state == STOPPED) break;
+      if (session_state == STOPPED) break;
 
-#ifndef __clang__
+#ifdef tek
       setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)&reuse, &reusesize);
       /* is turning off Nagle supported? */
 #else
@@ -1013,9 +1063,9 @@ char **argv;
 
     }
     
-    close(sock);
+    close(server_sock);
   }
-#ifndef __clang__
+#ifdef tek
   else
   {
     struct stat s;
@@ -1061,7 +1111,7 @@ char **argv;
 
         istelnet = 0;
         
-        /* rlogin_session(0,1,"local"); */       
+        /* rlogin_session(0,1,"local"); */
      }
      else
      {
