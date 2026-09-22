@@ -13,7 +13,13 @@
 #include <net/inet.h>
 #include <net/nerrno.h>
 
-#ifdef tek
+#ifdef TEK4404
+#ifndef __GNUC__
+#info telnetd
+#info Version 1.3
+#tstmp
+#endif
+
 #include <net/in.h>
 #include <net/socket.h>
 
@@ -72,7 +78,7 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 */
 
 #define USE_PACKETMODExx
-#define DEBUG
+#define DEBUGxx
 #define DEBUGCONSOLExx
 /***********************************/
 
@@ -104,8 +110,8 @@ clang: cc -std=c89 -Wno-extra-tokens -DB42 -Itek_include -o telnetd telnetd.c
 char hexascii[] = "0123456789ABCDEF";
 
 /* Uniflex maps \n to \r..  so we have to insert at runtime */
-char copyright[] = "Telnet Server Version 1.2 Copyright (C) 2024 By Adam Billyard\n";
-char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\n\n";
+char copyright[] = "Telnet Server Version 1.3 Copyright (C) 2024 By Adam Billyard\015\012";
+char welcomemotd[] = "Welcome to Tektronix 4404 Uniflex\015\012\015\012";
 char linefeed[] = "\012";
 
 int server_sock = -1;
@@ -327,11 +333,11 @@ int sig;
     n = kill(session_cmd_pid, 0);
 
 #ifdef DEBUG
-    fprintf(console,"pid(%d): cleanup telnet session on %d\015\012",getpid(), sig);
+    fprintf(console,"pid(%d): received SIGDEAD\015\012",getpid());
     fprintf(console,"child pid(%d) status(%d)\015\012", session_cmd_pid, n);
 #endif
 
-    /* SIGDEAD is *after* process has died so nothing to do here */
+    /* SIGDEAD received by all peer processes, killing them all! */
 
 /*
     if (n == 0)
@@ -471,6 +477,9 @@ char *from;
   signal(SIGQUIT, SIG_IGN);
   signal(SIGTERM, SIG_IGN);
 
+
+  signal(SIGDEAD, SIG_IGN);
+
   session_cmd_pid = fork();
   if (session_cmd_pid)
   {
@@ -502,21 +511,21 @@ char *from;
    /* quiet if in r-cmd mode */
    if (istelnet != 0)
       /* motd; Uniflex maps \n to \r so force it in */
-      writewithlf(dout, copyright, sizeof(copyright)-1);
+      write(dout, copyright, sizeof(copyright));
 
 #ifdef SHOW_MOTD
     fd = open("/etc/log/motd", O_RDONLY);
     if (fd < 0)
     {
       /* a default MOTD */
-      writewithlf(dout, welcomemotd, sizeof(welcomemotd)-1);
+      write(dout, welcomemotd, sizeof(welcomemotd));
     }
     else
     {
       while((i = (int)read(fd, buffer, sizeof(buffer)-1)) > 0)
       {
         buffer[i] = '\0';
-        writewithlf(dout, buffer, i);
+        write(dout, buffer, i);
       }
       close(fd);
     }
@@ -529,7 +538,11 @@ char *from;
 
 /* getting spurious SIGDEADs...
    Exiting child causes a SIGDEAD, but then other connections get SIGDEAD too..
-   Check PTY_EOF instead..*/
+
+   session1, session2, kill session1, session2 OK
+   session1, session2, kill session2, session1 also gets SIGDEAD!
+
+   Check PTY_EOF instead to detect session dead..*/
 
     signal(SIGDEAD, cleanup_child);
     
@@ -540,7 +553,7 @@ char *from;
     {
         errno = 0;
 
-        /* Uniflex select appears to only expect actual socket fds */
+        /* Uniflex select appears to only expect actual socket fds (not ptty, not stdin) */
         /* having stdin in the FD_SET wreaks havoc */
         FD_ZERO(&fd_in);
         n = 0;
@@ -549,40 +562,32 @@ char *from;
         if (din > n)
           n = din;
 
-        /* Uniflex select returns immediately when adding fdmaster to the FDSET..*always* saying its ready to read..buts its not */
+        /* Uniflex select() returns immediately when adding fdmaster to the FDSET..*always* saying its ready to read..buts its not 
+            fdmaster is a ptty not a socket..
+        */
 
-        /* Uniflex schedules using a quantum of 0.1s, so is having a smaller timeout stopping slave ever being run? */
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-#ifdef tek
-        /* Uniflex select, for reasons unknown but appears to be related to when lots of writes to ptty, */
-        /* sometimes does not timeout(!), so if there is pending output, avoid doing a select().. */
-        ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
-        if (ptystatus & PTY_OUTPUT_QUEUED)
+        if (last_read > 0)
         {
-            fprintf(console, "pid(%d): select NULL timeout n(%d)\015\012", getpid(), n + 1);
-            rc = select(n + 1, &fd_in, NULL, NULL, NULL);
+            /* if there is slave output, for a few loops use a short timeout */
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 50000;
+            last_read--;
         }
-        else
-        {
-            if (last_read > 0)
-            {
-                /* if there is slave output, for a few loops use a short timeout */
-                timeout.tv_sec = 0;
-                timeout.tv_usec = 50000;
-                last_read--;
-            }
 
-            fprintf(console, "pid(%d): select n(%d)\015\012", getpid(), n + 1);
-            rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
-            fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d 0x%4.4x\015\012", getpid(), n + 1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc, ptystatus);
-        }
+#ifdef TEK4404
+        /* Uniflex select(), for reasons unknown (but appears to be related to when lots of writes to ptty) 
+        sometimes does not timeout(!) so requires keyboard input to progress..
+        */
 #else
         FD_SET(fdmaster, &fd_in);
         if (fdmaster > n)
           n = fdmaster;
-        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
 #endif
+        /* fprintf(console, "pid(%d): select n(%d)\015\012", getpid(), n + 1);*/
+        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+        /* fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d 0x%4.4x\015\012", getpid(), n + 1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc, ptystatus); */
 
         if (rc < 0)
         {
@@ -687,7 +692,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
         /* select says bytes to read but read busy waits forever.. */
         /* select just doesn't work with pty descriptors */
         
-#ifdef tek
+#ifdef TEK4404
         ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
         while (ptystatus & PTY_OUTPUT_QUEUED)
 #else
@@ -793,15 +798,16 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 
             ts.bo.start += n;
           }
-#ifdef tek
+#ifdef TEK4404
           ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
+#ifdef DEBUG
           if (ptystatus & PTY_OUTPUT_QUEUED)
               fprintf(console, "pid(%d): STILL PTY_OUTPUT_QUEUED\015\012", session_cmd_pid);
-
+#endif
 #endif
         }
 
-#ifdef tek
+#ifdef TEK4404
         /* check EOF */
         if (ptystatus & PTY_EOF)
         {
@@ -860,7 +866,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
     sessionargv[1] = from;
     sessionargv[2] = NULL;
       
-#ifdef tek
+#ifdef TEK4404
     /* calls pty_make_controlling_terminal */
     system_control(2, fdslave);
 #endif
@@ -950,7 +956,7 @@ char **argv;
   struct in_sockaddr serv_addr;
   struct in_sockaddr cli_addr;
   socklen_t cli_addr_len;
-#ifdef tek
+#ifdef TEK4404
   socketopt opt;
 #endif
   int reuse = 1;
@@ -975,7 +981,7 @@ char **argv;
       return 1;
     }
 
-#ifdef tek
+#ifdef TEK4404
     setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, &reusesize);
 #else
     setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reusesize));
@@ -1028,7 +1034,7 @@ char **argv;
       
       if (session_state == STOPPED) break;
 
-#ifdef tek
+#ifdef TEK4404
       setsockopt(newsock, SOL_SOCKET, SO_DONTLINGER, (char *)&reuse, &reusesize);
       /* is turning off Nagle supported? */
 #else
@@ -1065,7 +1071,7 @@ char **argv;
     
     close(server_sock);
   }
-#ifdef tek
+#ifdef TEK4404
   else
   {
     struct stat s;
@@ -1115,8 +1121,8 @@ char **argv;
      }
      else
      {
-          fprintf(logger, ": telnet login");
-          istelnet = 1;
+        fprintf(logger, ": telnet login");
+        istelnet = 1;
      }
 
      fprintf(logger, "\n");
