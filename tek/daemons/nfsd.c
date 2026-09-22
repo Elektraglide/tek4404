@@ -2328,8 +2328,16 @@ char **argv;
 {
 	int portmapsock, mountsock, locksock, nfssock;
 	int n;
-	
-	console = stderr;
+	struct stat s;
+
+	/* are we being launched by /etc/server? */
+	fstat(0, &s);
+	if (s.st_mode & S_IFPIPE)
+	{
+		launched_by_server = 1;
+	}
+
+	console = fopen("/dev/console","w");
 
 #ifdef TEK4404
 	if (geteuid() != 0)
@@ -2337,9 +2345,9 @@ char **argv;
 #endif
 
 	umask(0);
-	
+
 	/* we act as portmapd, mountd and nfsd... */
-	portmapsock = create_UDP_sock("portmapd", PORTMAPPERD_PORT);
+	portmapsock = launched_by_server ? fileno(stdin) ? create_UDP_sock("portmapd", PORTMAPPERD_PORT);
 	mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
 	locksock = create_UDP_sock("lockd", LOCKD_PORT);
 	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
