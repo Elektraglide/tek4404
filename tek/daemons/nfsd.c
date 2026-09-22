@@ -219,7 +219,9 @@ struct response {
 /* logging credential details */
 #define LOGCREDS 0
 
+
 FILE *console;
+int launched_by_server = 0;
 
 #ifdef TEK4404
 /* missing CRT */
