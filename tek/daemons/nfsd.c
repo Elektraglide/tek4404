@@ -13,7 +13,7 @@
 */
 
 /* standard compiler define for Tektronix 440x */
-#ifdef tek
+#ifdef TEK4404
 
 #include <sys/sir.h>
 
@@ -221,7 +221,7 @@ struct response {
 
 FILE *console;
 
-#ifdef tek
+#ifdef TEK4404
 /* missing CRT */
 int mkdir(path, mode)
 char *path;
@@ -533,7 +533,7 @@ unsigned int nfsmode;
 			perms |= S_IFCHR;
 		if (nfsmode & BLK)
 			perms |= S_IFBLK;
-#ifndef tek
+#ifndef TEK4404
 		if (nfsmode & LNK)
 			perms |= S_IFLNK;
 #endif
@@ -551,7 +551,7 @@ unsigned int nfsmode;
 			perms |= S_IOWRITE;
 		if (nfsmode & XOTH)
 			perms |= S_IOEXEC;
-#ifndef tek
+#ifndef TEK4404
 		if (nfsmode & RGRP)
 			perms |= S_IRGRP;
 		if (nfsmode & WGRP)
@@ -581,7 +581,7 @@ unsigned int hostperms;
 		nfsperms |= CHR;
 	if ((hostperms & S_IFBLK) == S_IFBLK)
 		nfsperms |= BLK;
-#ifndef tek
+#ifndef TEK4404
 	if ((hostperms & S_IFLNK) == S_IFLNK)
 		nfsperms |= LNK;
 #endif
@@ -598,7 +598,7 @@ unsigned int hostperms;
 		nfsperms |= WOTH;
 	if (hostperms & S_IOEXEC)
 		nfsperms |= XOTH;
-#ifndef tek
+#ifndef TEK4404
 	if (hostperms & S_IRGRP)
 		nfsperms |= RGRP;
 	if (hostperms & S_IWGRP)
@@ -920,7 +920,7 @@ struct stat *info;
 #endif
 		info->st_size = get_uint(request);
 
-#ifdef tek
+#ifdef TEK4404
 		get_uint(request);	get_uint(request);	/* no access time */
 #else
 		get_uint(request); info->st_atime = get_uint(request);
@@ -958,7 +958,7 @@ struct stat *info;
 	}
 	
 	time_how = get_uint(request);
-#ifdef tek
+#ifdef TEK4404
 	if (time_how == SET_TO_CLIENT_TIME)
 	{
 		get_uint(request);	get_uint(request);	/* no access time */
@@ -1574,7 +1574,7 @@ struct conn *request;
 			add_uint(&reply, NFS_OK);
 			add_uint(&reply, TRANSFER_SIZE);			/* tsize: optimum transfer size */
 			add_uint(&reply, BLOCK_SIZE);			/* Block size of FS */
-#ifdef tek
+#ifdef TEK4404
 			n = open("/dev/disk", O_RDONLY);
 			lseek(n, BLOCK_SIZE, SEEK_SET);
 			read(n, &sirbuf, sizeof(sirbuf));
@@ -2218,7 +2218,7 @@ struct conn *request;
 			{
 				add_uint(&reply, NFS_OK);
 				add_post_fattr3(&reply, &info, fh->fsid);
-#ifdef tek
+#ifdef TEK4404
 				n = open("/dev/disk", O_RDONLY);
 				lseek(n, BLOCK_SIZE, SEEK_SET);
 				read(n, &sirbuf, sizeof(sirbuf));
@@ -2331,7 +2331,7 @@ char **argv;
 	
 	console = stderr;
 
-#ifdef tek
+#ifdef TEK4404
 	if (geteuid() != 0)
 		exit(-1);
 #endif
