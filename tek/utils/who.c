@@ -14,6 +14,14 @@ char **argv;
   fd = open("/act/utmp", O_RDONLY);
   if (fd > 0)
   {
+
+      /* this is written in same format as /act/history (struct hist)
+        helper functions fill in struct utmp
+        ut_id[4] is an ascii(!) index into file
+
+        How can we know if entry is still logged in?
+        */
+
   	setutent();
     while((record = getutent()) != NULL)
     {
