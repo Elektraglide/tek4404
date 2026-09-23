@@ -125,7 +125,8 @@ int on = 1;
 FILE  *console;
 FILE  *logger;
 
-int istelnet = 1;
+int is_in_select = 0;
+int istelnet;
 char ruser[32],rhost[32];
 char sessionname[64];
 
@@ -334,16 +335,15 @@ int sig;
 
 #ifdef DEBUG
     fprintf(console,"pid(%d): received SIGDEAD\015\012",getpid());
-    fprintf(console,"child pid(%d) status(%d)\015\012", session_cmd_pid, n);
+    fprintf(console,"child pid(%d) status(%d) in_select(%d)\015\012", session_cmd_pid, n, on);
 #endif
 
-    /* SIGDEAD received by all peer processes, killing them all! */
-
-/*
-    if (n == 0)
-      state = STOPPED;
-*/
-
+    /* SIGDEAD received by all peer processes, killing them all when 1 session ends!
+       Appears to be when a process in inside a select() it wrongly gets a SIGDEAD..  
+       so ignore SIGDEAD if curently inside a select()
+    */
+    if (is_in_select == 0)
+        session_state = STOPPED;
 }
 
 void
@@ -422,7 +422,7 @@ char *from;
   int last_read;
   int ptystatus;
 
-  fd_set fd_in;
+  fd_set fd_reads;
 
   struct sgttyb slave_orig_term_settings; 
   struct sgttyb new_term_settings;
@@ -456,7 +456,7 @@ char *from;
   rc = create_pty(ptfd);
   if (rc < 0)
   {
-    fprintf(console, "Error %s on create_pty\015", strerror(errno));
+    fprintf(console, "create_pty: error: %s\015", strerror(errno));
     exit(1);
   }
 
@@ -534,16 +534,7 @@ char *from;
     /* Close the slave side of the PTY */
     close(fdslave);
 
-/* nonblocking(din); */
-
-/* getting spurious SIGDEADs...
-   Exiting child causes a SIGDEAD, but then other connections get SIGDEAD too..
-
-   session1, session2, kill session1, session2 OK
-   session1, session2, kill session2, session1 also gets SIGDEAD!
-
-   Check PTY_EOF instead to detect session dead..*/
-
+    /* see handler comment for weird Uniflex SIGDEAD behaviour */
     signal(SIGDEAD, cleanup_child);
     
     last_was_cr = 0;
@@ -551,14 +542,12 @@ char *from;
     last_read = 1;
     while(session_state != STOPPED)
     {
-        errno = 0;
-
         /* Uniflex select appears to only expect actual socket fds (not ptty, not stdin) */
         /* having stdin in the FD_SET wreaks havoc */
-        FD_ZERO(&fd_in);
+        FD_ZERO(&fd_reads);
         n = 0;
         
-        FD_SET(din, &fd_in);
+        FD_SET(din, &fd_reads);
         if (din > n)
           n = din;
 
@@ -581,25 +570,31 @@ char *from;
         sometimes does not timeout(!) so requires keyboard input to progress..
         */
 #else
-        FD_SET(fdmaster, &fd_in);
+        FD_SET(fdmaster, &fd_reads);
         if (fdmaster > n)
           n = fdmaster;
 #endif
+        is_in_select = 1;
+        errno = 0;
         /* fprintf(console, "pid(%d): select n(%d)\015\012", getpid(), n + 1);*/
-        rc = select(n + 1, &fd_in, NULL, NULL, &timeout);
+        rc = select(n + 1, &fd_reads, NULL, NULL, &timeout);
         /* fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d 0x%4.4x\015\012", getpid(), n + 1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc, ptystatus); */
+        is_in_select = 0;
 
         if (rc < 0)
         {
-            fprintf(console, "pid(%d): select(): error %s\015\012", getpid(), strerror(errno)); 
-        	
+#ifdef DEBUG
+            fprintf(console, "pid(%d): select(): error: %s\015\012", getpid(), strerror(errno)); 
+#endif
         	if (errno != EINTR)
         	{
               fprintf(console,"break on %d\015\012",errno);
               break;
             }
 
+#ifdef DEBUG
             fprintf(console,"continuing on %d with state = %d\015\012",errno, session_state);
+#endif
             errno = 0;
             continue;
         }
@@ -612,7 +607,7 @@ char *from;
         else
 
         /* read any socket input (din) and send to slave input */
-        if (FD_ISSET(din, &fd_in))
+        if (FD_ISSET(din, &fd_reads))
         {
           /* we have no input data still pending to be written, read some more */
           if (ts.bi.start == ts.bi.end)
@@ -624,7 +619,7 @@ fprintf(console, "**Read din\015\012");
 
               if (n < 0)
               {
-                fprintf(console, "din read() error %s\015\012", strerror(errno));
+                fprintf(console, "din read() error: %s\015\012", strerror(errno));
                 if (errno != EINTR && errno != EWOULDBLOCK)
                 {
                   break;
@@ -661,7 +656,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
               n = (int)write(fdmaster, ts.bi.start, ts.bi.end - ts.bi.start);
               if (n < 0)
               {
-                fprintf(console, "fdmaster write() error %s\015\012",strerror(errno));
+                fprintf(console, "fdmaster write() error: %s\015\012",strerror(errno));
                 if (errno != EINTR && errno != EWOULDBLOCK)
                 {
                   break;
@@ -677,8 +672,9 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
                  /* we would like to kill any buffered output */
                  control_pty(fdmaster, PTY_FLUSH_WRITE, 0);
                  write(dout, "SIGHUP\015", 8);
-
+#ifdef DEBUG
                  fprintf(console, "sent SIGHUP to pid(%d)\015\012", session_cmd_pid);
+#endif
                  kill(session_cmd_pid, SIGHUP);
 
                  break;
@@ -696,7 +692,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
         ptystatus = control_pty(fdmaster, PTY_INQUIRY, 0);
         while (ptystatus & PTY_OUTPUT_QUEUED)
 #else
-        if (FD_ISSET(fdmaster, &fd_in))
+        if (FD_ISSET(fdmaster, &fd_reads))
 #endif
         {
           /* Data available from application */
@@ -707,14 +703,14 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 #ifdef DEBUG
             fprintf(console, "** TRY Read fdmaster %d bytes\015\012", sizeof(ts.bo.data));
 #endif
-              /* Q: is there a bug in uniflex ptty buffering?  when reading max amount (224), select() then does not timeout..  */
+              /* Q: is there a bug in uniflex ptty buffering?  when reading max amount (224) a few times, select() then does not timeout..  */
               n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
 #ifdef DEBUG
             fprintf(console, "**Read fdmaster %d bytes\015\012", n);
 #endif
             if (n < 0)
             {
-              fprintf(console, "fdmaster read() error %s\015\012", strerror(errno));
+              fprintf(console, "fdmaster read() error: %s\015\012", strerror(errno));
               if (errno != EINTR && errno != EWOULDBLOCK)
               {
               	session_state = STOPPED;
@@ -727,7 +723,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
             if (n == 0)
             {
             	if (errno && errno != EINTR && errno != EWOULDBLOCK)
-                  fprintf(console,"broken connection %s\015\012",strerror(errno));
+                  fprintf(console,"broken connection: error: %s\015\012",strerror(errno));
                 break;
             }
             else
@@ -775,9 +771,8 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 
             if (n < 0)
             {
-#ifdef DEBUG
-              fprintf(console, "dout write() error %s\015\012", strerror(errno));
-#endif
+              fprintf(console, "dout write() error: %s\015\012", strerror(errno));
+
               if (errno && errno != EINTR && errno != EWOULDBLOCK)
               {
               	session_state = STOPPED;
@@ -791,7 +786,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
             if (n == 0)
             {
 #ifdef DEBUG
-                fprintf(console, "dout write() ZERO %s\015\012", strerror(errno));
+                fprintf(console, "dout write() ZERO error: %s\015\012", strerror(errno));
 #endif
                 break;
             }
@@ -894,7 +889,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
                   envp);
       if (rc < 0)
       {
-        fprintf(console, "Error %s on exec\n", strerror(errno));
+        fprintf(console, "exec failed: error:\n", strerror(errno));
       }
     }
 
@@ -1026,7 +1021,7 @@ char **argv;
           if (errno == ENETDOWN) continue;
           if (errno == ENOPROTOOPT) continue;
 
-          fprintf(console, "error %d (%s) in accept\n", errno, strerror(errno));
+          fprintf(console, "accept: error %d (%s)\n", errno, strerror(errno));
           close(server_sock);
           return errno;
         }
