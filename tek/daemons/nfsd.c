@@ -2349,7 +2349,7 @@ char **argv;
 	umask(0);
 
 	/* we act as portmapd, mountd and nfsd... */
-	portmapsock = launched_by_server ? fileno(stdin) ? create_UDP_sock("portmapd", PORTMAPPERD_PORT);
+	portmapsock = launched_by_server ? fileno(stdin) : create_UDP_sock("portmapd", PORTMAPPERD_PORT);
 	mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
 	locksock = create_UDP_sock("lockd", LOCKD_PORT);
 	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
