@@ -237,6 +237,7 @@ FILE *console;
 
 uint8_t host_mac[6];
 struct in_addr host_assigned;
+char host_name[256];
 
 /* cmdline args:  nfsd -base /Users/dodah -machinename sparc2 -mac XX:XX:XX:XX:XX:XX -addr 192.168.1.71 -fs /Users/Shared/export/root -swap /Users/Shared/export/swap */
 uint8_t rarp_machinemac[6];
@@ -245,6 +246,7 @@ char bp_machinename[256];
 char bp_addr[64];
 char bp_fs[256];
 char bp_swap[256];
+char bp_dump[256];
 
 #ifdef TEK4404
 /* missing CRT */
@@ -1155,7 +1157,7 @@ int port;
 	}
 
 	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = INADDR_ANY;
+	serv_addr.sin_addr.s_addr = host_assigned.s_addr ;		// INADDR_ANY;
 	serv_addr.sin_port = htons(port);
 	n = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
 	if (n < 0) {
@@ -1423,7 +1425,6 @@ int isinternal;
 					{
 						fd = open(filepath, O_RDONLY);
 						rc = lseek(fd, offset, SEEK_SET);
-fprintf(console, "nfsd: read: offset=%d\n", offset);
 						add_uint(&reply, NFS_OK);
 						add_fattr(&reply, &info, fh->fsid);
 						add_fromfile(&reply, fd, count);
@@ -2417,14 +2418,15 @@ int isinternal;
 				n = get_uint(request);
 
 			ipv4 = get_ipv4(request);	/* ss2 passes 4 uint32 for address.. */
-			fprintf(console, "bootparamd: whoami: %8.8X\n", ipv4);
+			fprintf(console, "bootparamd: whoami:%8.8X\n", ipv4);
 
 			if (isinternal)
 				lomark = add_length_marker(&reply);
 
 			add_string(&reply, bp_machinename, strlen(bp_machinename));
-			add_string(&reply, "localdomain", 11);	/* domain */
-			add_ipv4(&reply, htonl(inet_addr(bp_addr)));
+			add_string(&reply, host_name, strlen(host_name));	/* domain */
+			add_ipv4(&reply, htonl(inet_addr("192.168.1.1")));
+			fprintf(console, "bootparamd: whoami:%8.8X => machinename:%s domain:%s address:%s\n", ipv4, bp_machinename, host_name, "192.168.1.1");
 
 			if (isinternal)
 				update_length(&reply, lomark);
@@ -2442,25 +2444,34 @@ int isinternal;
 			/* is the hostname we have info about? */
 			if (!strcmp(hostname, bp_machinename))
 			{
+				char *result;
+				
 				if (isinternal)
 					lomark = add_length_marker(&reply);
 
-				add_string(&reply, "sunbootd", 10);				/* server name */
-				add_ipv4(&reply, htonl(host_assigned.s_addr));			/* server address */
+				add_string(&reply, inet_ntoa(host_assigned), strlen(inet_ntoa(host_assigned)));		/* server name */
+				add_ipv4(&reply, htonl(host_assigned.s_addr));				/* server address */
+
+				result = NULL;
 				if (!strcmp(pathname, "root"))
 				{
-					add_string(&reply, bp_fs, strlen(bp_fs));
-					fprintf(console, "bootparamd: getfile: client:%s root:%s\n", hostname, bp_fs);
+					result = bp_fs;
 				}
+				else
 				if (!strcmp(pathname, "swap"))
 				{
-					add_string(&reply, bp_swap, strlen(bp_swap));
-					fprintf(console, "bootparamd: getfile: client:%s swap:%s\n", hostname, bp_swap);
+					result = bp_swap;
 				}
+				else
 				if (!strcmp(pathname, "dump"))
 				{
-					add_string(&reply, bp_swap, strlen(bp_swap));
-					fprintf(console, "bootparamd: getfile: client:%s dump:%s\n", hostname, bp_swap);
+					result = bp_dump;
+				}
+
+				if (result)
+				{
+					add_string(&reply, result, strlen(result));
+					fprintf(console, "bootparamd: getfile: client:%s %s => %s\n", hostname, pathname, result);
 				}
 				
 				if (isinternal)
@@ -2826,7 +2837,6 @@ char **argv;
 {
 	int portmapsock, mountsock, locksock, nfssock;
 	int n;
-	char hostbuffer[256];
 	struct hostent *host_entry;
 	int launched_by_server = 0;
 
@@ -2846,8 +2856,8 @@ char **argv;
 #endif
 
 	/* get our IP address so we can point clients back at us */
-	gethostname(hostbuffer, sizeof(hostbuffer));
-	host_entry = gethostbyname(hostbuffer);
+	gethostname(host_name, sizeof(host_name));
+	host_entry = gethostbyname(host_name);
 	n = 0;
 	while(host_entry->h_addr_list[n])
 	{
@@ -2856,7 +2866,11 @@ char **argv;
 			break;
 		n++;
 	}
-	fprintf(console, "%s: running on host: %s\n",  basename(argv[0]), inet_ntoa(host_assigned) );
+	/* shorten it */
+	if (strchr(host_name, '.'))
+		*strchr(host_name,'.') = '\0';
+
+	fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), host_name, inet_ntoa(host_assigned) );
 
 	umask(0);
 
@@ -2954,6 +2968,12 @@ char **argv;
 			{
 				n++;
 				strcpy(bp_swap, argv[n]);
+			}
+			else
+			if (!strcmp(argv[n],"-dump"))
+			{
+				n++;
+				strcpy(bp_dump, argv[n]);
 			}
 		}
 	
