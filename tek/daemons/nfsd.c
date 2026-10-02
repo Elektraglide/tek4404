@@ -2696,7 +2696,9 @@ struct conn *request;
 			add_uint16(&reply, 1);
 			strcpy(reply.buffer+reply.cwp, "File not found.");
 			reply.cwp += 16;
+			add_uint16(&reply,0);
 			sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
+			fprintf(console, "tftpd: ERROR: not found: %s\n", fullpath);
 	}
 }
 
