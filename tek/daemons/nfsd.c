@@ -3180,7 +3180,8 @@ char **argv;
 							{
 								struct eth2 reply;
 								uint32_t ipv4;
-																
+								char cmd[128];
+								
 								/* build a reply */
 								memcpy(reply.destmac, ethpkt->srcmac, 6);
 								memcpy(reply.srcmac, host_mac, 6);
