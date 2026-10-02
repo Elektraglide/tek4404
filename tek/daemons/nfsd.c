@@ -70,7 +70,7 @@ struct sir sirbuf;
 #include <libgen.h>
 #endif
 
-#define TRANSFER_SIZE 4096
+#define TRANSFER_SIZE 8192
 #define BLOCK_SIZE 512
 #define FDNPB 8
 
@@ -1415,7 +1415,7 @@ int isinternal;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_fattr(&reply, &info, fh->fsid);
-				/*fprintf(console, "nfsd: lookup = %s\n", filepath);*/
+				fprintf(console, "nfsd: lookup = %s size:%d\n", filepath, info.st_size);
 			}
 			else
 			{
