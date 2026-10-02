@@ -1220,9 +1220,24 @@ int isinternal;
 					}
 				}
 				else
+				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
-				add_uint(&reply, NFSERR_NOTDIR);
-				add_uint(&reply, 0);
+					make_filehandle(path, &info, &handle);
+					handle.fsid = make_fsid(&handle);
+					add_uint(&reply, NFS_OK);
+					add_filehandle(&reply, &handle);
+					fprintf(console, "mountd: mount File = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
+					if (header->vers == htonl(3))
+					{
+						add_uint(&reply, 1);	/* maxlen */
+						add_uint(&reply, 1);	/* len */
+						add_uint(&reply, AUTH_UNIX);
+					}
+				}
+				else
+				{
+					add_uint(&reply, NFSERR_NOTDIR);
+					add_uint(&reply, 0);
 				}
 			}
 			else
