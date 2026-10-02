@@ -2643,13 +2643,26 @@ struct conn *request;
 				unsigned short *ptr = (unsigned short *)buffer;
 				opcode = ntohs(*ptr++);
 				n = ntohs(*ptr++);
-				if (opcode != TFTP_ACK || n != blocknum)
+				if (opcode != TFTP_ACK)
+				{
+					fprintf(console, "tftpd: OPCODE mismatch: got:%d exp:%d\n", opcode, TFTP_ACK);
+					
+					/* TODO: send ERROR packet */
+					break;
+				}
+				else
+				if (n != blocknum)
 				{
 					fprintf(console, "tftpd: ACK mismatch: got:%d exp:%d\n", n, blocknum);
 					
 					/* TODO: send ERROR packet */
 					break;
 				}
+			}
+			else
+			{
+					fprintf(console, "tftpd: recvfrom: %s\n",strerror(errno));
+					break;
 			}
 			
 			blocknum++;
