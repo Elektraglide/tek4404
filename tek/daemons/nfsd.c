@@ -2629,6 +2629,7 @@ struct conn *request;
 			add_uint16(&reply, blocknum);
 			memcpy(reply.buffer+reply.cwp, buffer, n);
 			reply.cwp += n;
+			/* FIXME: perhaps should use MSG_CONFIRM but unsupported on MacOS */
 			n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 			if(n != reply.cwp)
 			{
