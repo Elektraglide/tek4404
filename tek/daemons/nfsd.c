@@ -2433,15 +2433,16 @@ int isinternal;
 				n = get_uint(request);
 
 			ipv4 = get_ipv4(request);	/* ss2 passes 4 uint32 for address.. */
-			fprintf(console, "bootparamd: whoami:%8.8X\n", ipv4);
+			fprintf(console, "bootparamd: whoami: got question for %8.8X\n", ipv4);
 
 			if (isinternal)
 				lomark = add_length_marker(&reply);
 
+#define GATEWAY "192.168.1.1"
 			add_string(&reply, bp_machinename, strlen(bp_machinename));
-			add_string(&reply, host_name, strlen(host_name));	/* domain */
-			add_ipv4(&reply, htonl(inet_addr("192.168.1.1")));
-			fprintf(console, "bootparamd: whoami:%8.8X => machinename:%s domain:%s address:%s\n", ipv4, bp_machinename, host_name, "192.168.1.1");
+			add_string(&reply, host_name, strlen(host_name));			/* domain */
+			add_ipv4(&reply, htonl(inet_addr(GATEWAY)));					/* gateway */
+			fprintf(console, "bootparamd: whoami:%8.8X => machinename:%s domain:%s gateway:%s\n", ipv4, bp_machinename, host_name, GATEWAY);
 
 			if (isinternal)
 				update_length(&reply, lomark);
