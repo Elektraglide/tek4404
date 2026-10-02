@@ -1653,8 +1653,8 @@ int isinternal;
 			freesize = (sirbuf.sfreec[0] << 16) + (sirbuf.sfreec[1] << 8) + (sirbuf.sfreec[2] << 0);
 #else
 			/* fake some numbers */
-			disksize = 64 * 1024 * 1024 / BLOCK_SIZE;
-			freesize = 56 * 1024 * 1024 / BLOCK_SIZE;
+			disksize = (64 * 1024 * 1024) / BLOCK_SIZE;
+			freesize = (56 * 1024 * 1024) / BLOCK_SIZE;
 #endif
 			add_uint(&reply, disksize);					/* Total # of blocks (of the above size) */
 			add_uint(&reply, freesize);					/* Free blocks */
@@ -2926,6 +2926,9 @@ char **argv;
 	int bootparamsock = 0;
 	if (argc > 1)
 	{
+		/* allowed defaults */
+		strcpy(bp_dump, "");
+		
 		for(n=1; n<argc; n++)
 		{
 			if (!strcmp(argv[n],"-mac"))
@@ -3022,6 +3025,7 @@ char **argv;
 			}
 
 			/* setup RARP packet handling using BPF */
+			/* TODO: use RAW_SOCKET for __linux__ */
 			rarp_bpf_fd = open_bpf_device("en0", host_mac);
 		}
 		else
