@@ -3205,6 +3205,13 @@ char **argv;
 								fprintf(console, "rarpd: %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x => %s\n",
 									reply.destmac[0],reply.destmac[1],reply.destmac[2],reply.destmac[3],reply.destmac[4],reply.destmac[5],
 									inet_ntoa(*(struct in_addr *)&(reply.arp.dstip)));
+
+
+								snprintf(cmd,sizeof(cmd),"arp -s %s %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x", bp_addr,
+												rarp_machinemac[0],rarp_machinemac[1],rarp_machinemac[2],
+												rarp_machinemac[3],rarp_machinemac[4],rarp_machinemac[5]);
+								system(cmd);
+								fprintf(console, "rarpd: adding ARP entry: %s\n", cmd);
 							}
 						}
 					}
