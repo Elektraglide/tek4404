@@ -230,7 +230,7 @@ struct response {
 #define BOOTPARAMD_PORT 2050
 
 /* logging credential details */
-#define LOGCREDS 1
+#define LOGCREDS 0
 
 
 FILE *console;
@@ -828,8 +828,8 @@ int prognum;
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
 
-	fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d msg:%d\015\012", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc), ntohl(header->msg_type));
-
+/*	fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d msg:%d\015\012", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc), ntohl(header->msg_type));
+*/
 	reply.cwp = 0;
 	if (ntohl(header->msg_type) != CALL)
 	{
@@ -1248,7 +1248,7 @@ int isinternal;
 	{
 			fprintf(console, "mountd: sendto: %s\n",strerror(errno));
 	}
-	fprintf(console, "mountd: replied %d bytes\n", n);
+	/*fprintf(console, "mountd: replied %d bytes\n", n);*/
 }
 
 void lockprog(request,isinternal)
@@ -2474,20 +2474,7 @@ int isinternal;
 	{
 			fprintf(console, "bootparamd: sendto: %s\n",strerror(errno));
 	}
-	fprintf(console, "bootparamd: replied %d bytes\n", n);
-	
-	
-	/* HACK: we need to get client to do some ARP-ing, so ping it. */
-	if (ntohl(header->proc) == 1  && isinternal)
-	{
-		char cmd[128];
-		
-		ipv4 = htonl(ipv4);
-		snprintf(cmd,sizeof(cmd),"ping -c 3 -i 0.5 %s > /dev/null 2>&1 &", inet_ntoa(*(struct in_addr *)&(ipv4)));
-		fprintf(console, "wakey wakey: %s\n", cmd);
-		system(cmd);
-		sleep(1);
-	}
+	/*fprintf(console, "bootparamd: replied %d bytes\n", n);*/
 }
 
 /* portmapper is special and can invoke other progs */
