@@ -60,11 +60,13 @@ struct sir sirbuf;
 
 #include <sys/ioctl.h>
 #include <net/if.h>
-#include <net/bpf.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <net/if_dl.h>
 #include <ifaddrs.h>
+#if defined(__APPLE__)
+#include <net/bpf.h>
+#include <net/if_dl.h>
+#endif
 
 #include <netdb.h>
 #include <libgen.h>
@@ -675,13 +677,40 @@ unsigned int hostperms;
 	return nfsperms;
 }
 
+char *hostmode2ascii(hostperms)
+unsigned int hostperms;
+{
+	static char mode[16];
+
+	mode[0] = ((hostperms & S_ISUID) == S_ISUID) ? 'S' : '-';
+	mode[1] = ((hostperms & S_IFDIR) == S_IFDIR) ? 'D' : 'F';
+	mode[2] = '/';
+	
+	mode[3] = ((hostperms & S_IREAD) == S_IREAD)   ? 'r' : '-';
+	mode[4] = ((hostperms & S_IWRITE) == S_IWRITE) ? 'w' : '-';
+	mode[5] = ((hostperms & S_IEXEC) == S_IEXEC)   ? 'x' : '-';
+
+	mode[6] = ((hostperms & S_IRGRP) == S_IRGRP) ? 'r' : '-';
+	mode[7] = ((hostperms & S_IWGRP) == S_IWGRP) ? 'w' : '-';
+	mode[8] = ((hostperms & S_IXGRP) == S_IXGRP) ? 'x' : '-';
+
+	mode[9] = ((hostperms & S_IOREAD) == S_IOREAD)   ? 'r' : '-';
+	mode[10] = ((hostperms & S_IOWRITE) == S_IOWRITE) ? 'w' : '-';
+	mode[11] = ((hostperms & S_IOEXEC) == S_IOEXEC)   ? 'x' : '-';
+
+	mode[12] = '\0';
+
+	return mode;
+}
+
 void add_fattr(reply, info, fsid)
 struct response *reply;
 struct stat *info;
 int fsid;
 {
-	unsigned int nfsperms = host2nfsmode(info->st_perm);
+	unsigned int nfsperms;
 
+	nfsperms = host2nfsmode(info->st_perm);
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
 		add_uint(reply, NFDIR);
@@ -913,6 +942,7 @@ struct conn *request;
 
 #define get_cookie3 get_uint64
 
+/* host-order */
 unsigned int get_ipv4(request)
 struct conn *request;
 {
@@ -935,40 +965,48 @@ struct conn *request;
 	request->crp += length;
 }
 
-void get_credentials(request, verbose)
+int get_credentials(request, verbose)
 struct conn *request;
 int verbose;
 {
 	unsigned int flavour = get_uint(request);
 	unsigned int length = get_uint(request);
 
-	if (verbose)
+	/* assume root:wheel */
+	int uid = 0;
+	int gid = 0;
+	
+	if (flavour == AUTH_NULL)
 	{
-		if (flavour == AUTH_NULL)
-		{
-			fprintf(console, "get_credentials: %d AUTH_NULL\n", length);
-		}
-		else
-		if (flavour == AUTH_UNIX)
-		{
-			unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
-			int n;
-			n = ntohl(ptr[1]);
-			fprintf(console, "get_credentials: stamp:%8.8x machinename:'%*s'\n", ptr[0], n, ptr + 2);
-			
-			/* only from expected machinename */
-			if (bp_machinename[0])
-			{
-				if (strcmp(bp_machinename, ptr + 2))
-				{
-					fprintf(console, "get_credentials: REJECT unknown machinename\n");
-					return;
-				}
-			}
-						
-			ptr += n;
-			fprintf(console, "get_credentials: uid:%d gid:%d\n", ntohl(ptr[2]), ntohl(ptr[3]));
+		if (verbose) fprintf(console, "get_credentials: %d AUTH_NULL\n", length);
+	}
+	else
+	if (flavour == AUTH_UNIX)
+	{
+		unsigned int *ptr = (unsigned int *)(request->buffer + request->crp);
+		char *name;
+		int n;
+		n = ntohl(ptr[1]);
+		name = (char *)(ptr + 2);
+		if (verbose) fprintf(console, "get_credentials: stamp:%8.8x machinename:'%*s'\n", ptr[0], n, name);
 
+		/* only from expected machinename */
+		if (bp_machinename[0] && name[0])
+		{
+			if (strcmp(bp_machinename, name) && strcmp(bp_addr, name))
+			{
+				fprintf(console, "get_credentials: REJECT unknown machinename\n");
+				return -1;
+			}
+		}
+					
+		ptr += n;
+		uid = ntohl(ptr[2]);
+		gid = ntohl(ptr[3]);
+
+		if (verbose)
+		{
+			fprintf(console, "get_credentials: uid:%d gid:%d\n", uid, gid);
 			n = ntohl(ptr[4]);
 			if (n < 64)
 			{
@@ -981,6 +1019,8 @@ int verbose;
 	}
 
 	request->crp += length;
+	
+	return uid;
 }
 
 struct filehandle *get_filehandle(request, filepath)
@@ -1179,9 +1219,9 @@ int isinternal;
 	struct stat info;
 	char *path;
 	struct filehandle handle;
-	int n;
+	int n,uid;
 	
-	get_credentials(request, 0);
+	uid = get_credentials(request, 0);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -1205,6 +1245,9 @@ int isinternal;
 			path = get_string(request);
 			if (stat(path, &info) == 0)
 			{
+				info.st_uid = uid;
+				//info.st_gid = 0;
+			
 				if ((info.st_mode & S_IFDIR) == S_IFDIR)
 				{
 					make_filehandle(path, &info, &handle);
@@ -1342,7 +1385,7 @@ int isinternal;
 	DIR *d;
 	struct direct *dir;
 	
-	get_credentials(request, LOGCREDS);
+	int uid = get_credentials(request, LOGCREDS);
 	get_verifier(request);
 	
 	reply.cwp = 0;
@@ -1367,9 +1410,11 @@ int isinternal;
 			fh = get_filehandle(request, filepath);
 			if (stat(filepath, &info) == 0)
 			{
+				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), info.st_size);
+				info.st_uid = uid;
+				//info.st_gid = 0;
 				add_uint(&reply, NFS_OK);
 				add_fattr(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: get_attr: %s  perm:%4.4x  size:%d\n", filepath, info.st_mode, info.st_size);
 			}
 			else
 			{
@@ -1410,12 +1455,14 @@ int isinternal;
 			strcat(filepath, path);
 			if (stat(filepath, &info) == 0)
 			{
+				fprintf(console, "nfsd: lookup = %s uid=%d perms=%s size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), info.st_size);
+				info.st_uid = uid;
+				//info.st_gid = 0;
 				make_filehandle(filepath, &info, &handle);
 				handle.fsid = fh->fsid;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_fattr(&reply, &info, fh->fsid);
-				fprintf(console, "nfsd: lookup = %s size:%d\n", filepath, info.st_size);
 			}
 			else
 			{
@@ -1434,6 +1481,8 @@ int isinternal;
 			n = get_uint(request);
 			if (stat(filepath, &info) == 0)
 			{
+				info.st_uid = uid;
+				//info.st_gid = 0;
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					if (info.st_perm & S_IREAD)
@@ -1443,6 +1492,7 @@ int isinternal;
 						add_uint(&reply, NFS_OK);
 						add_fattr(&reply, &info, fh->fsid);
 						add_fromfile(&reply, fd, count);
+						/* fprintf(console, "  read: %s: %d bytes at %d\n", filepath, count, offset); */
 						close(fd);
 					}
 					else
@@ -1531,7 +1581,7 @@ int isinternal;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_fattr(&reply, &info, fh->fsid);
-				/*fprintf(console, "nfsd: create = %s perm:%4.4x\n", filepath, info.st_mode);*/
+				/*fprintf(console, "nfsd: create = %s perm:%s\n", filepath, hostmode2ascii(info.st_mode));*/
 			}
 			else
 			{
@@ -1727,14 +1777,14 @@ int isinternal;
 			{
 				add_uint(&reply, NFS_OK);
 				add_fattr3(&reply, &info, fh->fsid);
-				/* fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x\n", filepath, info.st_mode); */
+				/* fprintf(console, "nfsd: GETATTR3: %s  perm:%s\n", filepath, hostmode2ascii(info.st_mode)); */
 			}
 			else
 			{
 				/* this should never happen.. */
 				add_uint(&reply, NFS3ERR_BADHANDLE);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: GETATTR3: %s  perm:%4.4x FAILED\n", filepath, info.st_mode);
+				fprintf(console, "nfsd: GETATTR3: %s  perm:%s FAILED\n", filepath, hostmode2ascii(info.st_mode));
 			}
 			break;
 		case 2:
@@ -1755,7 +1805,7 @@ int isinternal;
 			{
 				add_uint(&reply, NFS_OK);
 				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
-				/* fprintf(console, "nfsd: SETATTR3 = %s mode=%4.4x size=%d\n", filepath, info.st_perm, info.st_size); */
+				/* fprintf(console, "nfsd: SETATTR3 = %s mode=%s size=%d\n", filepath, hostmode2ascii(info.st_mode), info.st_size); */
 			}
 			else
 			{
@@ -2419,9 +2469,6 @@ int isinternal;
 	add_uint(&reply, 0);		/* opaque_verf size */
 	add_uint(&reply, SUCCESS);
 
-	if (isinternal)
-		add_uint(&reply, BOOTPARAMD_PORT);
-	
 	switch(ntohl(header->proc))
 	{
 		case 0:
@@ -2435,18 +2482,28 @@ int isinternal;
 			ipv4 = get_ipv4(request);	/* ss2 passes 4 uint32 for address.. */
 			fprintf(console, "bootparamd: whoami: got question for %8.8X\n", ipv4);
 
-			if (isinternal)
-				lomark = add_length_marker(&reply);
-
+			if (htonl(ipv4) == inet_addr(bp_addr))
+			{
+				if (isinternal)
+				{
+					add_uint(&reply, BOOTPARAMD_PORT);
+					lomark = add_length_marker(&reply);
+				}
 #define GATEWAY "192.168.1.1"
-			add_string(&reply, bp_machinename, strlen(bp_machinename));
-			add_string(&reply, host_name, strlen(host_name));			/* domain */
-			add_ipv4(&reply, htonl(inet_addr(GATEWAY)));					/* gateway */
-			fprintf(console, "bootparamd: whoami:%8.8X => machinename:%s domain:%s gateway:%s\n", ipv4, bp_machinename, host_name, GATEWAY);
+				add_string(&reply, bp_machinename, strlen(bp_machinename));
+				add_string(&reply, host_name, strlen(host_name));			/* domain */
+				add_ipv4(&reply, htonl(inet_addr(GATEWAY)));					/* gateway */
+				fprintf(console, "bootparamd: whoami:%8.8X => machinename:%s domain:%s gateway:%s\n", ipv4, bp_machinename, host_name, GATEWAY);
 
-			if (isinternal)
-				update_length(&reply, lomark);
-
+				if (isinternal)
+					update_length(&reply, lomark);
+			}
+			else
+			if (isinternal == 0)
+			{
+					add_uint(&reply, NFSERR_IO);
+			}
+			
 			break;
 		case 2:
 			/* GETFILE */
@@ -2455,7 +2512,7 @@ int isinternal;
 
 			strcpy(hostname, get_string(request));
 			strcpy(pathname, get_string(request));
-			fprintf(console, "bootparamd: getfile: client:%s asking for %s\n", hostname, pathname);
+			fprintf(console, "bootparamd: getfile: got question for '%s' asking for '%s'\n", hostname, pathname);
 
 			/* is the hostname we have info about? */
 			if (!strcmp(hostname, bp_machinename))
@@ -2463,7 +2520,10 @@ int isinternal;
 				char *result;
 				
 				if (isinternal)
+				{
+					add_uint(&reply, BOOTPARAMD_PORT);
 					lomark = add_length_marker(&reply);
+				}
 
 				add_string(&reply, inet_ntoa(host_assigned), strlen(inet_ntoa(host_assigned)));		/* server name */
 				add_ipv4(&reply, htonl(host_assigned.s_addr));				/* server address */
@@ -2492,6 +2552,11 @@ int isinternal;
 				
 				if (isinternal)
 					update_length(&reply, lomark);
+			}
+			else
+			if (isinternal == 0)
+			{
+					add_uint(&reply, NFSERR_IO);
 			}
 			break;
 	}
@@ -2761,6 +2826,51 @@ struct eth2
 #define RARP_REQUEST   3
 #define RARP_REPLY     4
 
+#ifdef __linux__
+int open_bpf_device(const char *ifname, uint8_t *hostmac)
+{
+
+    int fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_RARP));
+    if (fd < 0) {
+        perror("socket");
+        return EXIT_FAILURE;
+    }
+
+    unsigned int ifindex = if_nametoindex(ifname);
+    if (ifindex == 0) {
+        perror("if_nametoindex");
+        close(fd);
+        return EXIT_FAILURE;
+    }
+
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+
+    if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0) {
+        perror("SIOCGIFHWADDR");
+        close(fd);
+        return EXIT_FAILURE;
+    }
+
+    memcpy(hostmac, ifr.ifr_hwaddr.sa_data, 6);
+
+    struct sockaddr_ll bind_addr;
+    memset(&bind_addr, 0, sizeof(bind_addr));
+    bind_addr.sll_family   = AF_PACKET;
+    bind_addr.sll_protocol = htons(ETH_P_RARP);
+    bind_addr.sll_ifindex  = ifindex;
+
+    if (bind(fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
+        perror("bind");
+        close(fd);
+        return EXIT_FAILURE;
+    }
+
+	return fd;
+}
+
+#elif defined(__APPLE__)
 
 int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
     char bpf_path[32];
@@ -2815,26 +2925,6 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
 
     printf("Successfully bound BPF node to interface: %s\n", iface_name);
 
-	// get our MAC address
-#ifdef __linux__
-    #include <sys/ioctl.h>
-    #include <net/if.h>
-    #include <sys/socket.h>
-
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0)
-        return -1;
-
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
-
-    int result = ioctl(fd, SIOCGIFHWADDR, &ifr);
-    if (result == 0)
-        memcpy(hostmac, ifr.ifr_hwaddr.sa_data, 6);
-
-    close(fd);
-#elif defined(__APPLE__)
     struct ifaddrs *ifap, *p;
 
     if (getifaddrs(&ifap) != 0)
@@ -2856,12 +2946,12 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
         }
     }
     freeifaddrs(ifap);
-#endif
 
     return bpf_fd;
 }
-
 #endif
+
+#endif	// SUNBOOTs
 
 int main(argc, argv)
 int argc;
@@ -2901,6 +2991,12 @@ char **argv;
 	/* shorten it */
 	if (strchr(host_name, '.'))
 		*strchr(host_name,'.') = '\0';
+		
+
+
+strcpy(host_name, "localdomain");
+
+
 
 	fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), host_name, inet_ntoa(host_assigned) );
 
