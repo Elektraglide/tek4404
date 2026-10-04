@@ -2827,10 +2827,11 @@ struct eth2
 #define RARP_REPLY     4
 
 #ifdef __linux__
+#include <linux/if_packet.h>
 int open_bpf_device(const char *ifname, uint8_t *hostmac)
 {
 
-    int fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_RARP));
+    int fd = socket(AF_PACKET, SOCK_RAW, htons(RARP_ETHERTYPE));
     if (fd < 0) {
         perror("socket");
         return EXIT_FAILURE;
