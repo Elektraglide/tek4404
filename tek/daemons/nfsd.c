@@ -1421,8 +1421,9 @@ int isinternal;
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
 	struct stat info,reqinfo;
-	char *path;
+    char *path,*pathto;
 	char filepath[1024];
+    char filepathfrom[1024];
 	int disksize,freesize;
 	int n, count, offset, fd, rc, len;
 	struct filehandle handle;
@@ -1661,8 +1662,42 @@ int isinternal;
 		case 11:
 			/* Rename */
 			break;
+        case 12:
+            /* Link */
+            fh = get_filehandle(request, filepathfrom);
+            n = get_filehandle(request, filepath);
+            path = get_string(request);
+            strcat(filepath, "/");
+            strcat(filepath, path);
+            link(filepathfrom, filepath);
+            if (stat(filepath, &info) == 0)
+            {
+                make_filehandle(filepath, &info, &handle);
+                handle.fsid = fh->fsid;
+                add_uint(&reply, NFS_OK);
+                add_filehandle(&reply, &handle);
+                add_fattr(&reply, &info, fh->fsid);
+                fprintf(console, "nfsd: mkdir = %s\n", filepath);
+            }
+            break;
 		case 13:
 			/* SymLink */
+            fh = get_filehandle(request, filepathfrom);
+            path = get_string(request);
+            strcat(filepathfrom, "/");
+            strcat(filepathfrom, path);
+            pathto = get_string(request);
+            get_sattr(request, &reqinfo);
+            symlink(filepathfrom, pathto);
+            if (stat(pathto, &info) == 0)
+            {
+                make_filehandle(pathto, &info, &handle);
+                handle.fsid = fh->fsid;
+                add_uint(&reply, NFS_OK);
+                add_filehandle(&reply, &handle);
+                add_fattr(&reply, &info, fh->fsid);
+                fprintf(console, "nfsd: mkdir = %s\n", pathto);
+            }
 			break;
 		case 14:
 			/* MkDir */
