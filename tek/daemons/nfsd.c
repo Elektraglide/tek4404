@@ -677,13 +677,39 @@ unsigned int hostperms;
 	return nfsperms;
 }
 
+unsigned int host2nfstype(hostperms)
+unsigned int hostperms;
+{
+	unsigned int ftype = 0;
+
+	if ((hostperms & S_IFDIR) == S_IFDIR)
+		ftype = NFDIR;
+	if ((hostperms & S_IFREG) == S_IFREG)
+		ftype = NFREG;
+	if ((hostperms & S_IFCHR) == S_IFCHR)
+		ftype = NFCHR;
+	if ((hostperms & S_IFBLK) == S_IFBLK)
+		ftype = NFBLK;
+#ifndef TEK4404
+	if ((hostperms& S_IFLNK) == S_IFLNK)
+		ftype = NFLNK;
+#endif
+	return ftype;
+}
+
 char *hostmode2ascii(hostperms)
 unsigned int hostperms;
 {
 	static char mode[16];
 
 	mode[0] = ((hostperms & S_ISUID) == S_ISUID) ? 'S' : '-';
+	
 	mode[1] = ((hostperms & S_IFDIR) == S_IFDIR) ? 'D' : 'F';
+	mode[1] = ((hostperms & S_IFCHR) == S_IFCHR) ? 'C' : mode[1];
+	mode[1] = ((hostperms & S_IFBLK) == S_IFBLK) ? 'B' : mode[1];
+#ifndef TEK4404
+	mode[1] = ((hostperms & S_IFLNK) == S_IFLNK) ? 'L' : mode[1];
+#endif
 	mode[2] = '/';
 	
 	mode[3] = ((hostperms & S_IREAD) == S_IREAD)   ? 'r' : '-';
@@ -703,46 +729,61 @@ unsigned int hostperms;
 	return mode;
 }
 
+void get_majorminor(devnum, major,minor)
+unsigned int devnum;
+unsigned int *major;
+unsigned int *minor;
+{
+#if defined(__APPLE__)
+    /* APPLE 8:24 */
+    *major = (devnum>>24) & 0xff;
+    *minor = devnum & 0xffff;
+#elif defined(__linux__)
+    /* LINUX 12:20 */
+    *major = (devnum>>20) & 0xfff;
+    *minor = devnum & 0xffff;
+#elif
+    /* 8:8 */
+    *major = (devnum>>8) & 0xff;
+    *minor = devnum & 0xff;
+#endif
+}
+
 void add_fattr(reply, info, fsid)
 struct response *reply;
 struct stat *info;
 int fsid;
 {
-	unsigned int nfsperms;
-
+	unsigned int ftype, nfsperms;
+	unsigned int major,minor;
+	
+	ftype = host2nfstype(info->st_perm);
+	add_uint(reply, ftype);
 	nfsperms = host2nfsmode(info->st_perm);
+	add_uint(reply, nfsperms);
+	add_uint(reply, info->st_nlink);
+	add_uint(reply, info->st_uid);
+#ifdef NO_GROUPS
+	add_uint(reply, info->st_uid);
+#else
+	add_uint(reply, info->st_gid);
+#endif
+	add_uint(reply, (unsigned int)info->st_size);
+	add_uint(reply, BLOCK_SIZE);
+	
+	
+	get_majorminor(info->st_rdev, &major, &minor);
+	add_uint(reply, (major<<8) | minor);
+
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
-		add_uint(reply, NFDIR);
-		add_uint(reply, DIR_NFS | nfsperms);
-		add_uint(reply, info->st_nlink);
-		add_uint(reply, info->st_uid);
-#ifdef NO_GROUPS
-		add_uint(reply, info->st_uid);
-#else
-		add_uint(reply, info->st_gid);
-#endif
-		add_uint(reply, (unsigned int)info->st_size);
-		add_uint(reply, BLOCK_SIZE);
-		add_uint(reply, info->st_dev);
 		add_uint(reply, BLOCK_SIZE / FDNPB);
 	}
 	else
 	{
-		add_uint(reply, NFREG);
-		add_uint(reply, REG | nfsperms);
-		add_uint(reply, info->st_nlink);
-		add_uint(reply, info->st_uid);
-#ifdef NO_GROUPS
-		add_uint(reply, info->st_uid);
-#else
-		add_uint(reply, info->st_gid);
-#endif
-		add_uint(reply, (unsigned int)info->st_size);
-		add_uint(reply, BLOCK_SIZE);
-		add_uint(reply, info->st_dev);
 		add_uint(reply, ((unsigned int)info->st_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
 	}
+
 	add_uint(reply, fsid);
 	add_uint(reply, (unsigned int)info->st_ino);
 #ifdef ONLY_MTIME
@@ -1414,7 +1455,9 @@ int isinternal;
 			fh = get_filehandle(request, filepath);
 			if (stat(filepath, &info) == 0)
 			{
-				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), info.st_size);
+				unsigned int major,minor;
+				get_majorminor(info.st_rdev, &major, &minor);
+				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				add_uint(&reply, NFS_OK);
@@ -1455,11 +1498,13 @@ int isinternal;
 			/* Lookup */
 			fh = get_filehandle(request, filepath);
 			path = get_string(request);
-			strcat(filepath, "/");
+			if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
 			if (stat(filepath, &info) == 0)
 			{
-				fprintf(console, "nfsd: lookup = %s uid=%d perms=%s size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), info.st_size);
+				unsigned int major,minor;
+				get_majorminor(info.st_rdev, &major, &minor);
+				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				make_filehandle(filepath, &info, &handle);
@@ -1470,6 +1515,7 @@ int isinternal;
 			}
 			else
 			{
+				fprintf(console, "nfsd: lookup:%s  NFSERR_NOENT  path:'%s'\n", filepath, path);
 				add_uint(&reply, NFSERR_NOENT);	/* no such file */
 				add_uint(&reply, 0);
 			}
@@ -1545,16 +1591,19 @@ int isinternal;
 						}
 						else
 						{
+							fprintf(console, "  write NFSERR_IO: %s: count:%s\n", filepath, rc);
 							add_uint(&reply, NFSERR_IO);
 						}
 					}
 					else
 					{
+							fprintf(console, "  write NFSERR_ACCES: %s: perm:%x\n", filepath, info.st_perm);
 							add_uint(&reply, NFSERR_ACCES);
 					}
 				}
 				else
 				{
+					fprintf(console, "  write NFSERR_ISDIR: %s: mode:%s\n", filepath, hostmode2ascii(info.st_mode));
 					add_uint(&reply, NFSERR_ISDIR);
 				}
 			}
@@ -1567,7 +1616,7 @@ int isinternal;
 			/* Create */
 			fh = get_filehandle(request, filepath);
 			path = get_string(request);
-			strcat(filepath, "/");
+			if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
 			get_sattr(request, &info);
 			fd = creat(filepath, info.st_mode);
@@ -1597,7 +1646,7 @@ int isinternal;
 			/* Remove */
 			fh = get_filehandle(request, filepath);
 			path = get_string(request);
-			strcat(filepath, "/");
+			if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
 			if (unlink(filepath) == 0)
 			{
@@ -1824,7 +1873,7 @@ int isinternal;
 			fh = get_filehandle(request, dirpath);
 			path = get_string(request);
 			strcpy(filepath, dirpath);
-			strcat(filepath, "/");
+			if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
 			memset(&info, 0, sizeof(info));
 			if (stat(filepath, &info) == 0)
