@@ -1196,8 +1196,12 @@ int port;
 		return -1;
 	}
 
+	int reuse = 1;
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = host_assigned.s_addr ;		// INADDR_ANY;
+	//serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(port);
 	n = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
 	if (n < 0) {
@@ -1472,6 +1476,7 @@ int isinternal;
 			break;
 		case 5:
 			/* ReadLink */
+				fprintf(console, "nfsd: MISSING readlink = %s\n", filepath);
 			break;
 		case 6:
 			/* Read */
@@ -2564,7 +2569,7 @@ int isinternal;
 	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 	if(n != reply.cwp)
 	{
-			fprintf(console, "bootparamd: sendto: %s\n",strerror(errno));
+		fprintf(console, "bootparamd: sendto(%d): %s\n", request->sock, strerror(errno));
 	}
 	/*fprintf(console, "bootparamd: replied %d bytes\n", n);*/
 }
@@ -2714,7 +2719,7 @@ struct conn *request;
 			n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
 			if(n != reply.cwp)
 			{
-					fprintf(console, "tftpd: sendto: %s\n",strerror(errno));
+					fprintf(console, "tftpd: sendto: %s: %s\n", inet_ntoa(request->from.sin_addr), strerror(errno));
 					break;
 			}
 
@@ -2859,7 +2864,7 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
     struct sockaddr_ll bind_addr;
     memset(&bind_addr, 0, sizeof(bind_addr));
     bind_addr.sll_family   = AF_PACKET;
-    bind_addr.sll_protocol = htons(ETH_P_RARP);
+    bind_addr.sll_protocol = htons(RARP_ETHERTYPE);
     bind_addr.sll_ifindex  = ifindex;
 
     if (bind(fd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
@@ -2997,10 +3002,7 @@ char **argv;
 
 strcpy(host_name, "localdomain");
 
-
-
-	fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), host_name, inet_ntoa(host_assigned) );
-
+	fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), inet_ntoa(host_assigned), host_name);
 	umask(0);
 
 	/* we act as portmapd, mountd and nfsd... */
@@ -3008,6 +3010,15 @@ strcpy(host_name, "localdomain");
 	mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
 	locksock = create_UDP_sock("lockd", LOCKD_PORT);
 	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
+
+#ifdef SUNBOOT
+	/* required for sunbooting */
+	if (portmapsock < 0)
+	{
+		fprintf(console, "cannot bind portmapper\n");
+		exit(-2);
+	}
+#endif
 
 	/* cannot continue (not having portmapping is tolerable) */
 	if (mountsock < 0 || locksock < 0 || nfssock < 0)
@@ -3023,6 +3034,8 @@ strcpy(host_name, "localdomain");
 	int bootparamsock = 0;
 	if (argc > 1)
 	{
+		char ifname[32];
+
 		/* allowed defaults */
 		strcpy(bp_dump, "");
 		
@@ -3057,7 +3070,8 @@ strcpy(host_name, "localdomain");
 				fd = open(tftp_base, 0);
 				if (fd < 0)
 				{
-					fprintf(console, "%s: not found\n", tftp_base);
+					fprintf(console, "%s: %s\n", tftp_base, strerror(errno));
+					
 					exit(-3);
 				}
 				close(fd);
@@ -3090,7 +3104,7 @@ strcpy(host_name, "localdomain");
 				fd = open(bp_fs, 0);
 				if (fd < 0)
 				{
-					fprintf(console, "%s: not found\n", bp_fs);
+					fprintf(console, "%s: %s\n", bp_fs, strerror(errno));
 					exit(-3);
 				}
 				close(fd);
@@ -3107,6 +3121,10 @@ strcpy(host_name, "localdomain");
 				n++;
 				strcpy(bp_dump, argv[n]);
 			}
+			else
+			{
+				strcpy(ifname, argv[n]);
+			}
 		}
 	
 		/* do we have all the info we need? */
@@ -3122,8 +3140,7 @@ strcpy(host_name, "localdomain");
 			}
 
 			/* setup RARP packet handling using BPF */
-			/* TODO: use RAW_SOCKET for __linux__ */
-			rarp_bpf_fd = open_bpf_device("en0", host_mac);
+			rarp_bpf_fd = open_bpf_device(ifname, host_mac);
 		}
 		else
 		{
@@ -3251,6 +3268,10 @@ strcpy(host_name, "localdomain");
 			uint8_t buffer[BUFFER_SIZE];
 		
 			int len = read(rarp_bpf_fd, buffer, BUFFER_SIZE);
+#ifdef __linux__
+			struct eth2 *ethpkt = (struct eth2 *)buffer;
+
+#else
 			struct bpf_hdr *hdr = (struct bpf_hdr *)buffer;
 
 			// NB we may have read >1 packet
@@ -3272,7 +3293,7 @@ strcpy(host_name, "localdomain");
 									{
 										/* redirect */
 										
-										printf("redirecting broadcast:111 size:%d from %s\n",  hdr->bh_caplen, inet_ntoa(*(struct in_addr *)&(ethpkt->ipv4.srcip)));
+										printf("redirecting broadcast:111 from %s\n", inet_ntoa(*(struct in_addr *)&(ethpkt->ipv4.srcip)));
 										
 										request.crp = 0;
 										request.sock = portmapsock;
@@ -3297,7 +3318,7 @@ strcpy(host_name, "localdomain");
 				else
 				if (ethpkt->type == ntohs(RARP_ETHERTYPE))
 				{
-					if (ethpkt->arp.op == ntohs(3))
+					if (ethpkt->arp.op == ntohs(3))			// RARP: reverse request
 					{
 						if ((ethpkt->destmac[0]==0xff && ethpkt->destmac[1]==0xff &&						/* BROADCAST */
 								ethpkt->destmac[2]==0xff && ethpkt->destmac[3]==0xff &&
@@ -3324,7 +3345,7 @@ strcpy(host_name, "localdomain");
 								reply.arp.ptype = htons(0x800);
 								reply.arp.hwlen = 6;
 								reply.arp.plen = 4;
-								reply.arp.op = htons(4);
+								reply.arp.op = htons(4);			// RARP: reverse reply
 								
 								memcpy(reply.arp.srcmac, host_mac, 6);
 								ipv4 =  host_assigned.s_addr;
@@ -3357,6 +3378,7 @@ strcpy(host_name, "localdomain");
 				//if (len)
 				//	printf("MORE packets STUFF: %d\n", len);
 			}
+#endif
 			/* printf("***** remain = %d hdrlen = %d caplen = %d\n", len, hdr->bh_hdrlen, hdr->bh_caplen); */
             
 		}
