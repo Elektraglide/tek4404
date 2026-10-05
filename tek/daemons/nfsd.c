@@ -72,7 +72,7 @@ struct sir sirbuf;
 #include <libgen.h>
 #endif
 
-#define TRANSFER_SIZE 8192
+#define TRANSFER_SIZE (8192+256)    /* read may be 8192, but preamble uses buffer too */
 #define BLOCK_SIZE 512
 #define FDNPB 8
 
@@ -1497,7 +1497,7 @@ int isinternal;
 						add_uint(&reply, NFS_OK);
 						add_fattr(&reply, &info, fh->fsid);
 						add_fromfile(&reply, fd, count);
-						/* fprintf(console, "  read: %s: %d bytes at %d\n", filepath, count, offset); */
+						fprintf(console, "  read: %s: %d bytes at %d\n", filepath, count, offset);
 						close(fd);
 					}
 					else
