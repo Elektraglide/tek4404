@@ -2483,7 +2483,7 @@ int isinternal;
 			if (stat(filepath, &info) == 0)
 			{
 				add_uint(&reply, NFS_OK);
-				add_post_fattr3(&reply, &info), fh->fsid;
+				add_post_fattr3(&reply, &info, fh->fsid);
 				add_uint(&reply, sizeof(struct conn) + TRANSFER_SIZE);			/* rtmax */
 				add_uint(&reply, TRANSFER_SIZE);			/* rtpref */
 				add_uint(&reply, TRANSFER_SIZE);			/* rtmult */
@@ -2867,7 +2867,7 @@ struct conn *request;
 	}
 }
 
-#ifdef __clang__
+#ifndef TEK4404
 #pragma pack(push, 1)
 #endif
 struct eth2
@@ -2918,6 +2918,9 @@ struct eth2
 		} ipv4;
 	};
 };
+#ifndef TEK4404
+#pragma pack(pop)
+#endif
 
 #define BUFFER_SIZE 2048
 #define ETHER_ADDR_LEN 6
