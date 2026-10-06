@@ -2933,18 +2933,6 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
         return EXIT_FAILURE;
     }
 
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
-
-    if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0) {
-        perror("SIOCGIFHWADDR");
-        close(fd);
-        return EXIT_FAILURE;
-    }
-
-    memcpy(hostmac, ifr.ifr_hwaddr.sa_data, 6);
-
     struct sockaddr_ll bind_addr;
     memset(&bind_addr, 0, sizeof(bind_addr));
     bind_addr.sll_family   = AF_PACKET;
@@ -2970,8 +2958,7 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
         }
         
         /* Check the device name */
-        if ((strcmp(p->ifa_name, iface_name) == 0) &&
-            (p->ifa_addr->sa_family == AF_LINK))
+        if ((strcmp(p->ifa_name, iface_name) == 0) && (p->ifa_addr->sa_family == AF_LINK))
         {
             struct sockaddr_dl* sdp;
 
