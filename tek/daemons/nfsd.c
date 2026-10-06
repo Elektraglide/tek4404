@@ -1427,7 +1427,7 @@ int isinternal;
 	int disksize,freesize;
 	int n, count, offset, fd, rc, len;
 	struct filehandle handle;
-	struct filehandle *fh;
+	struct filehandle *fh, *fh2;
 	DIR *d;
 	struct direct *dir;
 	
@@ -1665,38 +1665,49 @@ int isinternal;
         case 12:
             /* Link */
             fh = get_filehandle(request, filepathfrom);
-            n = get_filehandle(request, filepath);
+            fh2 = get_filehandle(request, filepath);
             path = get_string(request);
             strcat(filepath, "/");
             strcat(filepath, path);
-            link(filepathfrom, filepath);
-            if (stat(filepath, &info) == 0)
+            rc = link(filepathfrom, filepath);
+            if (rc == 0 && stat(filepath, &info) == 0)
             {
                 make_filehandle(filepath, &info, &handle);
                 handle.fsid = fh->fsid;
                 add_uint(&reply, NFS_OK);
                 add_filehandle(&reply, &handle);
                 add_fattr(&reply, &info, fh->fsid);
-                fprintf(console, "nfsd: mkdir = %s\n", filepath);
+                fprintf(console, "nfsd: link: %s => %s\n", filepathfrom, filepath);
+            }
+            else
+            {
+                add_uint(&reply, errno);
             }
             break;
 		case 13:
 			/* SymLink */
             fh = get_filehandle(request, filepathfrom);
+            strcpy(filepath, filepathfrom);
             path = get_string(request);
             strcat(filepathfrom, "/");
             strcat(filepathfrom, path);
             pathto = get_string(request);
+            strcat(filepath, "/");
+            strcat(filepath, basename(pathto));      /* FIXME: is this right to drop filepath? */
             get_sattr(request, &reqinfo);
-            symlink(filepathfrom, pathto);
-            if (stat(pathto, &info) == 0)
+            rc = symlink(filepathfrom, filepath);
+            if (rc == 0 && stat(filepath, &info) == 0)
             {
-                make_filehandle(pathto, &info, &handle);
+                make_filehandle(filepath, &info, &handle);
                 handle.fsid = fh->fsid;
                 add_uint(&reply, NFS_OK);
                 add_filehandle(&reply, &handle);
                 add_fattr(&reply, &info, fh->fsid);
-                fprintf(console, "nfsd: mkdir = %s\n", pathto);
+                fprintf(console, "nfsd: symlink: %s => %s\n", filepathfrom, filepath);
+            }
+            else
+            {
+                add_uint(&reply, errno);
             }
 			break;
 		case 14:
