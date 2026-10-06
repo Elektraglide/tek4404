@@ -1458,7 +1458,7 @@ int isinternal;
 			{
 				unsigned int major,minor;
 				get_majorminor(info.st_rdev, &major, &minor);
-				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, info.st_size);
+				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, (int)info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				add_uint(&reply, NFS_OK);
@@ -1505,7 +1505,7 @@ int isinternal;
 			{
 				unsigned int major,minor;
 				get_majorminor(info.st_rdev, &major, &minor);
-				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%ld\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, info.st_size);
+				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, (int)info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				make_filehandle(filepath, &info, &handle);
@@ -1892,7 +1892,7 @@ int isinternal;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			/* fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size); */
+			/* fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,(int)reqinfo.st_size); */
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
