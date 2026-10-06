@@ -1652,7 +1652,7 @@ int isinternal;
 			if (unlink(filepath) == 0)
 			{
 				add_uint(&reply, NFS_OK);
-				/*fprintf(console, "nfsd: remove = %s\n", filepath);*/
+				fprintf(console, "nfsd: remove: %s\n", filepath);
 			}
 			else
 			{
@@ -1661,7 +1661,26 @@ int isinternal;
 			break;
 		case 11:
 			/* Rename */
-			break;
+            fh = get_filehandle(request, filepathfrom);
+            path = get_string(request);
+            strcat(filepathfrom, "/");
+            strcat(filepathfrom, path);
+            fh2 = get_filehandle(request, filepath);
+            path = get_string(request);
+            strcat(filepath, "/");
+            strcat(filepath, path);
+            rc = link(filepathfrom, filepath);
+            if (rc == 0)
+            {
+                unlink(filepathfrom);
+                add_uint(&reply, NFS_OK);
+                fprintf(console, "nfsd: rename: %s => %s\n", filepathfrom, filepath);
+            }
+            else
+            {
+                add_uint(&reply, errno);
+            }
+            break;
         case 12:
             /* Link */
             fh = get_filehandle(request, filepathfrom);
@@ -3199,6 +3218,14 @@ char **argv;
 				
 				n++;
 				strcpy(bp_fs, argv[n]);
+
+                /* must end with hostname; we could automagic this */
+                if (strcmp(bp_machinename, strrchr(bp_fs, '/')+1))
+                {
+                    fprintf(console, "%s: path does not finish with hostname: %s\n", bp_fs, bp_machinename);
+                    exit(-3);
+                }
+                
 				fd = open(bp_fs, 0);
 				if (fd < 0)
 				{
@@ -3212,6 +3239,13 @@ char **argv;
 			{
 				n++;
 				strcpy(bp_swap, argv[n]);
+
+                /* must end with hostname; we could automagic this */
+                if (strcmp(bp_machinename, strrchr(bp_swap, '/')+1))
+                {
+                    fprintf(console, "%s: path does not finish with hostname: %s\n", bp_swap, bp_machinename);
+                    exit(-3);
+                }
 			}
 			else
 			if (!strcmp(argv[n],"-dump"))
