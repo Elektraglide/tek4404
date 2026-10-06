@@ -2917,7 +2917,7 @@ struct eth2
 
 #ifdef __linux__
 #include <linux/if_packet.h>
-int open_bpf_device(const char *ifname, uint8_t *hostmac)
+int open_bpf_device(const char *iface_name, uint8_t *hostmac)
 {
 
     int fd = socket(AF_PACKET, SOCK_RAW, htons(RARP_ETHERTYPE));
@@ -2926,7 +2926,7 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
         return EXIT_FAILURE;
     }
 
-    unsigned int ifindex = if_nametoindex(ifname);
+    unsigned int ifindex = if_nametoindex(iface_name);
     if (ifindex == 0) {
         perror("if_nametoindex");
         close(fd);
@@ -2945,8 +2945,17 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
         return EXIT_FAILURE;
     }
 
-    struct ifaddrs *ifap, *p;
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, iface_name, IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0) {
+        perror("SIOCGIFHWADDR");
+        close(fd);
+        return EXIT_FAILURE;
+    }
+    memcpy(hostmac, ifr.ifr_hwaddr.sa_data, 6);
 
+    struct ifaddrs *ifap, *p;
     if (getifaddrs(&ifap) != 0)
         return -1;
 
@@ -2955,16 +2964,6 @@ int open_bpf_device(const char *ifname, uint8_t *hostmac)
         if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET)
         {
             host_assigned = ((struct sockaddr_in *)p->ifa_addr)->sin_addr;
-        }
-        
-        /* Check the device name */
-        if ((strcmp(p->ifa_name, iface_name) == 0) && (p->ifa_addr->sa_family == AF_LINK))
-        {
-            struct sockaddr_dl* sdp;
-
-            sdp = (struct sockaddr_dl*) p->ifa_addr;
-            memcpy((void *)hostmac, sdp->sdl_data + sdp->sdl_nlen, ETHER_ADDR_LEN);
-            //break;
         }
     }
     freeifaddrs(ifap);
