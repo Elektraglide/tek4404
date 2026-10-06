@@ -40,7 +40,7 @@ struct sir sirbuf;
 #else
 
 /* provide all boot services */
-#define SUNBOOT
+#define POLYD
 
 #include <stdlib.h>
 
@@ -2765,7 +2765,7 @@ struct conn *request;
 	}
 }
 
-#ifdef SUNBOOT
+#ifdef POLYD
 /* https://www.rfc-editor.org/info/rfc1350/ */
 #define TFTP_RRQ 1
 #define TFTP_DATA 3
@@ -3070,7 +3070,7 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
 }
 #endif
 
-#endif	// SUNBOOTs
+#endif	// POLYDs
 
 int main(argc, argv)
 int argc;
@@ -3109,7 +3109,7 @@ char **argv;
 	locksock = create_UDP_sock("lockd", LOCKD_PORT);
 	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
 
-#ifdef SUNBOOT
+#ifdef POLYD
 	/* required for sunbooting */
 	if (portmapsock < 0)
 	{
@@ -3125,7 +3125,7 @@ char **argv;
 		exit(-2);
 	}
 	
-#ifdef SUNBOOT
+#ifdef POLYD
 	/* we are going to offer rarp, tftp and bootparams too */
 	int rarp_bpf_fd = 0;
 	int tftpsock = 0;
@@ -3274,7 +3274,7 @@ char **argv;
 		if (nfssock > n)
 			n = nfssock;
 
-#ifdef SUNBOOT
+#ifdef POLYD
 		/* are we in all-in-one mode? */
 		if (tftpsock > 0)
 		{
@@ -3361,7 +3361,7 @@ char **argv;
 				}
 			}
 		}
-#ifdef SUNBOOT
+#ifdef POLYD
 		else
 		if (FD_ISSET(rarp_bpf_fd, &fd_in))
 		{
