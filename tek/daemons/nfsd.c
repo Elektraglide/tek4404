@@ -1592,7 +1592,7 @@ int isinternal;
 						}
 						else
 						{
-							fprintf(console, "  write NFSERR_IO: %s: count:%s\n", filepath, rc);
+							fprintf(console, "  write NFSERR_IO: %s: count:%d\n", filepath, rc);
 							add_uint(&reply, NFSERR_IO);
 						}
 					}
@@ -2766,7 +2766,7 @@ struct conn *request;
 	int opcode = get_uint16(request);
 	char *filepath = request->buffer + request->crp;
 	char *mode = filepath + strlen(filepath) + 1;
-	char fullpath[256];
+	char fullpath[1024];
 	sprintf(fullpath, "%s/%s", tftp_base, filepath);
 
 	/* only offer RRQ */
