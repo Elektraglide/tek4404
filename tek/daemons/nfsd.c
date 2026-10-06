@@ -3022,17 +3022,20 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
 
     for (p = ifap; p; p = p->ifa_next)
     {
+        if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET)
+        {
+            host_assigned = ((struct sockaddr_in *)p->ifa_addr)->sin_addr;
+        }
+        
         /* Check the device name */
         if ((strcmp(p->ifa_name, iface_name) == 0) &&
             (p->ifa_addr->sa_family == AF_LINK))
         {
-						//printf("checking AF_LINK %s\n", p->ifa_name);
-        
             struct sockaddr_dl* sdp;
 
             sdp = (struct sockaddr_dl*) p->ifa_addr;
             memcpy((void *)hostmac, sdp->sdl_data + sdp->sdl_nlen, ETHER_ADDR_LEN);
-            break;
+            //break;
         }
     }
     freeifaddrs(ifap);
@@ -3049,7 +3052,6 @@ char **argv;
 {
 	int portmapsock, mountsock, locksock, nfssock;
 	int n;
-	struct hostent *host_entry;
 	int launched_by_server = 0;
 
 #ifdef TEK4404
@@ -3069,25 +3071,11 @@ char **argv;
 
 	/* get our IP address so we can point clients back at us */
 	gethostname(host_name, sizeof(host_name));
-	host_entry = gethostbyname(host_name);
-	n = 0;
-	while(host_entry->h_addr_list[n])
-	{
-		host_assigned = *(struct in_addr*)(host_entry->h_addr_list[n]);
-		if (host_assigned.s_addr != htonl(INADDR_LOOPBACK))
-			break;
-		n++;
-	}
-	/* shorten it */
-	if (strchr(host_name, '.'))
-		*strchr(host_name,'.') = '\0';
-		
+    /* shorten it */
+    if (strchr(host_name, '.'))
+        *strchr(host_name,'.') = '\0';
 
-
-strcpy(host_name, "localdomain");
-
-	fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), inet_ntoa(host_assigned), host_name);
-	umask(0);
+    umask(0);
 
 	/* we act as portmapd, mountd and nfsd... */
 	portmapsock = launched_by_server ? fileno(stdin) : create_UDP_sock("portmapd", PORTMAPPERD_PORT);
@@ -3225,7 +3213,9 @@ strcpy(host_name, "localdomain");
 
 			/* setup RARP packet handling using BPF */
 			rarp_bpf_fd = open_bpf_device(ifname, host_mac);
-		}
+        
+            fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), inet_ntoa(host_assigned), host_name);
+        }
 		else
 		{
 			fprintf(console, "missing bootparam info.\n");
