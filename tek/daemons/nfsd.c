@@ -200,7 +200,7 @@ struct filehandle {
 	unsigned int inode;
 	unsigned short dev;
 	unsigned short fsid;
-	unsigned char pathtokens[20];	/* 32 bytes total */
+	unsigned short pathtokens[10];	/* 32 bytes total */
 };
 
 /* request and response state */
@@ -304,75 +304,96 @@ int len;
 }
 #endif
 
-/* cache of file handle entries */
-unsigned int filetablemask = 0;
-char filetable[32][256];
-
+/* packed pool of unique strings */
 int stringcachelen = 0;
-char *stringcache;
+char *stringcache = NULL;
 
-short numsubpaths = 0;
-int subpathindex[256];
-
+/* cache of refs to filepath components */
+int subpaths_len = 0;
+int *subpaths = NULL;
+int subpaths_count = 1;
 int add_subpath(path)
 char *path;
 {
 	short n;
 	char *ptr;
 	
-	/* init */
-	if (stringcachelen == 0)
-	{
-		stringcachelen = 2048;
-		stringcache = malloc(stringcachelen);
+    n = strlen(path) + 1;
 
-		/* subpath index 0 terminates run */
-		numsubpaths = 1;
-		subpathindex[0] = 0;
-	}
-	
-	/* find it */
-	for (n=0; n<numsubpaths; n++)
+    /* do we need to expand subpaths[]? */
+    if (subpaths == NULL)
+    {
+        subpaths_len = 1024;
+        subpaths = (int *)malloc(subpaths_len * sizeof(int));
+        subpaths_count = 1;
+        subpaths[0] = 0;
+    }
+    else
+    if (subpaths_count >= subpaths_len)
+    {
+        fprintf(console, "nfsd: add_subpath: EXHAUSTED subpaths[%d]\n", subpaths_count);
+        subpaths_len += subpaths_len / 2;
+        subpaths = (int *)realloc(subpaths, subpaths_len * sizeof(int));
+    }
+
+    /* do we need to expand string cache? */
+    if (stringcache == NULL)
+    {
+        stringcachelen = 2048;
+        stringcache = malloc(stringcachelen);
+    }
+    else
+    {
+        /* find last byte used */
+        ptr = stringcache + subpaths[subpaths_count-1];
+        ptr += strlen(ptr) + 1;
+
+        if (ptr - stringcache + n > stringcachelen)
+        {
+            fprintf(console, "nfsd: add_subpath: EXHAUSTED stringcache[%d]\n", stringcachelen);
+            stringcachelen += stringcachelen / 2;
+            stringcache = realloc(stringcache, stringcachelen);
+        }
+    }
+    
+    /* find it */
+	for (n=0; n<subpaths_count; n++)
 	{
-		if (!strcmp(path, stringcache + subpathindex[n]))
+		if (!strcmp(path, stringcache + subpaths[n]))
 		{
 			return n;
 		}
 	}
 
-	/* append it  */
-	ptr = stringcache + subpathindex[numsubpaths-1];
+    /* append it */
+	ptr = stringcache + subpaths[subpaths_count-1];
 	ptr += strlen(ptr) + 1;
-	
-	/* do we need to expand */
-	n = strlen(path) + 1;
-	if (ptr - stringcache + n > stringcachelen)
-	{
-		stringcachelen += stringcachelen / 2;
-		stringcache = realloc(stringcache, stringcachelen);
-		ptr = stringcache + subpathindex[numsubpaths-1];
-		ptr += strlen(ptr) + 1;
-	}
 	strcpy(ptr, path);
-	subpathindex[numsubpaths++] = ptr - stringcache;
-	
-	return numsubpaths - 1;
+    
+	subpaths[subpaths_count++] = ptr - stringcache;
+
+	return subpaths_count - 1;
 }
 
 int encodepath(filepath, encoded)
 char *filepath;
-unsigned char *encoded;
+unsigned short *encoded;
 {
 	char working[1024];
 	char *ptr;
 	int n;
+    short i;
 	
 	n = 0;
 	strcpy(working, filepath);
 	ptr = strtok(working, "/");
 	while(ptr)
 	{
-		encoded[n++] = add_subpath(ptr);
+        i = add_subpath(ptr);
+        if (i < 0)
+            return -1;
+
+        encoded[n++] = i;
 		ptr = strtok(NULL,  "/");
 	}
 	
@@ -380,7 +401,7 @@ unsigned char *encoded;
 }
 
 void decodepath(encoded, path)
-unsigned char *encoded;
+unsigned short *encoded;
 char *path;
 {
 	int n = 0;
@@ -393,7 +414,7 @@ char *path;
 	while(encoded[n])
 	{
 		strcat(path, "/");
-		strcat(path, stringcache + subpathindex[encoded[n]]);
+		strcat(path, stringcache + subpaths[encoded[n]]);
 		n++;
 	}
 }
@@ -729,33 +750,13 @@ unsigned int hostperms;
 	return mode;
 }
 
-void get_majorminor(devnum, major,minor)
-unsigned int devnum;
-unsigned int *major;
-unsigned int *minor;
-{
-#if defined(__APPLE__)
-    /* APPLE 8:24 */
-    *major = (devnum>>24) & 0xff;
-    *minor = devnum & 0xffff;
-#elif defined(__linux__)
-    /* LINUX 12:20 */
-    *major = (devnum>>20) & 0xfff;
-    *minor = devnum & 0xffff;
-#elif
-    /* 8:8 */
-    *major = (devnum>>8) & 0xff;
-    *minor = devnum & 0xff;
-#endif
-}
-
 void add_fattr(reply, info, fsid)
 struct response *reply;
 struct stat *info;
 int fsid;
 {
 	unsigned int ftype, nfsperms;
-	unsigned int major,minor;
+	unsigned int devmajor,devminor;
 	
 	ftype = host2nfstype(info->st_perm);
 	add_uint(reply, ftype);
@@ -771,9 +772,9 @@ int fsid;
 	add_uint(reply, (unsigned int)info->st_size);
 	add_uint(reply, BLOCK_SIZE);
 	
-	
-	get_majorminor(info->st_rdev, &major, &minor);
-	add_uint(reply, (major<<8) | minor);
+    devmajor = major(info->st_rdev);
+    devminor = minor(info->st_rdev);
+	add_uint(reply, (devmajor<<8) | devminor);  /* SunOS is 8:8 always */
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
@@ -1036,7 +1037,7 @@ int verbose;
 		{
 			if (strcmp(bp_machinename, name) && strcmp(bp_addr, name))
 			{
-				fprintf(console, "get_credentials: REJECT unknown machinename\n");
+				fprintf(console, "get_credentials: REJECT unknown machinename: '%s'\n", name);
 				return -1;
 			}
 		}
@@ -1068,14 +1069,15 @@ struct filehandle *get_filehandle(request, filepath)
 struct conn *request;
 char *filepath;
 {
-	struct filehandle *ptr = (struct filehandle *)(request->buffer + request->crp);
+	struct filehandle *fh = (struct filehandle *)(request->buffer + request->crp);
 	request->crp += sizeof(struct filehandle);
 
-	/* TODO: if we have flushed the stringcache, return NFS3ERR_STALE */
 	if (filepath)
-		decodepath(ptr->pathtokens, filepath);
+    {
+        decodepath(fh->pathtokens, filepath);
+    }
 
-	return ptr;
+    return fh;
 }
 
 char *get_string(request)
@@ -1192,6 +1194,47 @@ char *path;
 
 }
 
+int make_rootrelativepath(fh, rootrelative)
+struct filehandle *fh;
+char *rootrelative;
+{
+    char *ptr;
+    int n, pcount;
+    
+    decodepath(fh->pathtokens, rootrelative);
+
+    /* count components */
+    ptr = rootrelative;
+    n = 0;
+    while(ptr)
+    {
+        ptr = strchr(ptr, '/');
+        if (ptr)
+        {
+            ptr++;
+            if (strcmp(ptr, ".") && strcmp(ptr, ".."))
+                n++;
+        }
+    }
+
+    /* file system root has (fh->fsid & 15) components */
+    pcount = n - (fh->fsid & 15);
+    
+    /* generate relative path to root of filesystem */
+    rootrelative[0] = '\0';
+    while(--pcount > 0)
+    {
+        strcat(rootrelative, "../");
+    }
+
+    /* does not need last trailing '/' */
+    ptr = strrchr(rootrelative, '/');
+    if(ptr)
+        *ptr = '\0';
+
+    return n;
+}
+
 int make_filehandle(path, info, handle)
 char *path;
 struct stat *info;
@@ -1204,8 +1247,9 @@ struct filehandle *handle;
 	handle->inode = info->st_ino;
 	handle->dev = info->st_dev;
 	handle->fsid = 0;
-	encodepath(path, handle->pathtokens);
-	
+
+    encodepath(path, handle->pathtokens);
+    
 	return 0;
 }
 
@@ -1218,9 +1262,17 @@ struct filehandle *handle;
 	while(handle->pathtokens[n])
 	{
 		result ^= handle->pathtokens[n];
+        result *= 0x01000193;
 		n++;
 	}
-
+    
+    if (n > 15)
+        fprintf(console, "make_fsid: root path too long\n");
+    
+    /* store how many path components there are to the root in lower 4bits */
+    result &= 0xfffffff0;
+    result |= n;
+    
 	return result;
 }
 
@@ -1452,13 +1504,16 @@ int isinternal;
 			break;
 		case 1:
 			/* GetAttr */
-			/* TODO: deal with NFSERR_STALE */
 			fh = get_filehandle(request, filepath);
-			if (stat(filepath, &info) == 0)
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
+            
+            if (lstat(filepath, &info) == 0)
 			{
-				unsigned int major,minor;
-				get_majorminor(info.st_rdev, &major, &minor);
-				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, (int)info.st_size);
+ 				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				add_uint(&reply, NFS_OK);
@@ -1466,13 +1521,18 @@ int isinternal;
 			}
 			else
 			{
-				/* this should never happen.. */
+                fprintf(console, "nfsd: getattr:%s  %s\n", filepath, strerror(errno));
 				add_uint(&reply, NFSERR_NOENT);
 			}
 			break;
 		case 2:
 			/* SetAttr */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			get_sattr(request, &reqinfo);
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
@@ -1499,13 +1559,17 @@ int isinternal;
 			/* Lookup */
 			fh = get_filehandle(request, filepath);
 			path = get_string(request);
-			if (path[0] != '/') strcat(filepath, "/");
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
+
+            if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
-			if (stat(filepath, &info) == 0)
+			if (lstat(filepath, &info) == 0)
 			{
-				unsigned int major,minor;
-				get_majorminor(info.st_rdev, &major, &minor);
-				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major,minor, (int)info.st_size);
+				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
 				info.st_uid = uid;
 				//info.st_gid = 0;
 				make_filehandle(filepath, &info, &handle);
@@ -1516,18 +1580,46 @@ int isinternal;
 			}
 			else
 			{
-				fprintf(console, "nfsd: lookup:%s  NFSERR_NOENT  path:'%s'\n", filepath, path);
+                fprintf(console, "nfsd: lookup:%s path:'%s': %s\n", filepath, path, strerror(errno));
 				add_uint(&reply, NFSERR_NOENT);	/* no such file */
 				add_uint(&reply, 0);
 			}
 			break;
 		case 5:
 			/* ReadLink */
-				fprintf(console, "nfsd: MISSING readlink = %s\n", filepath);
+            fh = get_filehandle(request, filepathfrom);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
+            n = readlink(filepathfrom, filepath, sizeof(filepath));
+            if (n > 0)
+            {
+                char rootrelative[1024];
+
+                rootrelative[0] = '\0';
+
+                /* if absolute, make a relative path */
+                if (filepath[0] == '/')
+                    make_rootrelativepath(fh, rootrelative);
+
+                filepath[n++]  ='\0';
+                strcat(rootrelative, filepath);
+                
+                add_uint(&reply, NFS_OK);
+                add_string(&reply, rootrelative, strlen(rootrelative));
+                fprintf(console, "nfsd: readlink:%s =>'%s'\n", filepathfrom, rootrelative);
+            }
 			break;
 		case 6:
 			/* Read */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			offset = get_uint(request);
 			count = get_uint(request);
 			n = get_uint(request);
@@ -1544,7 +1636,7 @@ int isinternal;
 						add_uint(&reply, NFS_OK);
 						add_fattr(&reply, &info, fh->fsid);
 						add_fromfile(&reply, fd, count);
-						fprintf(console, "  read: %s: %d bytes at %d\n", filepath, count, offset);
+						/*fprintf(console, "  read: %s: %d bytes at %d\n", filepath, count, offset);*/
 						close(fd);
 					}
 					else
@@ -1565,6 +1657,11 @@ int isinternal;
 		case 8:
 			/* Write */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			n = get_uint(request);
 			offset = get_uint(request);
 			n = get_uint(request);
@@ -1578,7 +1675,7 @@ int isinternal;
 						rc = lseek(fd, offset, SEEK_SET);
 						count = get_uint(request);
 						rc = write(fd, request->buffer + request->crp, count);
-						fprintf(console, "  write: %s: %d bytes at %d\n", filepath, rc, offset);
+						/*fprintf(console, "  write: %s: %d bytes at %d\n", filepath, rc, offset);*/
 						close(fd);
 						if (rc == count)
 						{
@@ -1646,6 +1743,11 @@ int isinternal;
 		case 10:
 			/* Remove */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			path = get_string(request);
 			if (path[0] != '/') strcat(filepath, "/");
 			strcat(filepath, path);
@@ -1662,6 +1764,11 @@ int isinternal;
 		case 11:
 			/* Rename */
             fh = get_filehandle(request, filepathfrom);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
             path = get_string(request);
             strcat(filepathfrom, "/");
             strcat(filepathfrom, path);
@@ -1684,6 +1791,11 @@ int isinternal;
         case 12:
             /* Link */
             fh = get_filehandle(request, filepathfrom);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
             fh2 = get_filehandle(request, filepath);
             path = get_string(request);
             strcat(filepath, "/");
@@ -1706,6 +1818,11 @@ int isinternal;
 		case 13:
 			/* SymLink */
             fh = get_filehandle(request, filepathfrom);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
             strcpy(filepath, filepathfrom);
             path = get_string(request);
             strcat(filepathfrom, "/");
@@ -1732,6 +1849,11 @@ int isinternal;
 		case 14:
 			/* MkDir */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			path = get_string(request);
 			strcat(filepath, "/");
 			strcat(filepath, path);
@@ -1755,6 +1877,11 @@ int isinternal;
 		case 16:
 			/* ReadDir */
 			fh = get_filehandle(request, filepath);
+            if (!fh)
+            {
+                add_uint(&reply, NFSERR_STALE);
+                break;
+            }
 			offset = get_uint(request);
 			count = get_uint(request);
 			/* fprintf(console, "nfsd: READDIR: offset = %d count = %d\n", offset, count); */
@@ -1828,7 +1955,7 @@ int isinternal;
 			add_uint(&reply, disksize);					/* Total # of blocks (of the above size) */
 			add_uint(&reply, freesize);					/* Free blocks */
 			add_uint(&reply, freesize);					/* Free blocks available to non-priv. users */
-			fprintf(console, "nfsd: statfs: disk:%d free:%d\n", disksize, freesize);
+			/*fprintf(console, "nfsd: statfs: disk:%d free:%d\n", disksize, freesize);*/
 			break;
 	}
 
@@ -1911,7 +2038,7 @@ int isinternal;
 			fh = get_filehandle(request, filepath);
 			get_sattr3(request, &reqinfo);
 			get_sattrguard3(request, &reqinfo);
-			/* fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%d\n",reqinfo.st_mode,reqinfo.st_uid,(int)reqinfo.st_size); */
+			/* fprintf(console, "nfsd: SETATTR3: mode=%x uid=%d size=%ld\n",reqinfo.st_mode,reqinfo.st_uid,reqinfo.st_size); */
 			if (reqinfo.st_mode != 0xffff)
 				chmod(filepath, reqinfo.st_mode);
 			if ((int)reqinfo.st_uid != -1)
@@ -3218,7 +3345,7 @@ char **argv;
 				
 				n++;
 				strcpy(bp_fs, argv[n]);
-
+                
                 /* must end with hostname; we could automagic this */
                 if (strcmp(bp_machinename, strrchr(bp_fs, '/')+1))
                 {
