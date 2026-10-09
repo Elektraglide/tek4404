@@ -35,6 +35,10 @@
 
 #define ONLY_MTIME  /* does not have atimne or ctime */
 
+#define st_rdev st_dev	/* does not have */
+#define minor(A) ((A)      & 0xff)
+#define major(A) ((A >> 8) & 0xff)
+
 struct sir sirbuf;
 
 #else
@@ -237,12 +241,12 @@ struct response {
 
 FILE *console;
 
-uint8_t host_mac[6];
+unsigned char host_mac[6];
 struct in_addr host_assigned;
 char host_name[256];
 
 /* cmdline args:  nfsd -base /Users/dodah -machinename sparc2 -mac XX:XX:XX:XX:XX:XX -addr 192.168.1.71 -fs /Users/Shared/export/root -swap /Users/Shared/export/swap */
-uint8_t rarp_machinemac[6];
+unsigned char rarp_machinemac[6];
 char tftp_base[256];
 char bp_machinename[256];
 char bp_addr[64];
@@ -252,6 +256,22 @@ char bp_dump[256];
 
 #ifdef TEK4404
 /* missing CRT */
+
+int gethostname(host_name, len)
+char *host_name;
+int len;
+{
+	strncpy(host_name, nget_str("my_name"), len);
+	return 0;
+}
+
+int lstat(fd, info)
+int fd;
+struct stat *info;
+{
+	return stat(fd, info);
+}
+
 int mkdir(path, mode)
 char *path;
 unsigned int mode;
@@ -686,7 +706,7 @@ unsigned int hostperms;
 		nfsperms |= WOTH;
 	if (hostperms & S_IOEXEC)
 		nfsperms |= XOTH;
-#ifndef TEK4404
+#ifndef NO_GROUPS
 	if (hostperms & S_IRGRP)
 		nfsperms |= RGRP;
 	if (hostperms & S_IWGRP)
@@ -737,6 +757,12 @@ unsigned int hostperms;
 	mode[4] = ((hostperms & S_IWRITE) == S_IWRITE) ? 'w' : '-';
 	mode[5] = ((hostperms & S_IEXEC) == S_IEXEC)   ? 'x' : '-';
 
+#ifdef NO_GROUPS
+	mode[6] = ((hostperms & S_IOREAD) == S_IOREAD) ? 'r' : '-';
+	mode[7] = ((hostperms & S_IOWRITE) == S_IOWRITE) ? 'w' : '-';
+	mode[8] = ((hostperms & S_IOEXEC) == S_IOEXEC) ? 'x' : '-';
+	mode[9] = '\0';
+#else
 	mode[6] = ((hostperms & S_IRGRP) == S_IRGRP) ? 'r' : '-';
 	mode[7] = ((hostperms & S_IWGRP) == S_IWGRP) ? 'w' : '-';
 	mode[8] = ((hostperms & S_IXGRP) == S_IXGRP) ? 'x' : '-';
@@ -744,8 +770,9 @@ unsigned int hostperms;
 	mode[9] = ((hostperms & S_IOREAD) == S_IOREAD)   ? 'r' : '-';
 	mode[10] = ((hostperms & S_IOWRITE) == S_IOWRITE) ? 'w' : '-';
 	mode[11] = ((hostperms & S_IOEXEC) == S_IOEXEC)   ? 'x' : '-';
-
 	mode[12] = '\0';
+#endif
+
 
 	return mode;
 }
@@ -1282,19 +1309,22 @@ int port;
 {
 	struct in_sockaddr serv_addr;
 	int sock,n;
-		
+	int reusesize,reuse = 1;
+
 	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
 		fprintf(console, "socket: %s: %s\n",daemonname, strerror(errno));
 		return -1;
 	}
 
-	int reuse = 1;
-	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+#ifdef TEK4404
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, &reusesize);
+#else
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reusesize));
+#endif
 
 	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = host_assigned.s_addr ;		// INADDR_ANY;
-	//serv_addr.sin_addr.s_addr = INADDR_ANY;
+	serv_addr.sin_addr.s_addr = host_assigned.s_addr ;		/* or INADDR_ANY; */
 	serv_addr.sin_port = htons(port);
 	n = bind(sock, (struct sockaddr *) & serv_addr, sizeof serv_addr);
 	if (n < 0) {
@@ -1343,8 +1373,9 @@ int isinternal;
 			if (stat(path, &info) == 0)
 			{
 				info.st_uid = uid;
+#ifndef NO_GROUPS
 				//info.st_gid = 0;
-			
+#endif			
 				if ((info.st_mode & S_IFDIR) == S_IFDIR)
 				{
 					make_filehandle(path, &info, &handle);
@@ -1515,7 +1546,9 @@ int isinternal;
 			{
  				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
 				info.st_uid = uid;
+#ifndef NO_GROUPS
 				//info.st_gid = 0;
+#endif
 				add_uint(&reply, NFS_OK);
 				add_fattr(&reply, &info, fh->fsid);
 			}
@@ -1571,7 +1604,9 @@ int isinternal;
 			{
 				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
 				info.st_uid = uid;
+#ifndef NO_GROUPS
 				//info.st_gid = 0;
+#endif
 				make_filehandle(filepath, &info, &handle);
 				handle.fsid = fh->fsid;
 				add_uint(&reply, NFS_OK);
@@ -1587,7 +1622,11 @@ int isinternal;
 			break;
 		case 5:
 			/* ReadLink */
-            fh = get_filehandle(request, filepathfrom);
+#ifdef TEK4404
+			/* FIXME: implement readlink() */
+			add_uint(&reply, NFSERR_IO);
+#else
+			fh = get_filehandle(request, filepathfrom);
             if (!fh)
             {
                 add_uint(&reply, NFSERR_STALE);
@@ -1611,6 +1650,7 @@ int isinternal;
                 add_string(&reply, rootrelative, strlen(rootrelative));
                 fprintf(console, "nfsd: readlink:%s =>'%s'\n", filepathfrom, rootrelative);
             }
+#endif
 			break;
 		case 6:
 			/* Read */
@@ -1626,7 +1666,9 @@ int isinternal;
 			if (stat(filepath, &info) == 0)
 			{
 				info.st_uid = uid;
+#ifndef NO_GROUPS
 				//info.st_gid = 0;
+#endif
 				if ((info.st_mode & S_IFREG) == S_IFREG)
 				{
 					if (info.st_perm & S_IREAD)
@@ -1817,6 +1859,9 @@ int isinternal;
             break;
 		case 13:
 			/* SymLink */
+#ifdef TEK4404
+            add_uint(&reply, NFSERR_IO);
+#else
             fh = get_filehandle(request, filepathfrom);
             if (!fh)
             {
@@ -1845,6 +1890,7 @@ int isinternal;
             {
                 add_uint(&reply, errno);
             }
+#endif
 			break;
 		case 14:
 			/* MkDir */
@@ -2693,6 +2739,8 @@ int isinternal;
 	
 }
 
+#ifdef POLYD
+
 void bootparamprog(request,isinternal)
 struct conn *request;
 int isinternal;
@@ -2911,7 +2959,6 @@ struct conn *request;
 	}
 }
 
-#ifdef POLYD
 /* https://www.rfc-editor.org/info/rfc1350/ */
 #define TFTP_RRQ 1
 #define TFTP_DATA 3
@@ -3462,20 +3509,6 @@ char **argv;
 			continue;
 		}
 		else
-		if (FD_ISSET(portmapsock, &fd_in))
-		{
-			request.sock = portmapsock;
-			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr *)&request.from, &fromSize);
-			if (request.len > 0)
-			{
-				/* validate */
-				if (validate(&request, PORTMAPPERD))
-				{
-					portmapperprog(&request);
-				}
-			}
-		}
-		else
 		if (FD_ISSET(mountsock, &fd_in))
 		{
 			request.sock = mountsock;
@@ -3523,6 +3556,20 @@ char **argv;
 			}
 		}
 #ifdef POLYD
+		else
+		if (FD_ISSET(portmapsock, &fd_in))
+		{
+			request.sock = portmapsock;
+			request.len = recvfrom(request.sock, request.buffer, sizeof(request.buffer), 0, (struct sockaddr*)&request.from, &fromSize);
+			if (request.len > 0)
+			{
+				/* validate */
+				if (validate(&request, PORTMAPPERD))
+				{
+					portmapperprog(&request);
+				}
+			}
+		}
 		else
 		if (FD_ISSET(rarp_bpf_fd, &fd_in))
 		{
