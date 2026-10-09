@@ -2739,6 +2739,104 @@ int isinternal;
 	
 }
 
+/* portmapper is special and can invoke other progs */
+void portmapperprog(request)
+struct conn* request;
+{
+	struct rpcheader* header = (struct rpcheader*)request->buffer;
+	struct response reply;
+	unsigned int prog, vers, prot, port, registeredport;
+	unsigned int proc;
+	char* lomark, * himark;
+	int n;
+
+	/* expecting nullop credentials */
+	get_credentials(request, 0);
+	get_verifier(request);
+
+	reply.cwp = 0;
+	add_uint(&reply, ntohl(header->xid));
+	add_uint(&reply, REPLY);
+	add_uint(&reply, MSG_ACCEPTED);
+	add_uint(&reply, 0);		/* opaque_verf */
+	add_uint(&reply, 0);		/* opaque_verf size */
+
+	/* I dont understand why it does not need SUCCESS here.. */
+
+	switch (ntohl(header->proc))
+	{
+	default:
+	case 0:
+		add_uint(&reply, NFS_OK);
+		break;
+	case 3:
+		/* GetPort */
+		prog = get_uint(request);
+		vers = get_uint(request);
+		prot = get_uint(request);
+		port = get_uint(request);
+		registeredport = 0;
+		if (prot == IPPROTO_UDP)
+		{
+			if (prog == NFSD) registeredport = NFSD_PORT;
+			if (prog == MOUNTD) registeredport = MOUNTD_PORT;
+			if (prog == BOOTPARAMD) registeredport = BOOTPARAMD_PORT;
+			if (prog == LOCKD && vers == 4) registeredport = LOCKD_PORT;
+		}
+
+		if (registeredport)
+		{
+			add_uint(&reply, NFS_OK);
+			add_uint(&reply, registeredport);
+		}
+		else
+		{
+			add_uint(&reply, PROG_UNAVAIL);
+		}
+		fprintf(console, "portmapd: prog:%d vers:%d prot:%d => registeredport:%d\n", prog, vers, prot, registeredport);
+		break;
+
+	case 5:
+		/* Call-It */
+		lomark = request->buffer + request->crp;
+		prog = get_uint(request);
+		vers = get_uint(request);
+		proc = get_uint(request);
+		himark = request->buffer + request->crp;
+		fprintf(console, "portmapd: CALLIT: prog:%d vers:%d proc:%d \n", prog, vers, proc);
+
+		/* roll back buffer */
+		while (lomark < request->buffer + request->len)
+		{
+			*lomark++ = *himark++;
+		}
+
+		/* edit header */
+		request->crp = sizeof(struct rpcheader);
+		header->proc = ntohl(proc);
+
+		if (prog == MOUNTD) mountprog(request, NFS_TRUE);
+		if (prog == LOCKD) lockprog(request, NFS_TRUE);
+		if (prog == NFSD)
+		{
+			if (vers == 2)
+				nfsprog(request, NFS_TRUE);
+			if (vers == 3)
+				nfs3prog(request, NFS_TRUE);
+		}
+#ifdef POLYD
+		if (prog == BOOTPARAMD) bootparamprog(request, NFS_TRUE);
+#endif
+		return;
+	}
+
+	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr*)&request->from, sizeof(request->from));
+	if (n != reply.cwp)
+	{
+		fprintf(console, "portmapd: sendto: %s\n", strerror(errno));
+	}
+}
+
 #ifdef POLYD
 
 void bootparamprog(request,isinternal)
@@ -2861,102 +2959,6 @@ int isinternal;
 		fprintf(console, "bootparamd: sendto(%d): %s\n", request->sock, strerror(errno));
 	}
 	/*fprintf(console, "bootparamd: replied %d bytes\n", n);*/
-}
-
-/* portmapper is special and can invoke other progs */
-void portmapperprog(request)
-struct conn *request;
-{
-	struct rpcheader *header = (struct rpcheader *)request->buffer;
-	struct response reply;
-	unsigned int prog, vers, prot, port, registeredport;
-	unsigned int proc;
-	char *lomark,*himark;
-	int n;
-	
-	/* expecting nullop credentials */
-	get_credentials(request, 0);
-	get_verifier(request);
-	
-	reply.cwp = 0;
-	add_uint(&reply, ntohl(header->xid));
-	add_uint(&reply, REPLY);
-	add_uint(&reply, MSG_ACCEPTED);
-	add_uint(&reply, 0);		/* opaque_verf */
-	add_uint(&reply, 0);		/* opaque_verf size */
-
-	/* I dont understand why it does not need SUCCESS here.. */
-
-	switch(ntohl(header->proc))
-	{
-		default:
-		case 0:
-			add_uint(&reply, NFS_OK);
-			break;
-		case 3:
-			/* GetPort */
-			prog = get_uint(request);
-			vers = get_uint(request);
-			prot = get_uint(request);
-			port = get_uint(request);
-			registeredport = 0;
-			if (prot == IPPROTO_UDP)
-			{
-				if (prog == NFSD) registeredport = NFSD_PORT;
-				if (prog == MOUNTD) registeredport = MOUNTD_PORT;
-				if (prog == BOOTPARAMD) registeredport = BOOTPARAMD_PORT;
-				if (prog == LOCKD && vers == 4) registeredport = LOCKD_PORT;
-			}
-
-			if (registeredport)
-			{
-				add_uint(&reply, NFS_OK);
-				add_uint(&reply, registeredport);
-			}
-			else
-			{
-				add_uint(&reply, PROG_UNAVAIL);
-			}
-			fprintf(console, "portmapd: prog:%d vers:%d prot:%d => registeredport:%d\n", prog, vers, prot, registeredport);
-			break;
-
-		case 5:
-			/* Call-It */
-			lomark = request->buffer + request->crp;
-			prog = get_uint(request);
-			vers = get_uint(request);
-			proc = get_uint(request);
-			himark = request->buffer + request->crp;
-			fprintf(console, "portmapd: CALLIT: prog:%d vers:%d proc:%d \n", prog, vers, proc);
-
-			/* roll back buffer */
-			while(lomark < request->buffer+request->len)
-			{
-				*lomark++ = *himark++;
-			}
-
-			/* edit header */
-			request->crp = sizeof(struct rpcheader);
-			header->proc = ntohl(proc);
-			
-			if (prog == MOUNTD) mountprog(request, NFS_TRUE);
-			if (prog == LOCKD) lockprog(request, NFS_TRUE);
-			if (prog == BOOTPARAMD) bootparamprog(request, NFS_TRUE);
-			if (prog == NFSD)
-			{
-				if (vers == 2)
-					nfsprog(request, NFS_TRUE);
-				if (vers == 3)
-					nfs3prog(request, NFS_TRUE);
-			}
-			return;
-	}
-
-	n = sendto(request->sock, reply.buffer, reply.cwp, 0, (struct sockaddr *) &request->from, sizeof(request->from));
-	if(n != reply.cwp)
-	{
-			fprintf(console, "portmapd: sendto: %s\n",strerror(errno));
-	}
 }
 
 /* https://www.rfc-editor.org/info/rfc1350/ */
@@ -3277,9 +3279,9 @@ char **argv;
 	/* are we being launched by /etc/server? */
 	struct stat s;
 	fstat(0, &s);
-	if (s.st_mode & S_IFPIPE)
+	if (s.st_mode & S_IFPIPE)	/* this test does not seem sufficient */
 	{
-		launched_by_server = 1;
+		launched_by_server = 0;
 	}
 	console = fopen("/dev/console","w");
 	if (geteuid() != 0)
@@ -3456,7 +3458,18 @@ char **argv;
 			exit(-4);
 		}
 	}
+	else
 #endif
+	{
+#ifdef TEK4404
+		char host_ip[32];
+		n = adb_open("/etc/net.db");
+		adb_search(n, "name", "teta");
+		adb_extract(n, "INET", host_ip);
+		adb_close(n);
+		fprintf(console, "%s: running on host: %s (%s)\n", basename(argv[0]), host_ip, host_name);
+#endif
+	}
 
 	/* run loop */
 	while(1)
@@ -3555,7 +3568,6 @@ char **argv;
 				}
 			}
 		}
-#ifdef POLYD
 		else
 		if (FD_ISSET(portmapsock, &fd_in))
 		{
@@ -3570,6 +3582,7 @@ char **argv;
 				}
 			}
 		}
+#ifdef POLYD
 		else
 		if (FD_ISSET(rarp_bpf_fd, &fd_in))
 		{
