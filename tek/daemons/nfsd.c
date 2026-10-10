@@ -49,7 +49,7 @@ struct sir sirbuf;
 #include <stdlib.h>
 
 #define in_sockaddr sockaddr_in
-#define st_perm st_mode
+#define st_perm st_mode                  /* Uniflex stores perms seperately */
 #define S_IOREAD         S_IROTH         /* backward compatability */
 #define S_IOWRITE        S_IWOTH         /* backward compatability */
 #define S_IOEXEC         S_IXOTH         /* backward compatability */
@@ -673,24 +673,25 @@ unsigned int nfsmode;
 	return perms;
 }
 
-unsigned int host2nfsmode(hostperms)
+unsigned int host2nfsmode(hostmode,hostperms)
+unsigned int hostmode;
 unsigned int hostperms;
 {
 	unsigned int nfsperms = 0;
 
-	if ((hostperms & S_ISUID) == S_ISUID)
+	if ((hostmode & S_ISUID) == S_ISUID)
 		nfsperms |= SUID;
 
-	if ((hostperms & S_IFDIR) == S_IFDIR)
+	if ((hostmode & S_IFMT) == S_IFDIR)
 		nfsperms |= DIR_NFS;
-	if ((hostperms & S_IFREG) == S_IFREG)
+	if ((hostmode & S_IFMT) == S_IFREG)
 		nfsperms |= REG;
-	if ((hostperms & S_IFCHR) == S_IFCHR)
+	if ((hostmode & S_IFMT) == S_IFCHR)
 		nfsperms |= CHR;
-	if ((hostperms & S_IFBLK) == S_IFBLK)
+	if ((hostmode & S_IFMT) == S_IFBLK)
 		nfsperms |= BLK;
 #ifndef TEK4404
-	if ((hostperms & S_IFLNK) == S_IFLNK)
+	if ((hostmode & S_IFMT) == S_IFLNK)
 		nfsperms |= LNK;
 #endif
 
@@ -718,38 +719,39 @@ unsigned int hostperms;
 	return nfsperms;
 }
 
-unsigned int host2nfstype(hostperms)
-unsigned int hostperms;
+unsigned int host2nfstype(hostmode)
+unsigned int hostmode;
 {
 	unsigned int ftype = 0;
 
-	if ((hostperms & S_IFDIR) == S_IFDIR)
+	if ((hostmode & S_IFMT) == S_IFDIR)
 		ftype = NFDIR;
-	if ((hostperms & S_IFREG) == S_IFREG)
+	if ((hostmode & S_IFMT) == S_IFREG)
 		ftype = NFREG;
-	if ((hostperms & S_IFCHR) == S_IFCHR)
+	if ((hostmode & S_IFMT) == S_IFCHR)
 		ftype = NFCHR;
-	if ((hostperms & S_IFBLK) == S_IFBLK)
+	if ((hostmode & S_IFMT) == S_IFBLK)
 		ftype = NFBLK;
 #ifndef TEK4404
-	if ((hostperms& S_IFLNK) == S_IFLNK)
+	if ((hostmode & S_IFMT) == S_IFLNK)
 		ftype = NFLNK;
 #endif
 	return ftype;
 }
 
-char *hostmode2ascii(hostperms)
+char *hostmode2ascii(hostmode,hostperms)
+unsigned int hostmode;
 unsigned int hostperms;
 {
 	static char mode[16];
 
 	mode[0] = ((hostperms & S_ISUID) == S_ISUID) ? 'S' : '-';
 	
-	mode[1] = ((hostperms & S_IFDIR) == S_IFDIR) ? 'D' : 'F';
-	mode[1] = ((hostperms & S_IFCHR) == S_IFCHR) ? 'C' : mode[1];
-	mode[1] = ((hostperms & S_IFBLK) == S_IFBLK) ? 'B' : mode[1];
+	mode[1] = ((hostmode & S_IFMT) == S_IFDIR) ? 'D' : 'F';
+	mode[1] = ((hostmode & S_IFMT) == S_IFCHR) ? 'C' : mode[1];
+	mode[1] = ((hostmode & S_IFMT) == S_IFBLK) ? 'B' : mode[1];
 #ifndef TEK4404
-	mode[1] = ((hostperms & S_IFLNK) == S_IFLNK) ? 'L' : mode[1];
+	mode[1] = ((hostmode & S_IFMT) == S_IFLNK) ? 'L' : mode[1];
 #endif
 	mode[2] = '/';
 	
@@ -777,6 +779,28 @@ unsigned int hostperms;
 	return mode;
 }
 
+void get_majorminor(info, devmajor, devminor)
+struct stat *info;
+unsigned int* devmajor;
+unsigned int* devminor;
+{
+#ifdef TEK4404
+	/* Uniflex returns major:minor in st_size field.. */
+	if (((info->st_mode & S_IFCHR) == S_IFCHR) || ((info->st_mode & S_IFBLK) == S_IFBLK))
+	{
+		*devmajor = major(info->st_size);
+		*devminor = minor(info->st_size);
+	}
+	else
+	{
+		*devmajor = 0;
+		*devminor = 0;
+	}
+#else
+	*devmajor = major(info->st_rdev);
+	*devminor = minor(info->st_rdev);
+#endif
+}
 void add_fattr(reply, info, fsid)
 struct response *reply;
 struct stat *info;
@@ -785,9 +809,9 @@ int fsid;
 	unsigned int ftype, nfsperms;
 	unsigned int devmajor,devminor;
 	
-	ftype = host2nfstype(info->st_perm);
+	ftype = host2nfstype(info->st_mode);
 	add_uint(reply, ftype);
-	nfsperms = host2nfsmode(info->st_perm);
+	nfsperms = host2nfsmode(info->st_mode, info->st_perm);
 	add_uint(reply, nfsperms);
 	add_uint(reply, info->st_nlink);
 	add_uint(reply, info->st_uid);
@@ -799,18 +823,7 @@ int fsid;
 	add_uint(reply, (unsigned int)info->st_size);
 	add_uint(reply, BLOCK_SIZE);
 
-#ifdef TEK4404
-	/* Uniflex returns major:minor in st_size field.. */
-	devmajor = devminor = 0;
-	if (((info->st_mode & S_IFCHR) == S_IFCHR) || ((info->st_mode & S_IFBLK) == S_IFBLK))
-	{
-		devmajor = major(info->st_size);
-		devminor = minor(info->st_size);
-	}
-#else
-    devmajor = major(info->st_rdev);
-    devminor = minor(info->st_rdev);
-#endif
+	get_majorminor(info, &devmajor, &devminor);
 	add_uint(reply, (devmajor<<8) | devminor);  /* SunOS is 8:8 always */
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
@@ -844,7 +857,7 @@ int fsid;
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
 		add_uint(reply, NFDIR);
-		add_uint(reply, nfsperms);			/* info->st_perm */
+		add_uint(reply, nfsperms);
 		add_uint(reply, info->st_nlink);
 		add_uint(reply, info->st_uid);
 #ifdef NO_GROUPS
@@ -1392,7 +1405,7 @@ int isinternal;
 					handle.fsid = make_fsid(&handle);
 					add_uint(&reply, NFS_OK);
 					add_filehandle(&reply, &handle);
-					fprintf(console, "mountd: mount Path = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
+					fprintf(console, "mountd: mount Path = %s for client@%s\n", path, inet_ntoa((request->from.sin_addr)) );
 					if (header->vers == htonl(3))
 					{
 						add_uint(&reply, 1);	/* maxlen */
@@ -1554,7 +1567,9 @@ int isinternal;
             
             if (lstat(filepath, &info) == 0)
 			{
- 				fprintf(console, "nfsd: get_attr: %s  uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
+				unsigned int devmajor,devminor;
+				get_majorminor(&info, &devmajor, &devminor);
+ 				fprintf(console, "nfsd: get_attr:'%s' uid:%d perm:%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);
 				info.st_uid = uid;
 #ifndef NO_GROUPS
 				//info.st_gid = 0;
@@ -1564,7 +1579,7 @@ int isinternal;
 			}
 			else
 			{
-                fprintf(console, "nfsd: getattr:%s  %s\n", filepath, strerror(errno));
+                fprintf(console, "nfsd: getattr:%s: %s\n", filepath, strerror(errno));
 				add_uint(&reply, NFSERR_NOENT);
 			}
 			break;
@@ -1612,7 +1627,9 @@ int isinternal;
 			strcat(filepath, path);
 			if (lstat(filepath, &info) == 0)
 			{
-				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode), major(info.st_rdev),minor(info.st_rdev), (int)info.st_size);
+				unsigned int devmajor, devminor;
+				get_majorminor(&info, &devmajor, &devminor);
+				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);
 				info.st_uid = uid;
 #ifndef NO_GROUPS
 				//info.st_gid = 0;
@@ -1753,7 +1770,7 @@ int isinternal;
 				}
 				else
 				{
-					fprintf(console, "  write NFSERR_ISDIR: %s: mode:%s\n", filepath, hostmode2ascii(info.st_mode));
+					fprintf(console, "  write NFSERR_ISDIR: %s: mode:%s\n", filepath, hostmode2ascii(info.st_mode, info.st_perm));
 					add_uint(&reply, NFSERR_ISDIR);
 				}
 			}
@@ -1785,7 +1802,7 @@ int isinternal;
 				add_uint(&reply, NFS_OK);
 				add_filehandle(&reply, &handle);
 				add_fattr(&reply, &info, fh->fsid);
-				/*fprintf(console, "nfsd: create = %s perm:%s\n", filepath, hostmode2ascii(info.st_mode));*/
+				/*fprintf(console, "nfsd: create = %s perm:%s\n", filepath, hostmode2ascii(info.st_mode, info.st_perm));*/
 			}
 			else
 			{
@@ -2079,14 +2096,14 @@ int isinternal;
 			{
 				add_uint(&reply, NFS_OK);
 				add_fattr3(&reply, &info, fh->fsid);
-				/* fprintf(console, "nfsd: GETATTR3: %s  perm:%s\n", filepath, hostmode2ascii(info.st_mode)); */
+				/* fprintf(console, "nfsd: GETATTR3: %s  perm:%s\n", filepath, hostmode2ascii(info.st_mode, info.st_perm)); */
 			}
 			else
 			{
 				/* this should never happen.. */
 				add_uint(&reply, NFS3ERR_BADHANDLE);
 				add_uint(&reply, 0);
-				fprintf(console, "nfsd: GETATTR3: %s  perm:%s FAILED\n", filepath, hostmode2ascii(info.st_mode));
+				fprintf(console, "nfsd: GETATTR3: %s  perm:%s FAILED\n", filepath, hostmode2ascii(info.st_mode, info.st_perm));
 			}
 			break;
 		case 2:
@@ -2107,7 +2124,7 @@ int isinternal;
 			{
 				add_uint(&reply, NFS_OK);
 				add_wcc_data(&reply, &preinfo, &info, fh->fsid);
-				/* fprintf(console, "nfsd: SETATTR3 = %s mode=%s size=%d\n", filepath, hostmode2ascii(info.st_mode), info.st_size); */
+				/* fprintf(console, "nfsd: SETATTR3 = %s mode=%s size=%d\n", filepath, hostmode2ascii(info.st_mode, info.st_perm), info.st_size); */
 			}
 			else
 			{
