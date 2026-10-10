@@ -736,6 +736,7 @@ unsigned int hostmode;
 	if ((hostmode & S_IFMT) == S_IFLNK)
 		ftype = NFLNK;
 #endif
+
 	return ftype;
 }
 
@@ -775,7 +776,6 @@ unsigned int hostperms;
 	mode[12] = '\0';
 #endif
 
-
 	return mode;
 }
 
@@ -801,6 +801,7 @@ unsigned int* devminor;
 	*devminor = minor(info->st_rdev);
 #endif
 }
+
 void add_fattr(reply, info, fsid)
 struct response *reply;
 struct stat *info;
@@ -951,7 +952,7 @@ int prognum;
 	struct rpcheader *header = (struct rpcheader *)request->buffer;
 	struct response reply;
 
-/*	fprintf(console,"RPC: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d msg:%d\015\012", ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc), ntohl(header->msg_type));
+/*	fprintf(console,"RPC: %s: xid:%8.8x rpcvers:%d vers:%d prog:%d proc:%d msg:%d\n", inet_ntoa((request->from.sin_addr)), ntohl(header->xid), ntohl(header->rpcvers), ntohl(header->vers), ntohl(header->prog), ntohl(header->proc), ntohl(header->msg_type));
 */
 	reply.cwp = 0;
 	if (ntohl(header->msg_type) != CALL)
@@ -1629,7 +1630,7 @@ int isinternal;
 			{
 				unsigned int devmajor, devminor;
 				get_majorminor(&info, &devmajor, &devminor);
-				fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);
+				/**/fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);*/
 				info.st_uid = uid;
 #ifndef NO_GROUPS
 				//info.st_gid = 0;
@@ -1995,7 +1996,7 @@ int isinternal;
 						add_uint(&reply, n);	/* fileid */
 						add_string(&reply, dir->d_name, len);
 						add_uint(&reply, n);
-						fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);
+						/* fprintf(console, "nfsd: READDIR: %3d: cwp(%d) %s\n", n, reply.cwp, dir->d_name);*/
 					}
 				}
 				closedir(d);
@@ -2005,7 +2006,7 @@ int isinternal;
 
 				/* complete or run out of room? */
 				add_uint(&reply, (count) ? 1 : 0);
-				fprintf(console, "nfsd: READDIR: eof(%d): cwp(%d)\n", (count) ? 1 : 0, reply.cwp);
+				/* fprintf(console, "nfsd: READDIR: eof(%d): cwp(%d)\n", (count) ? 1 : 0, reply.cwp); */
 			}
 			break;
 		case 17:
