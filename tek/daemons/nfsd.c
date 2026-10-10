@@ -1643,7 +1643,7 @@ int isinternal;
 			}
 			else
 			{
-                fprintf(console, "nfsd: lookup:%s path:'%s': %s\n", filepath, path, strerror(errno));
+                /* fprintf(console, "nfsd: lookup:%s path:'%s': %s\n", filepath, path, strerror(errno)); */
 				add_uint(&reply, NFSERR_NOENT);	/* no such file */
 				add_uint(&reply, 0);
 			}
