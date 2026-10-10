@@ -35,7 +35,7 @@
 
 #define ONLY_MTIME  /* does not have atimne or ctime */
 
-#define st_rdev st_dev	/* does not have */
+#define st_rdev st_size		/* stored in st_size for devices */
 #define minor(A) ((A)      & 0xff)
 #define major(A) ((A >> 8) & 0xff)
 
