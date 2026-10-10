@@ -798,9 +798,19 @@ int fsid;
 #endif
 	add_uint(reply, (unsigned int)info->st_size);
 	add_uint(reply, BLOCK_SIZE);
-	
+
+#ifdef TEK4404
+	/* Uniflex returns major:minor in st_size field.. */
+	devmajor = devminor = 0;
+	if (((info->st_mode & S_IFCHR) == S_IFCHR) || ((info->st_mode & S_IFBLK) == S_IFBLK))
+	{
+		devmajor = major(info->st_size);
+		devminor = minor(info->st_size);
+	}
+#else
     devmajor = major(info->st_rdev);
     devminor = minor(info->st_rdev);
+#endif
 	add_uint(reply, (devmajor<<8) | devminor);  /* SunOS is 8:8 always */
 
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
