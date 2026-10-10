@@ -3303,14 +3303,14 @@ char **argv;
 	int launched_by_server = 0;
 
 #ifdef TEK4404
-	/* are we being launched by /etc/server? */
+	/* are we being launched by /etc/server meaning stdin is a socket? */
 	struct stat s;
 	fstat(0, &s);
-	if (s.st_mode & S_IFPIPE)	/* this test does not seem sufficient */
+	if ((s.st_mode & S_IFCHR) && (major(s.st_size) == 9))
 	{
-		launched_by_server = 0;
+		launched_by_server = 1;
 	}
-	console = fopen("/dev/console","w");
+	console = launched_by_server ? fopen("/dev/console","w") : stdout;
 	if (geteuid() != 0)
 		exit(-1);
 #else
