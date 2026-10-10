@@ -1630,7 +1630,7 @@ int isinternal;
 			{
 				unsigned int devmajor, devminor;
 				get_majorminor(&info, &devmajor, &devminor);
-				/**/fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);*/
+				/*fprintf(console, "nfsd: lookup:%s uid:%d perms=%s dev(%d:%d) size:%d\n", filepath, info.st_uid, hostmode2ascii(info.st_mode, info.st_perm), devmajor,devminor, (int)info.st_size);*/
 				info.st_uid = uid;
 #ifndef NO_GROUPS
 				//info.st_gid = 0;
