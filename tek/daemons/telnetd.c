@@ -117,6 +117,7 @@ char linefeed[] = "\012";
 int server_sock = -1;
 int session_state = STOPPED;
 int session_pty = 0;
+int session_pid = 0;
 int session_cmd_pid = 0;
 
 int off = 0;
@@ -125,7 +126,6 @@ int on = 1;
 FILE  *console;
 FILE  *logger;
 
-int is_in_select = 0;
 int istelnet;
 char ruser[32],rhost[32];
 char sessionname[64];
@@ -331,18 +331,15 @@ int sig;
   int n;
 
     /* is our child alive? */
-    n = kill(session_cmd_pid, 0);
+    n = kill(session_pid, 0);
 
 #ifdef DEBUG
-    fprintf(console,"pid(%d): received SIGDEAD\015\012",getpid());
-    fprintf(console,"child pid(%d) status(%d) in_select(%d)\015\012", session_cmd_pid, n, on);
+    fprintf(console,"pid(%d): received SIGDEAD  %d\015\012",getpid(),session_pid);
+    fprintf(console,"child pid(%d) kill(%d,0) => %d)\015\012", session_cmd_pid, session_pid, n);
 #endif
 
-    /* SIGDEAD received by all peer processes, killing them all when 1 session ends!
-       Appears to be when a process in inside a select() it wrongly gets a SIGDEAD..  
-       so ignore SIGDEAD if curently inside a select()
-    */
-    if (is_in_select == 0)
+    /* only if our expected process is dead */
+    if (n < 0)
         session_state = STOPPED;
 }
 
@@ -480,6 +477,9 @@ char *from;
 
   signal(SIGDEAD, SIG_IGN);
 
+  system_control(1);
+
+  session_pid = getpid();
   session_cmd_pid = fork();
   if (session_cmd_pid)
   {
@@ -574,12 +574,10 @@ char *from;
         if (fdmaster > n)
           n = fdmaster;
 #endif
-        is_in_select = 1;
         errno = 0;
         /* fprintf(console, "pid(%d): select n(%d)\015\012", getpid(), n + 1);*/
         rc = select(n + 1, &fd_reads, NULL, NULL, &timeout);
         /* fprintf(console, "pid(%d): ** select n(%d) timeout(%d) => %d 0x%4.4x\015\012", getpid(), n + 1, timeout.tv_sec * 1000000 + timeout.tv_usec, rc, ptystatus); */
-        is_in_select = 0;
 
         if (rc < 0)
         {
@@ -700,12 +698,12 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
           /* we have no ouput data still pending to be written, read some more */
           if (ts.bo.start == ts.bo.end)
           {
-#ifdef DEBUG
+#ifdef DEBUGCONSOLE
             fprintf(console, "** TRY Read fdmaster %d bytes\015\012", sizeof(ts.bo.data));
 #endif
               /* Q: is there a bug in uniflex ptty buffering?  when reading max amount (224) a few times, select() then does not timeout..  */
               n = (int)read(fdmaster, ts.bo.data, sizeof(ts.bo.data));
-#ifdef DEBUG
+#ifdef DEBUGCONSOLE
             fprintf(console, "**Read fdmaster %d bytes\015\012", n);
 #endif
             if (n < 0)
@@ -765,7 +763,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
             {
               fprintf(console, "output choked\015\012");
             }
-#ifdef DEBUG
+#ifdef DEBUGCONSOLE
             fprintf(console, "**Wrote dout %d bytes \015\012", n);
 #endif
 
@@ -814,7 +812,7 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
 #endif
       }
     
-      kill(session_cmd_pid, SIGQUIT);
+    /*  kill(session_cmd_pid, SIGQUIT); */
 
       /* collect child process */
       n = wait(&rc);
@@ -1052,6 +1050,8 @@ char **argv;
       }
       else
       {
+        close(server_sock);
+        
         argv[0] = "client";
 
         rc = telnet_session(newsock, newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
