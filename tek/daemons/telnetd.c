@@ -330,15 +330,25 @@ int sig;
 {
   int n;
 
+    /* /etc/server forks *currently running* telnetd for each new session, meaning each subsequent session has a 
+      parent of an earlier session.  A session creates a child to run the shell.
+      When the shell dies, a SIGDEAD is sent to its parent to tell it to exit.
+      However, because a new session can be a child of an existing session, the SIGDEAD handler can get invoked
+      either because the child (shell) has died OR because its other child (another session) has exited..Fun!
+
+      VERY IMPORTANT to establish whether the SIGDEAD is from our child or peer session by checking child
+      running status with kill(0).
+    */
+
     /* is our child alive? */
-    n = kill(session_pid, 0);
+    n = kill(session_cmd_pid, 0);
 
 #ifdef DEBUG
-    fprintf(console,"pid(%d): received SIGDEAD  %d\015\012",getpid(),session_pid);
-    fprintf(console,"child pid(%d) kill(%d,0) => %d)\015\012", session_cmd_pid, session_pid, n);
+    fprintf(console,"pid(%d): received SIGDEAD\015\012",getpid());
+    fprintf(console,"check child with kill(%d,0) => %d)\015\012", session_cmd_pid, n);
 #endif
 
-    /* only if our expected process is dead */
+    /* only if our expected child process is dead */
     if (n < 0)
         session_state = STOPPED;
 }
@@ -462,8 +472,7 @@ char *from;
 
   session_pty = fdmaster;
 #ifdef DEBUG
-  fprintf(console, "pid(%d): connect from %s\015\012", getpid(), from);
-  fprintf(console, "session_pty(%d)\015\012", session_pty);
+  fprintf(console, "pid(%d): ppid(%d): connect from %s\015\012", getpid(), getppid(), from);
 #endif
 
   signal(SIGEMT, testsig);
@@ -534,7 +543,7 @@ char *from;
     /* Close the slave side of the PTY */
     close(fdslave);
 
-    /* see handler comment for weird Uniflex SIGDEAD behaviour */
+    /* see handler comment for /etc/server fork quirk */
     signal(SIGDEAD, cleanup_child);
     
     last_was_cr = 0;
@@ -811,14 +820,28 @@ fprintf(console, "**Write master %d bytes\015\012", ts.bi.end - ts.bi.start);
         }
 #endif
       }
-    
-    /*  kill(session_cmd_pid, SIGQUIT); */
 
-      /* collect child process */
+      /* ensure its dead */
+      kill(session_cmd_pid, SIGQUIT); 
+
+      /* reap child process OR another session process! (see SIGDEAD handler) */
       n = wait(&rc);
 #ifdef DEBUG
       fprintf(console, "Collect ptty slave pid(%d) => %d\015\012", n, rc);
 #endif
+
+#if 0
+      /* is it our child? */
+      if (n != session_cmd_pid)
+      {
+        /* ok, so now try reap our child! */
+        n = wait(&rc);
+#ifdef DEBUG
+        fprintf(console, "Collect ptty slave pid(%d) => %d\015\012", n, rc);
+#endif
+      }
+#endif
+
   }
   else
   {
@@ -1042,7 +1065,7 @@ char **argv;
       if (fork())
       {
         logtime(logger);
-        fprintf(logger, ": connect from %s\015", inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(logger, ": connect from %s\015\012", inet_ntoa(cli_addr.sin_addr.s_addr));
       
         /* rate limiting */
         sleep(2);
@@ -1057,7 +1080,7 @@ char **argv;
         rc = telnet_session(newsock, newsock, inet_ntoa(cli_addr.sin_addr.s_addr));
       
         logtime(logger);
-        fprintf(logger, ": disconnect from %s\015",  inet_ntoa(cli_addr.sin_addr.s_addr));
+        fprintf(logger, ": disconnect from %s\015\012",  inet_ntoa(cli_addr.sin_addr.s_addr));
 
         break;
       }
@@ -1078,9 +1101,6 @@ char **argv;
     fstat(0, &s);
     if (s.st_mode & S_IFPIPE)
     {
-      /* give a chance to receive something */
- 	  sleep(1);
-
       /* is it a Berkeley r-command */
       nonblocking(fileno(stdin));
       rc = read(fileno(stdin), buffer, sizeof(buffer));
