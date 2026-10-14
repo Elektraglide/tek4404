@@ -71,6 +71,9 @@ struct sir sirbuf;
 #include <net/bpf.h>
 #include <net/if_dl.h>
 #endif
+#if defined(__linux__)
+#include <sys/sysmacros.h>
+#endif
 
 #include <netdb.h>
 #include <libgen.h>
@@ -238,6 +241,8 @@ struct response {
 /* logging credential details */
 #define LOGCREDS 0
 
+int mount_count = 0;
+struct filehandle mount_array[8];
 
 FILE *console;
 
@@ -669,7 +674,7 @@ unsigned int nfsmode;
 #endif
 	}
 	
-	fprintf(console, "nfsmode2host:  %4.4x => %4.4x\n", nfsmode,perms);
+	/* fprintf(console, "nfsmode2host:  %4.4x => %4.4x\n", nfsmode,perms); */
 	return perms;
 }
 
@@ -854,7 +859,7 @@ struct response *reply;
 struct stat *info;
 int fsid;
 {
-	unsigned int nfsperms = host2nfsmode(info->st_perm);
+	unsigned int nfsperms = host2nfsmode(info->st_mode, info->st_perm);
 	if ((info->st_mode & S_IFDIR) == S_IFDIR)
 	{
 		add_uint(reply, NFDIR);
@@ -1242,7 +1247,19 @@ struct stat *info;
 void release_filehandle(path)
 char *path;
 {
+    int n;
+    struct filehandle fh;
+    encodepath(path, fh.pathtokens);
 
+    for(n=0; n<mount_count; n++)
+    {
+        if (memcmp(mount_array[n].pathtokens, fh.pathtokens, sizeof(fh.pathtokens)))
+        {
+            mount_array[n] = mount_array[mount_count-1];
+            mount_count--;
+            break;
+        }
+    }
 }
 
 int make_rootrelativepath(fh, rootrelative)
@@ -1323,6 +1340,14 @@ struct filehandle *handle;
     /* store how many path components there are to the root in lower 4bits */
     result &= 0xfffffff0;
     result |= n;
+    
+    /* register this mount */
+    mount_array[mount_count++] = *handle;
+    if (mount_count > 8)
+    {
+        mount_count--;
+        fprintf(console, "make_fsid: max mountpoints\n");
+    }
     
 	return result;
 }
@@ -1442,16 +1467,33 @@ int isinternal;
 			}
 			break;
 		case 2:
-			fprintf(console, "mountd: Mount Entries for client@%s\n",  inet_ntoa((request->from.sin_addr)) );
 			/* Mount Entries */
+            fprintf(console, "mountd: Mount Entries for client@%s\n", inet_ntoa((request->from.sin_addr)) );
+            for(n=0; n<mount_count; n++)
+            {
+                char filepath[128];
+                
+                decodepath(mount_array[n].pathtokens, filepath);
+                fprintf(console, "mountd: Path[%d] = %s\n", n, filepath );
+            }
 			break;
 		case 3:
 			/* Remove Mount */
 			path = get_string(request);
 			release_filehandle(path);
 			add_uint(&reply, NFS_OK);
-			fprintf(console, "mountd: unmount Path = %s for client@%s\n", path,  inet_ntoa((request->from.sin_addr)) );
-			
+			fprintf(console, "mountd: unmount Path = %s for client@%s\n", path, inet_ntoa((request->from.sin_addr)) );
+            break;
+        case 4:
+            /* Remove All Mount */
+            for(n=0; n<mount_count; n++)
+            {
+                char filepath[128];
+                
+                decodepath(mount_array[n].pathtokens, filepath);
+                fprintf(console, "mountd: unmount Path[%d] = %s for client@%s\n", n, filepath, inet_ntoa((request->from.sin_addr)) );
+            }
+            mount_count = 0;
 			break;
 	}
 
@@ -2853,6 +2895,7 @@ struct conn* request;
 				nfs3prog(request, NFS_TRUE);
 		}
 #ifdef POLYD
+        extern void bootparamprog(struct conn *request, int isinternal);
 		if (prog == BOOTPARAMD) bootparamprog(request, NFS_TRUE);
 #endif
 		return;
@@ -3262,8 +3305,6 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
 	struct bpf_program filter = { 6, insnsIPV4 };
 	ioctl(bpf_fd, BIOCSETF, &filter);
 
-    printf("Successfully bound BPF node to interface: %s\n", iface_name);
-
     struct ifaddrs *ifap, *p;
 
     if (getifaddrs(&ifap) != 0)
@@ -3271,20 +3312,21 @@ int open_bpf_device(const char *iface_name, uint8_t *hostmac) {
 
     for (p = ifap; p; p = p->ifa_next)
     {
-        if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET)
+        if (!strcmp(p->ifa_name, iface_name))
         {
-            host_assigned = ((struct sockaddr_in *)p->ifa_addr)->sin_addr;
-        }
-        
-        /* Check the device name */
-        if ((strcmp(p->ifa_name, iface_name) == 0) &&
-            (p->ifa_addr->sa_family == AF_LINK))
-        {
-            struct sockaddr_dl* sdp;
-
-            sdp = (struct sockaddr_dl*) p->ifa_addr;
-            memcpy((void *)hostmac, sdp->sdl_data + sdp->sdl_nlen, ETHER_ADDR_LEN);
-            //break;
+            if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET)
+            {
+                host_assigned = ((struct sockaddr_in *)p->ifa_addr)->sin_addr;
+            }
+            
+            /* Check the device name */
+            if (p->ifa_addr->sa_family == AF_LINK)
+            {
+                struct sockaddr_dl* sdp;
+                
+                sdp = (struct sockaddr_dl*) p->ifa_addr;
+                memcpy((void *)hostmac, sdp->sdl_data + sdp->sdl_nlen, ETHER_ADDR_LEN);
+            }
         }
     }
     freeifaddrs(ifap);
@@ -3326,28 +3368,6 @@ char **argv;
 
     umask(0);
 
-	/* we act as portmapd, mountd and nfsd... */
-	portmapsock = launched_by_server ? fileno(stdin) : create_UDP_sock("portmapd", PORTMAPPERD_PORT);
-	mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
-	locksock = create_UDP_sock("lockd", LOCKD_PORT);
-	nfssock = create_UDP_sock("nfsd", NFSD_PORT);
-
-#ifdef POLYD
-	/* required for sunbooting */
-	if (portmapsock < 0)
-	{
-		fprintf(console, "cannot bind portmapper\n");
-		exit(-2);
-	}
-#endif
-
-	/* cannot continue (not having portmapping is tolerable) */
-	if (mountsock < 0 || locksock < 0 || nfssock < 0)
-	{
-		fprintf(console, "cannot bind sockets\n");
-		exit(-2);
-	}
-	
 #ifdef POLYD
 	/* we are going to offer rarp, tftp and bootparams too */
 	int rarp_bpf_fd = 0;
@@ -3466,19 +3486,15 @@ char **argv;
 		/* do we have all the info we need? */
 		if (bp_machinename[0] && bp_addr[0] && bp_fs[0] && bp_swap[0])
 		{
-			/* other services */
-			tftpsock = create_UDP_sock("tftpd", 69);
-			bootparamsock = create_UDP_sock("bootparamd", BOOTPARAMD_PORT);
-			if (tftpsock < 0 || bootparamsock < 0)
-			{
-				fprintf(console, "cannot bind sockets\n");
-				exit(-3);
-			}
-
 			/* setup RARP packet handling using BPF */
 			rarp_bpf_fd = open_bpf_device(ifname, host_mac);
-        
-            fprintf(console, "%s: running on host: %s (%s)\n",  basename(argv[0]), inet_ntoa(host_assigned), host_name);
+            if (rarp_bpf_fd < 0)
+            {
+                fprintf(console, "rarp socket failed.\n");
+                exit(-4);
+            }
+            
+            fprintf(console, "Starting %s: host: %s (%s)\n",  basename(argv[0]), inet_ntoa(host_assigned), host_name);
         }
 		else
 		{
@@ -3489,16 +3505,50 @@ char **argv;
 	else
 #endif
 	{
+        char host_ip[32];
 #ifdef TEK4404
-		char host_ip[32];
 		n = adb_open("/etc/net.db");
 		adb_search(n, "name", "teta");
 		adb_extract(n, "INET", host_ip);
 		adb_close(n);
-		fprintf(console, "%s: running on host: %s (%s)\n", basename(argv[0]), host_ip, host_name);
+#else
+        strcpy(host_ip, inet_ntoa(host_assigned));
 #endif
+        fprintf(console, "Starting %s: host: %s (%s)\n", basename(argv[0]), host_ip, host_name);
 	}
 
+    /* we act as portmapd, mountd and nfsd... */
+    portmapsock = launched_by_server ? fileno(stdin) : create_UDP_sock("portmapd", PORTMAPPERD_PORT);
+    mountsock = create_UDP_sock("mountd", MOUNTD_PORT);
+    locksock = create_UDP_sock("lockd", LOCKD_PORT);
+    nfssock = create_UDP_sock("nfsd", NFSD_PORT);
+
+#ifdef POLYD
+    /* required for sunbooting */
+    if (portmapsock < 0)
+    {
+        fprintf(console, "cannot bind portmapper\n");
+        exit(-2);
+    }
+
+    /* other services */
+    tftpsock = create_UDP_sock("tftpd", 69);
+    bootparamsock = create_UDP_sock("bootparamd", BOOTPARAMD_PORT);
+    if (tftpsock < 0 || bootparamsock < 0)
+    {
+        fprintf(console, "cannot bind sockets\n");
+        exit(-3);
+    }
+
+#endif
+
+    /* cannot continue (not having portmapping is tolerable) */
+    if (mountsock < 0 || locksock < 0 || nfssock < 0)
+    {
+        fprintf(console, "cannot bind sockets\n");
+        exit(-2);
+    }
+    
 	/* run loop */
 	while(1)
 	{
