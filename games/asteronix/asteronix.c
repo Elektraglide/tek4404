@@ -446,20 +446,24 @@ int w,h;
 {
 register bullet *bulletptr; 
 register short i;
-register short dx;
+register int dx;
 
   /* dying cannot be hit again */
   if (rockptr->state != ALIVE)
     return 0;
 
+  /* make fixedpoint */
+  w = (w+4) << 8;
+  h = (h+4) << 8;
 
+  /* treat ship as 8x8 */
   if (aship.state == ALIVE)
   {
-      dx = FIX2INT(aship.x - rockptr->x);
-      if ((dx > (-4)) && (dx < (w + 4)))
+      dx = (aship.x - rockptr->x);
+      if ((dx > (-4<<8)) && (dx < (w)))
       {
-          dx = FIX2INT(aship.y - rockptr->y);
-          if ((dx > (-4)) && (dx < (h + 4)))
+          dx = (aship.y - rockptr->y);
+          if ((dx > (-4<<8)) && (dx < (h)))
           {
               aship.state = DYING1;
               return 1;
@@ -467,16 +471,21 @@ register short dx;
       }
   }
 
+  /* remove padding */
+  w -= (4<<8);
+  h -= (4<<8);
+
   bulletptr = bullets;
-  for(i=0; i<numbullets; i++,bulletptr++)
+  i = numbullets;
+  while(--numbullets > 0)
   {
 
     if (bulletptr->spr.state >= ALIVE)
     {
-      dx = FIX2INT(bulletptr->spr.x - rockptr->x);
+      dx = (bulletptr->spr.x - rockptr->x);
       if ( (dx > (0)) && (dx < (w)) )
       {
-        dx = FIX2INT(bulletptr->spr.y - rockptr->y);
+        dx = (bulletptr->spr.y - rockptr->y);
         if ( (dx > (0)) && (dx < (h)) )
         {
           /* start dying */
@@ -485,7 +494,9 @@ register short dx;
         }
       }
     }
+    bulletptr++;
   }
+
   return 0;
 }
 
@@ -837,6 +848,9 @@ char *argv[];
       fprintf(stderr, "FontOpen: FAILED: %s\n",strerror(errno));
       return;
     }
+
+    /* want lots of attention */
+    nice(-20);
 
     screen = InitGraphics(FALSE);
     ClearScreen();
