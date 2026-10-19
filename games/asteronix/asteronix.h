@@ -11,9 +11,9 @@ typedef long fixed;
 
 typedef enum {
 	DEAD = 0,
-	DYING3,
+	DYING_FINISH,
 	DYING2,
-	DYING1 = 5,
+	DYING_START = 5,
 	ALIVE
 } sprstate;
 

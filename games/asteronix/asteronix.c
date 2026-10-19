@@ -380,7 +380,7 @@ void doship()
     else
     if (aship.state > DEAD)
     {
-        if (aship.state == DYING3)
+        if (aship.state == DYING_FINISH)
         {
             respawndelay = framenum + 90;
             explodesound();
@@ -440,53 +440,53 @@ int angle;
     asprite->state = ALIVE + 20;
 }
 
-int hit(rockptr,w,h)
+int hit_ship_or_bullets(rockptr,w,h)
 register sprite *rockptr;
 int w,h;
 {
 register bullet *bulletptr; 
 register short i;
-register int dx;
+register int delta;
 
-  /* dying cannot be hit again */
+  /* dying cannot be hit again & just spawned cannot be hit */
   if (rockptr->state != ALIVE)
     return 0;
 
-  /* make fixedpoint */
+  /* give a 4px margin and make fixedpoint */
   w = (w+4) << 8;
   h = (h+4) << 8;
 
   /* treat ship as 8x8 */
   if (aship.state == ALIVE)
   {
-      dx = (aship.x - rockptr->x);
-      if ((dx > (-4<<8)) && (dx < (w)))
+      delta = (aship.x - rockptr->x);
+      if ((delta > (-4<<8)) && (delta < (w)))
       {
-          dx = (aship.y - rockptr->y);
-          if ((dx > (-4<<8)) && (dx < (h)))
+          delta = (aship.y - rockptr->y);
+          if ((delta > (-4<<8)) && (delta < (h)))
           {
-              aship.state = DYING1;
+              aship.state = DYING_START;
               return 1;
           }
       }
   }
 
-  /* remove padding */
+  /* remove margin */
   w -= (4<<8);
   h -= (4<<8);
 
   bulletptr = bullets;
   i = numbullets;
-  while(--numbullets > 0)
+  while(--i >= 0)
   {
 
     if (bulletptr->spr.state >= ALIVE)
     {
-      dx = (bulletptr->spr.x - rockptr->x);
-      if ( (dx > (0)) && (dx < (w)) )
+      delta = (bulletptr->spr.x - rockptr->x);
+      if ((delta > (0)) && (delta < (w)))
       {
-        dx = (bulletptr->spr.y - rockptr->y);
-        if ( (dx > (0)) && (dx < (h)) )
+        delta = (bulletptr->spr.y - rockptr->y);
+        if ((delta > (0)) && (delta < (h)))
         {
           /* start dying */
           bulletptr->spr.state = DYING2;
@@ -513,7 +513,7 @@ fixed d360[] = {
    INT2FIX(1),INT2FIX(2)
 };
 fixed d360end[1];
-int* dir = d360;
+fixed* dir = d360;
 
 int makeboom(sx,sy)
 int sx,sy;
@@ -522,15 +522,17 @@ int sx,sy;
   register int *dir;
   register bullet* bullptr;
 
-  dir = d360;
   bullptr = bullets + numbullets;
   /* max bullets we *could* do */
   i = (MAXBULLETS - numbullets);
+
   /* bullets we need */
   if (i > 6) i = 6;
+
   /* create them */
+  dir = d360;
   numbullets += i;
-  while(--i > 0)
+  while(--i >= 0)
   {
     bullptr->spr.x = INT2FIX(sx);
     bullptr->spr.y = INT2FIX(sy);
@@ -540,6 +542,7 @@ int sx,sy;
     bullptr->spr.oldx[1] = -1;  /* mark as new */
     bullptr->spr.state = ALIVE + 25;
     bullptr++;
+
     if (dir >= d360end)
         dir = d360;
   }
@@ -550,7 +553,7 @@ int sx,sy;
 void dobullets()
 {
   register bullet *bulletptr;
-  int i;
+  short i;
   
   bulletptr = bullets;
   for(i=0; i<numbullets; i++, bulletptr++)
@@ -564,7 +567,7 @@ void dobullets()
     {
       sx = bulletptr->spr.oldx[pindex];
       sy = bulletptr->spr.oldy[pindex];
-      
+
       dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
       dst[0] &= ~(0x8000 >> (sx & 15));
     }
@@ -577,6 +580,7 @@ void dobullets()
     if (bulletptr->spr.y < INT2FIX(0)) bulletptr->spr.y += INT2FIX(480);
     if (bulletptr->spr.y >INT2FIX(480)) bulletptr->spr.y -= INT2FIX(480);
 
+    /* aging */
     bulletptr->spr.state--;
 
     /* draw */
@@ -584,6 +588,14 @@ void dobullets()
 	{
       sx = FIX2INT(bulletptr->spr.x);
       sy = FIX2INT(bulletptr->spr.y);
+
+#ifdef DEBUG
+      if (sx < 0 || sx > 640 || sy < 0 || sy > 480)
+      {
+          printf("dobullets: BAD2[%d]: %d %d\n", i, sx, sy);
+          return;
+      }
+#endif
 
       sy += page.y;
       dst = ((char*)screen->addr) + (sy << 7) + ((sx & -16) >> 3);
@@ -596,7 +608,10 @@ void dobullets()
     if (bulletptr->spr.state == DEAD)
     {
       numbullets--;
-      *bulletptr-- = bullets[numbullets];
+      *bulletptr = bullets[numbullets];
+
+      /* restart on this one */
+      bulletptr--;
       i--;
     }
   }	
@@ -627,9 +642,9 @@ short i;
       restoreunder(rockptr, 64, 41);
 
       /* has it hit a bullet? */
-      if (hit(rockptr, 48,41))
+      if (hit_ship_or_bullets(rockptr, 64, 41))
       {
-        rockptr->state = DYING1;
+        rockptr->state = DYING_START;
         bigboomsound();
 
 
@@ -650,7 +665,7 @@ short i;
       restoreunder(rockptr, 48, 22);
 
       /* has it hit a bullet? */
-      if (hit(rockptr, 32,22))
+      if (hit_ship_or_bullets(rockptr, 48, 22))
       {
         rockptr->state = DYING2;
 
@@ -681,9 +696,19 @@ short i;
 	{
       if (rockptr->state >= ALIVE)
       {
+        char label[32];
+        struct POINT origin;
+
         /* count down immortal state */
         if (rockptr->state > ALIVE) rockptr->state--;
         bigdrawfast(rockptr);
+
+#ifdef LABEL
+        sprintf(label,  "%d", rockptr->state);
+        origin.x = FIX2INT(rockptr->x) + 20;
+        origin.y = page.y + FIX2INT(rockptr->y) + 20;
+        StringDrawX(label, &origin, &bb, font);
+#endif
       }
       else
       {
@@ -836,7 +861,7 @@ char *argv[];
     signal(SIGBND, sh_int);
     signal(SIGMILLI, sh_timer);
 
-    font = FontOpen("/fonts/MagnoliaFixed7.font");
+    font = (struct FontHeader *)FontOpen("/fonts/MagnoliaFixed7.font");
     if (font)
     {
 		fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
@@ -1097,7 +1122,7 @@ char *argv[];
                     bullets[numbullets].spr.dy = INT2FIX(shipshape[aship.angle & ANGLE_MASK][0].y);
 
                     bullets[numbullets].spr.oldx[0] =
-                        bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
+                    bullets[numbullets].spr.oldx[1] = -1;  /* mark as new */
 
                     bullets[numbullets].spr.state = ALIVE + 60;
 
@@ -1114,7 +1139,7 @@ char *argv[];
         }
     }
 
-#if 0
+#ifdef DEBUG
     if ((framenum & 0) == 0)
 	{
       sprintf(status, "respawn:%d bullets:%d big:%d med:%d   ", respawndelay-framenum, numbullets, numbigrocks,nummediumrocks);
