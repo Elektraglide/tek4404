@@ -1,13 +1,19 @@
 #include <stdio.h>
 #include <sys/signal.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <time.h>
 #include "kernutils.h"
 #include "ph.h"
 #include "uniflex/task.h"
 #include "uniflex/userbl.h"
 
-#ifndef TEK4404
+#ifdef TEK4404
+#include <net/in.h>
+#include <sys/sir.h>
+#include <sys/fdn.h>
+#include <sys/modes.h>
+#else
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,12 +21,9 @@
 #include <sys/_types/_u_short.h>
 #include <sys/_types/_u_int.h>
 #include <netinet/ip.h>
+
 #include "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/lib/include/sys/sir.h"
 #include "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/lib/include/sys/fdn.h"
-
-#define FDNSIZ 64
-#define FMSZ 10      /* fdn direct map size */
-
 #define S_IFMT     0xCF      /* mask for type of file */
 #define S_IFREG    0x01      /* normal file */
 #define S_IFBLK    0x03      /* block special */
@@ -31,7 +34,6 @@
 #define S_IFCON    0x81      /* contiguous file */
 #define S_SLAVE_PTY  0x07    /* Slave pseudo-terminal device */
 #define S_MASTER_PTY 0x87    /* Master pseudo-terminal device */
-
 
 void _l2tos(unsigned char *blocks,char *sindblk,int count)
 {
@@ -76,11 +78,10 @@ void _l4tol(long *blocks,unsigned char *sindblk,int count)
 	}
 }
 
-#else
-#include <net/in.h>
-#include <sys/sir.h>
-#include <sys/fdn.h>
 #endif
+
+#define FDNSIZ 64
+#define FMSZ 10      /* fdn direct map size */
 
 /* S_IFDIR block table, 32 per block */
 struct dirblk {
@@ -89,66 +90,66 @@ struct dirblk {
 };
 
 struct fdn {
-    ptr32 cache_next;       // +0x00 struct fdn *
-    ptr32 cache_prev;       // +0x04 struct fdn *
-    ptr32 hash_next;        // +0x08 struct fdn *
-    ptr32 hash_prev;        // +0x0c struct fdn *
-    unsigned int    unknown_10;       // +0x10
+    ptr32 cache_next;       /* +0x00 struct fdn */
+    ptr32 cache_prev;       /* +0x04 struct fdn */
+    ptr32 hash_next;        /* +0x08 struct fdn */
+    ptr32 hash_prev;        /* +0x0c struct fdn */
+    unsigned int    unknown_10;       /* +0x10 */
 
-    unsigned short    device_key;       // +0x14
-    unsigned short    inode_key;        // +0x16
-    unsigned char     state_flags;      // +0x18
-    unsigned char     state_count;      // +0x19, role uncertain
-    short     				refcount;         // +0x1a
-    unsigned char     buffer_flags;     // +0x1c
+    unsigned short    device_key;       /* +0x14 */
+    unsigned short    inode_key;        /* +0x16 */
+    unsigned char     state_flags;      /* +0x18 */
+    unsigned char     state_count;      /* +0x19, role uncertain */
+    short     				refcount;         /* +0x1a */
+    unsigned char     buffer_flags;     /* +0x1c */
 
-    unsigned short    mode;             // +0x1d, packed/unaligned
-    unsigned char     link_count;       // +0x1f
-    unsigned short    owner_metadata;   // +0x20, meaning uncertain
-    unsigned int    	size;             // +0x22
-    unsigned short    device_value;     // +0x26, used by device-close paths
+    unsigned short    mode;             /* +0x1d, packed/unaligned */
+    unsigned char     link_count;       /* +0x1f */
+    unsigned short    owner_metadata;   /* +0x20, meaning uncertain */
+    unsigned int    	size;             /* +0x22 */
+    unsigned short    device_value;     /* +0x26, used by device-close paths */
 
     unsigned char     unknown_28_4e[0x27];
-    unsigned char     minimum_value_hi; // +0x4f
-    unsigned char     minimum_value_lo; // +0x50
+    unsigned char     minimum_value_hi; /* +0x4f */
+    unsigned char     minimum_value_lo; /* +0x50 */
     unsigned char     unknown_51_57[7];
-    unsigned char     tracked_count;    // +0x58
-    unsigned short    tracked_values[50]; // +0x59, packed/unaligned
+    unsigned char     tracked_count;    /* +0x58 */
+    unsigned short    tracked_values[50]; /* +0x59, packed/unaligned */
 };
 
 struct filedes {
 
-    unsigned char  mode;       // +0x00: access/mode byte; checked against the operation's permission mask
-    unsigned char  flags;      // +0x01: allocation/state bits; allocation code sets bit 7
-    unsigned short  refcount;   // +0x02: reference count
-    ptr32 fdn;									// +0x04: struct fdn *fdn;  pointer to the associated FDNSIZE record
-    int  position;   // +0x08: current file position
+    unsigned char  mode;        /* +0x00: access/mode byte; checked against the operation's permission mask */
+    unsigned char  flags;       /* +0x01: allocation/state bits; allocation code sets bit 7 */
+    unsigned short  refcount;   /* +0x02: reference count */
+    ptr32 fdn;                  /* +0x04: struct fdn *fdn;  pointer to the associated FDNSIZE record */
+    int  position;              /* +0x08: current file position */
 };
 
-#ifdef __clang__
+#ifndef TEK4404
 #pragma pack(push, 1)
 #endif
 struct tmat
 {
-	ushort unknown1;
+	unsigned short unknown1;
 	ptr32 memqueue;		/* 0x02 */
 	ptr32 unknown2;
 	ptr32 pooledpages;	/* 0x0a */
 	ptr32 privpages;	/* 0x0e */
-	ushort tasksize; 	/* 0x12 */
-	ushort taskordinal;	/* 0x14 */	
+	unsigned short tasksize; 	/* 0x12 */
+	unsigned short taskordinal;	/* 0x14 */
 	ptr32 unknown3;		/* 0x16 */
 };
-#ifdef __clang__
+#ifndef TEK4404
 #pragma pack(pop)
 #endif
 
 int header[1024];
 
-#ifdef __clang__
-#define DISKNAME "/Users/adambillyard/projects/tek4404/mame/bar.chd"
-#else
+#ifdef TEK4404
 #define DISKNAME "/dev/disk"
+#else
+#define DISKNAME "/Users/adambillyard/projects/tek4404/mame/bar.chd"
 #endif
 int fd_sir;
 
@@ -193,7 +194,6 @@ char c1,c2,c3;
 	printf("\n");
 }
 
-int fd_sir;
 void rdfdn(fdn,buffer)
 int fdn;
 struct inode *buffer;
@@ -296,11 +296,26 @@ char *needlepath;
 struct inode *workingnode;
 {
 	char workingpath[256];
-	
-	workingpath[0] = '/';
-	workingpath[1] = '\0';
+	struct stat info;
+
+	/* this is brute force search, so check a couple of likely places before searching *everything* */
+
+	strcpy(workingpath, "/dev/");
+	stat(workingpath, &info);
+	rdfdn(info.st_ino, workingnode);
+	if (enum_files(workingnode, workingpath, needle, needlepath))
+		return 0;
+
+	strcpy(workingpath, "/etc/");
+	stat(workingpath, &info);
+	rdfdn(info.st_ino, workingnode);
+	if (enum_files(workingnode, workingpath, needle, needlepath))
+		return 0;
+
+	strcpy(workingpath, "/");
 	rdfdn(1, workingnode);
 	enum_files(workingnode, workingpath, needle, needlepath);
+
 	return 0;
 }
 
@@ -338,15 +353,15 @@ char **argv;
 		read(fd, &atask, sizeof(atask));
 		printf("PROC:\n");
 		t = ntohl(userbl->ustart);
-#ifdef __clang__
-		// 10 years of seconds; UniFLEX epoch starts 1980 not 1970!
-		
+#ifndef TEK4404
+		// 10 years of seconds; UniFLEX epoch starts 1980 not 1970!		
 #define SECONDS_IN_DAY (60*60*24)
 #define NUM_OF_LEAP_DAYS_IN_10_YEARS 2
 		t += (int)(SECONDS_IN_DAY * 365 * 10 + SECONDS_IN_DAY * NUM_OF_LEAP_DAYS_IN_10_YEARS);
 #endif
 		status = ctime(&t);
-#ifndef __clang__
+
+#ifdef TEK4404
         /* UniFlex adds CR! */
 		status[24] = '\0';
 #endif		
@@ -404,12 +419,12 @@ char **argv;
 					struct fdn afdn;
 
 					read(fd, &afile, sizeof(afile));
-					read(fd, &afdn, 0x5e);	// coredump dumps only start of FDN
+					read(fd, &afdn, 0x5e);	/* coredump dumps only start of FDN */
 
 					/* disk file */
 					if (ntohs(afdn.device_key) == 4)
 					{
-						char *kind = "unknown";
+						char *kind;
 						char filepath[256];
 						struct inode afilenode;
 
@@ -437,6 +452,9 @@ char **argv;
 									break;
 							case S_IFCON:
 									kind = "CNTG";
+									break;
+							default:
+									kind = "??? ";
 									break;
 						}
 	
