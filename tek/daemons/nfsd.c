@@ -17,6 +17,7 @@
 
 #include <sys/sir.h>
 
+#include <net/adb.h>
 #include <net/inet.h>
 #include <net/nerrno.h>
 #include <net/in.h>
@@ -3506,11 +3507,12 @@ char **argv;
 #endif
 	{
         char host_ip[32];
+		adb *db;
 #ifdef TEK4404
-		n = adb_open("/etc/net.db");
-		adb_search(n, "name", "teta");
-		adb_extract(n, "INET", host_ip);
-		adb_close(n);
+		db = adb_open("/etc/net.db");
+		adb_search(db, "name", "teta");
+		adb_extract(db, "INET", host_ip);
+		adb_close(db);
 #else
         strcpy(host_ip, inet_ntoa(host_assigned));
 #endif
