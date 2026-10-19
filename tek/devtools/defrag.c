@@ -1481,6 +1481,9 @@ char *argv[];
    sirbuf = sir_area;
 
 #ifndef __clang__
+
+	/* Uniflex stores device major:minor in .st_size */
+
    devno = statbuf.st_size & 0xffff;
 
    /* check stdout not using disk */
