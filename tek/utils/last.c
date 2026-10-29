@@ -8,8 +8,8 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
-/* very slow but lookup in utmp */
-struct utmp *findentry(timestamp)
+/* very slow but lookup in utmp for matching timestamp */
+struct utmp *getuttime(timestamp)
 int timestamp;
 {
 int fd;
@@ -65,7 +65,7 @@ char **argv;
     while((n = read(fd, &record, sizeof(record))) > 0)
     {
       /* is this a still current login? */
-      active_login = findentry(record.time_field);
+      active_login = getuttime(record.time_field);
 
       if (active_login)
       {
