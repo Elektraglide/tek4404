@@ -1,3 +1,10 @@
+/* /act/utmp  is an indexed table of timestamps for every tty/pty 
+
+    rename 'last' to 'who' to get a list of currently logged in users by cross referencing
+    /tmp/history against timestamps in /act/utmp
+*/
+
+
 #include <stdio.h>
 #include <time.h>
 #include <sys/fcntl.h>
