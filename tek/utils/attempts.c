@@ -16,15 +16,20 @@ char **argv;
   {
     while((n = read(fd, &record, sizeof(record))) > 0)
     {
-      /* some records are init record */
-      if (record.user_name[0] == '\0')
+      if (record.user_name[0] < '0')
       	continue;
       
+      /* ensure its terminated */
+      strncpy(buffer, record.user_name, 10);
+      buffer[10] = '\0';
+
+      printf("%-10s\ttty%c%c", buffer, record.tty_num[0], record.tty_num[1]);
+
       strcpy(buffer, ctime(&record.time_field));
       /* no CR */
       buffer[24] = '\0';
+      printf("\t%s\n", buffer);
 
-      printf("%s tty%c%c\t%s\n", record.user_name,record.tty_num[0],record.tty_num[1], buffer);
     }
     close(fd);
   }
