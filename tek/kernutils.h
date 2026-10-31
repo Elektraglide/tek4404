@@ -52,7 +52,7 @@ struct kerntty {
     struct clist   *t_rawq;       /* 0x00 */
     struct clist   *t_canq;       /* 0x04 */
     struct clist   *t_outq;       /* 0x08 */
-    void           *t_addr;       /* 0x0c */
+    char           *t_addr;       /* 0x0c */
     unsigned short  t_dev;        /* 0x10 */
     unsigned char   t_ispeed;     /* 0x12 */
     unsigned char   t_ospeed;     /* 0x13 */
