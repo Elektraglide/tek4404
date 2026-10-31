@@ -346,8 +346,8 @@ while(1)
 			lseek(pmem, rc, SEEK_SET);
 			tty[0] = (devnum & 0x100) ? 'p' : 't';  /* PTYs begin at 0x100 */
       devnum &= 0xff;
-			tty[3] = '0' + (i / 10);
-			tty[4] = '0' + (i % 10);
+			tty[3] = '0' + (devnum / 10);
+			tty[4] = '0' + (devnum % 10);
 		}
 
 		/* read userblock */
