@@ -188,6 +188,7 @@ char **argv;
   int tname,swapsize;
   unsigned int personality;
   
+  short devnum;
 	int pcount;
 	int prunning;
 	int putime;
@@ -334,17 +335,17 @@ while(1)
 			pentry = getpwuid(lastuid);
 		}
 
-		/* controlling tty (struct not fully known) */
+		/* controlling tty */
 		if (atask.tstty)
 		{
 			rc = lseek(pmem, 0, SEEK_CUR);
 			/* struct is TTYSIZ (0x2a) */
-			lseek(pmem, ntohl(atask.tstty) + 0x10, 0);
-			read(pmem, buffer, 4);
+      i = offsetof(struct kerntty, t_dev);
+			lseek(pmem, ntohl(atask.tstty) + i, 0);
+			read(pmem, &devnum, 2);
 			lseek(pmem, rc, SEEK_SET);
-			i = buffer[0];
-			tty[0] = (i == 1) ? 'p' : 't';
-			i = buffer[1];
+			tty[0] = (devnum & 0x100) ? 'p' : 't';  /* PTYs begin at 0x100 */
+      devnum &= 0xff;
 			tty[3] = '0' + (i / 10);
 			tty[4] = '0' + (i % 10);
 		}
