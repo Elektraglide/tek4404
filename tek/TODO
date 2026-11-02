@@ -1,0 +1,20 @@
+code repo:  https://github.com/Elektraglide/tek4404
+
+- ash shell can't run cc; says no permission to create 
+  intermediate files, but umask looks fine...
+  cc calls create("/tmp/xxx") and test returned fd == 3!
+
+- under ash, vi cannot find a terminal type.. ptty implementation bug?
+  YES,  vi cannot detect IF_PTY;  vi patched (vi.orig unchanged)
+
+- /dev/sound cannot be interrupted with new sound..
+
+- finish rcat (".r concatenate") as seems faster than load cmd
+
+- kset  allows setting kernel constants;  eg kset tzone
+
+- pagemon.c experiment calling page_monitor(); hangs machine
+
+- system_control(2, fd)  makes controlling terminal
+  system_control(1) detach terminal; *must* have ppid=1
+
