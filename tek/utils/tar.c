@@ -171,10 +171,10 @@ int perms;
 
 int utimes(path, ptime)
 char *path;
-struct timeval *ptime;
+struct utimbuf *ptime;
 {
-  /* just modification time */
-  return utime(path, ptime + 1);	
+
+  return utime(path, ptime);
 }
 
 char *getwd(path)
@@ -335,10 +335,9 @@ char	*argv[];
 			signal(SIGHUP, onhup);
 		if (signal(SIGQUIT, SIG_IGN) != SIG_IGN)
 			signal(SIGQUIT, onquit);
-#ifdef notdef
 		if (signal(SIGTERM, SIG_IGN) != SIG_IGN)
 			signal(SIGTERM, onterm);
-#endif
+
 		if (strcmp(usefile, "-") == 0) {
 			if (cflag == 0) {
 				fprintf(stderr,
@@ -772,13 +771,11 @@ gotit:
 			/* ignore alien orders */
 			CHOWN(dblock.dbuf.name, stbuf.st_uid, stbuf.st_gid);
 			if (mflag == 0) {
-				struct timeval tv[2];
+				struct utimbuf tv;
 
-				tv[0].tv_sec = time(0);
-				tv[0].tv_usec = 0;
-				tv[1].tv_sec = stbuf.st_mtime;
-				tv[1].tv_usec = 0;
-				utimes(dblock.dbuf.name, tv);
+				tv.actime = time(0);
+				tv.modtime = stbuf.st_mtime;
+				utimes(dblock.dbuf.name, &tv);
 			}
 			if (pflag)
 				chmod(dblock.dbuf.name, stbuf.st_mode & 07777);
@@ -829,13 +826,11 @@ gotit:
 		}
 		close(ofile);
 		if (mflag == 0) {
-			struct timeval tv[2];
+			struct utimbuf tv;
 
-			tv[0].tv_sec = time(0);
-			tv[0].tv_usec = 0;
-			tv[1].tv_sec = stbuf.st_mtime;
-			tv[1].tv_usec = 0;
-			utimes(dblock.dbuf.name, tv);
+			tv.actime = time(0);
+			tv.modtime = stbuf.st_mtime;
+			utimes(dblock.dbuf.name, &tv);
 		}
 		if (pflag)
 			chmod(dblock.dbuf.name, stbuf.st_mode & 07777);
