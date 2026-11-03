@@ -149,7 +149,7 @@ int header[1024];
 #ifdef TEK4404
 #define DISKNAME "/dev/disk"
 #else
-#define DISKNAME "/Users/adambillyard/projects/tek4404/mame/bar.chd"
+#define DISKNAME "/Users/adambillyard/projects/tek4404/development/uniflexsnap/bar.chd"
 #endif
 int fd_sir;
 
@@ -299,7 +299,7 @@ struct inode *workingnode;
 	struct stat info;
 
 	/* this is brute force search, so check a couple of likely places before searching *everything* */
-
+#ifdef TEK4404
 	strcpy(workingpath, "/dev/");
 	stat(workingpath, &info);
 	rdfdn(info.st_ino, workingnode);
@@ -311,6 +311,7 @@ struct inode *workingnode;
 	rdfdn(info.st_ino, workingnode);
 	if (enum_files(workingnode, workingpath, needle, needlepath))
 		return 0;
+#endif
 
 	strcpy(workingpath, "/");
 	rdfdn(1, workingnode);
