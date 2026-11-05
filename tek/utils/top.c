@@ -13,7 +13,7 @@
 #include "uniflex/task.h"
 #include "uniflex/userbl.h"
 
-#ifndef __clang__
+#ifdef TEK4404
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 #include <net/netdev.h>
@@ -171,7 +171,6 @@ char **argv;
 {
 	int i, j, len, rc, pmem;
 	char bootfile[256];
-	char *needle;
 	char *symbols;
 	int symbolsize;
 	unsigned char buffer[256];
@@ -187,7 +186,7 @@ char **argv;
   char mode[64];
   char *status;
   char *priority;
-  int tname,swapsize;
+  int swapsize;
   unsigned int personality;
   
   short devnum;
@@ -379,7 +378,7 @@ while(1)
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, userbl.umem + 2 * MTSIZE, 10);	/* NB just reading stack descriptor (not text & data) */
 
-#ifdef __clang__
+#ifndef TEK4404
 		lseek(pmem, ntohl(atask.tsutop), 0);
 		read(pmem, &userbl, sizeof(userbl));
 #endif
@@ -459,7 +458,6 @@ while(1)
 						unsigned int mainenvp;
 
 						int args[3];
-						unsigned int array[16];
 
 						/* get last known SP */
 						sp = getSP(pmem, &atask, &userbl);
@@ -479,8 +477,6 @@ while(1)
 						/* if we failed to get to TOS, skip cmdline parsing */
 						if (!sp)
 						{
-							unsigned int datapage;
-							int datapageindex = -1;
 							char cmdarg[32];
               
 							/* skip */
@@ -613,7 +609,7 @@ while(1)
 	printf("disk ops:%d ", readkint32(stadsk, pmem));
 	printf("block ops:%d\n", readkint32(stablk, pmem));
 
-#ifndef __clang__
+#ifdef TEK4404
 {
 unsigned char dbuffer[2048];
 int dbufferlen,nde_size,ncount;
