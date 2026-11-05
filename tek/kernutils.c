@@ -1,5 +1,6 @@
 /* various reverse engineered functionality accessing the kernel */
 
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -25,7 +26,7 @@ char *getsymbols(exepath, symbolsize)
 char *exepath;
 int *symbolsize;
 {
-	int rc, boot;
+	int rc, boot,headersize;
 	char *symbols;
 	PH header;
 
@@ -38,8 +39,15 @@ int *symbolsize;
 	
 	read(boot, &header, sizeof(header));
 
+	headersize = sizeof(header);
+	if (header.magic[1] & 0x20)
+	{
+    /* demand paged */
+		headersize = 0x200;
+	}
+
 	symbols = (char *)malloc(ntohl(header.symbolsize));
-	lseek(boot, sizeof(PH) + ntohl(header.textsize) + ntohl(header.datasize) + ntohl(header.relocsize), 0);
+	lseek(boot, headersize + ntohl(header.textsize) + ntohl(header.datasize) + ntohl(header.relocsize), 0);
 	rc = read(boot, symbols, ntohl(header.symbolsize));
 	close(boot);
 
