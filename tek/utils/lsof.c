@@ -13,7 +13,7 @@
 #include "uniflex/task.h"
 #include "uniflex/userbl.h"
 
-#ifndef __clang__
+#ifdef TEK4404
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 #include <sys/sir.h>
@@ -470,22 +470,15 @@ char **argv;
 	int prunning;
 	int putime;
 	int pstime;
-	int totalcpu;
  	int openfd;
 	int framenum = 0;
 	short displaymode = 0;
-	struct sgttyb term_settings;
+  char cmdline[64];
   
 #ifdef __clang__
 	strcpy(buffer, "/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/system.boot");
 #else
 	kernbootfile(buffer);
-
-  gtty(fileno(stdin), &orig_term_settings);
-  term_settings = orig_term_settings;
-  term_settings.sg_flag |= CBREAK;
-  term_settings.sg_flag &= ~ECHO;
-  stty(fileno(stdin), &term_settings);
 
 #endif
 
@@ -496,7 +489,7 @@ char **argv;
   fd_sir = open(DISKNAME, O_RDONLY);
 
 #ifdef __clang__
-	pmem = open("/Users/adambillyard/projects/tek4404/development/uniflexsnap/allmem.bin", O_RDWR);
+	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem/allmem.bin", O_RDWR);
 #else
 	pmem = open("/dev/pmem", O_RDWR);
 #endif
@@ -513,49 +506,16 @@ char **argv;
 	if (argc > 1 && !strcmp(argv[1], "high"))
 		nice(-16);
 
-	/* these are task scheduling profiles depending on current work */
-	len = getkconstant(symbols, symbolsize, "PERSONALITY_SIZE", pmem);
-	cpu_pers = getkconstant(symbols, symbolsize, "CPU_personality", pmem);
-	dsk_pers = getkconstant(symbols, symbolsize, "DISK_personality", pmem);
-	tty_pers = getkconstant(symbols, symbolsize, "TTY_personality", pmem);
-	pip_pers = getkconstant(symbols, symbolsize, "PIPE_personality", pmem);
-
-	/* stats we will be checking often */
-	system_calls = getkconstant(symbols, symbolsize, "system_calls", pmem);
-	usedmem = getkconstant(symbols, symbolsize, "usedmem", pmem);
-	memsize = getkconstant(symbols, symbolsize, "memsize", pmem);
-	mempages = getkconstant(symbols, symbolsize, "mempages", pmem);
-	corcnt = getkconstant(symbols, symbolsize, "corcnt", pmem);
-	lbolt = getkconstant(symbols, symbolsize, "lbolt", pmem);
-	stadsk = getkconstant(symbols, symbolsize, "stadsk", pmem);
-	stablk = getkconstant(symbols, symbolsize, "stablk", pmem);
-
 	/* get to task table */
 	tsktab = getkint32(symbols, symbolsize, "tsktab", pmem);
 	tskend = getkint32(symbols, symbolsize, "tskend", pmem);
 
-printf("\033[2J");
-totalcpu = 100000000;
-while(1)
-{
-  char cmdline[64];
-
-  nowstamp = time(NULL);
-#ifdef __clang__
-	/* we want time from kernel image */
-	nowstamp = bootstamp + (getkint32(symbols, symbolsize, "stimh", pmem) / 100 );
-#endif
-
 	/* gather stats over all processes */
 	lastuid = -1;
 	pcount = 0;
-	prunning = 0;
-	putime = 0;
-	pstime = 0;
 	openfd = 0;
 	
-	printf("\033[5;1H");
-	printf("\033[1mPID.PPID.STATUS.OWNER....TTY...PRI..SIZE.TIME.....%%CPU.\033[K%s\033[0m\n", displaymode ? "QUANTUM.PERSON" : "CMDLINE");
+	printf("COMMAND.....PID......USER........ TYPE.......SIZE......NAME\n");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
@@ -582,32 +542,6 @@ while(1)
 		/* is it alive? */
 		if (status != NULL)
 		{
-
-		priority = NULL;
-		/* catch unknown magic values */
-		if (atask.tsprir == 251) priority = "pipe";
-		if (atask.tsprir == 246) priority = "in";
-		if (atask.tsprir == 216) priority = "wait";
-		if (atask.tsprir == 176) priority = "slp";
-		if (atask.tsprir == 158) priority = "trce";
-		if (atask.tsprir == 120) priority = "sys";
-		if (atask.tsstat == TTERM) priority = "---";
-		if (priority == NULL)
-		{
-			sprintf(numbers, "%-3d", atask.tsprir);
-			priority = numbers;
-		}
-
-#if 0		
-		/* build mode codes */
-		mode[0] = 0;
-		if (atask.tsmode & TCORE) strcat(mode, "CORE ");
-		if (atask.tsmode & TLOCK) strcat(mode, "LOCK ");
-		if (atask.tsmode & TSYSTM) strcat(mode, "SYSTM ");
-		if (atask.tsmode & TTRACP) strcat(mode, "TRACE ");
-		if (atask.tsmode & TSWAPO) strcat(mode, "SWAP ");
-		if (atask.tsmode & TARGX) strcat(mode, "ARGX ");
-#endif
 
 		/* worth skipping if unchanged? */
 		if (lastuid != ntohs(atask.tsuid))
@@ -656,22 +590,12 @@ while(1)
 		lseek(pmem, ntohl(atask.tsutop) + i, 0);
 		read(pmem, userbl.umem + 2 * MTSIZE, 10);	/* NB just reading stack descriptor (not text & data) */
 
-#ifdef __clang__
+#ifndef TEK4404
 		lseek(pmem, ntohl(atask.tsutop), 0);
 		read(pmem, &userbl, sizeof(userbl));
 #endif
 
 		lseek(pmem, rc, SEEK_SET);
-
-		/* pages are 4k */
-		swapsize = 4 * (ntohs(userbl.usizet)+ntohs(userbl.usized)+ntohs(userbl.usizes));
-#if 0
-		printf("swap size = %d (%d)\n", swapsize * 1024, ntohs(atask.tssize));
-
-		/* read swap image */
-		printf("swap offset = %d %d %d %d\n",
-		atask.tsswap[0],atask.tsswap[1],atask.tsswap[2],atask.tsswap[3]);
-#endif
 
 		/* not sure how to identify a non-task */
 		if (atask.tstid != 0 && swapsize == 0)
@@ -679,174 +603,95 @@ while(1)
 			continue;
 		}
 
-
-			/* running stats */
-			printf("%-3d  %-3d %-6s %-8s %-5s %-4s %3dK ",ntohs(atask.tstid), ntohs(atask.tstidp),
-				 status, pentry->pw_name, (atask.tstty) ? tty : "xxx  ", priority, swapsize);
-
-			/* cpu time */
-			timestamp = (ntohl(userbl.utimu) + ntohl(userbl.utims)) / 100;
-			printf("%2.2d:%2.2d:%2.2d ", (timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60);
-		
-			i = (atask.tsact);
-	/*		printf("%d:%2.2d:%2.2d ", ((i/60/60) % 60), ((i/60) % 60), i % 60); */
-	/*		printf("%d [%s] ", i,	mode); */
-
-			/* unknowns... */
-			/* printf("cpu%d tsmode%d tsact%d swap%d\n", ntohs(atask.tscpu), atask.tsmode2, (atask.tsact), ntohl(*(int *)atask.tsswap) ); */
-
 			/* if its core.. */
 			if (atask.tsmode & TCORE)
 			{
-				printf("%-4d ", ((ntohl(userbl.utimu) + ntohl(userbl.utims)) *100)/totalcpu );
+        /* find cmdline */
+        if (ntohs(atask.tstid) == 1)
+        {
+          /* pid1 is launched differently so fake its argvee */
+          /* fwiw, it shows as being called tty_wait */
+          strcpy(cmdline, "/etc/init");
+        }
+        else
+        if (userbl.usizes)
+        {
+          struct mt *arun;
+          int remain;
 
-				/* printf("IO count:%d  limits[time:%d io:%d mem:%d] ", ntohl(userbl.uicnt), ntohl(userbl.utimlmt), ntohl(userbl.uiotlmt), ntohl(userbl.umemlmt)); */
-				/* printf("effective uid:%d actual uid:%d dperm:%2.2x ", ntohs(userbl.uuid),ntohs(userbl.uuida),userbl.udperm); */
+          unsigned int sp;
+          unsigned int mainargc;
+          unsigned int mainargv;
+          unsigned int mainenvp;
 
-				/* alternate  between displaying different task info */
-				if (displaymode)
-				{
-					/* scheduling */
-					personality = ntohl(userbl.upersonality);
-					status = "??? ";
-					if (personality == cpu_pers)  status = "CPU ";
-					if (personality == dsk_pers)  status = "DISK";
-					if (personality == tty_pers)  status = "TTY ";
-					if (personality == pip_pers)  status = "PIPE";
-					printf("%3d:%-3d %s  \033[K\n",ntohs(userbl.uquantum), ntohs(userbl.usys_ratio), status );
-				}
-				else
-				{
-					/* find cmdline */
-					if (ntohs(atask.tstid) == 1)
-					{
-						/* pid1 is launched differently so fake its argvee */
-						/* fwiw, it shows as being called tty_wait */
-            strcpy(cmdline, "/etc/init");
-					}
-					else
-					if (userbl.usizes)
-					{
-						struct mt *arun;
-						int remain;
+          int args[3];
+          unsigned int array[16];
 
-						unsigned int sp;
-						unsigned int mainargc;
-						unsigned int mainargv;
-						unsigned int mainenvp;
+          /* get last known SP */
+          sp = getSP(pmem, &atask, &userbl);
 
-						int args[3];
-						unsigned int array[16];
+          /* we need to read virtual addresses, so get segment table */
+          arun = (struct mt *)(userbl.umem);
 
-						/* get last known SP */
-						sp = getSP(pmem, &atask, &userbl);
+          /* invalidate cached info */
+          lastsegment = -1;
+          
+          /* walk up stack until transfer address (assuming 0x0) */
+          while(sp > ntohl(arun[2].vaddr))
+          {
+            sp = readvaddr(arun, pmem, sp);
+          }
 
-						/* we need to read virtual addresses, so get segment table */
-						arun = (struct mt *)(userbl.umem);
-
-						/* invalidate cached info */
-						lastsegment = -1;
-						
-						/* walk up stack until transfer address (assuming 0x0) */
-						while(sp > ntohl(arun[2].vaddr))
-						{
-							sp = readvaddr(arun, pmem, sp);
-						}
-
-						/* if we failed to get to TOS, skip cmdline parsing */
-						if (!sp)
-						{
-							unsigned int datapage;
-							int datapageindex = -1;
-							char cmdarg[32];
+          /* if we failed to get to TOS, skip cmdline parsing */
+          if (!sp)
+          {
+            unsigned int datapage;
+            int datapageindex = -1;
+            char cmdarg[32];
+            
+            /* skip */
+            lseek(pmem, 4, SEEK_CUR);
+    
+            /* read argc, argv and envp */
+            /* NB assuming same page for argv,envp as last SP */
+            mainargc = 0;
+            read(pmem, args, sizeof(args));
+            mainargc = ntohl(args[0]);
+            mainargv = ntohl(args[1]);
+            mainenvp = ntohl(args[2]);
+            
+            remain = 22;
+            cmdline[0] = '\0';
+            for (i=0; i<mainargc; i++)
+            {
+              unsigned int stringvaddr;
+              unsigned int stringpaddr;
               
-							/* skip */
-							lseek(pmem, 4, SEEK_CUR);
-			
-							/* read argc, argv and envp */
-							/* NB assuming same page for argv,envp as last SP */
-							mainargc = 0;
-							read(pmem, args, sizeof(args));
-							mainargc = ntohl(args[0]);
-							mainargv = ntohl(args[1]);
-							mainenvp = ntohl(args[2]);
-							
-							remain = 22;
-              cmdline[0] = '\0';
-							for (i=0; i<mainargc; i++)
-							{
-								unsigned int stringvaddr;
-								unsigned int stringpaddr;
-								
-								stringvaddr = readvaddr(arun, pmem, mainargv + i * 4);
-								if (!stringvaddr)
-									break;
-									
-								stringpaddr = va2pa(arun, pmem, stringvaddr);
-								lseek(pmem, stringpaddr, 0);
-								read(pmem, cmdarg, remain);
-								cmdarg[remain] = 0;
-                strcat(cmdline, cmdarg);
-                strcat(cmdline, " ");
-								remain -= strlen(cmdarg);
-								if (remain <= 0)
-									break;
-							}
-						}
-						
-						lseek(pmem, rc, SEEK_SET);
-					}
-					/* delete rest of line */
-					printf("%s\033[K\n", cmdline);
-				}
-				
-#if 0
-				/* memory map */
-				printf("tchunk:%d dchunk:%d schunk:%d uerror:%d\n", ntohs(userbl.utchunk), ntohs(userbl.udchunk), ntohs(userbl.uschunk), userbl.uerror);
-				printf("tpages:%d dpages:%d spages:%d\n", ntohs(userbl.usizet), ntohs(userbl.usized), ntohs(userbl.usizes));
-				if (userbl.usizet)
-				{
-					arun = (struct mt *)(userbl.umem);
-					while (arun->numpages)
-					{
-						printf("vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun->vaddr), ntohl(arun->paddr), ntohs(arun->numpages));
-						arun++;
-					}
-				}
-				/* extra pages */
-				if (userbl.udep_chunks)
-				{
-					struct mt *arun = (struct mt *)(userbl.umdep_segs);
-					while (arun->numpages)
-					{
-						printf("udep: vaddr:%6.6x  paddr:%6.6x  count:%d\n", ntohl(arun->paddr), ntohl(arun->vaddr), ntohs(arun->numpages));
-						arun++;
-					}
-				}
-
-				tname = ntohl(userbl.ucname);
-				if (tname)
-				{
-					memset(buffer,0,16);
-					readkstring(buffer, 14, tname, pmem);
-					printf("ucname=%s umem=%d  utask=%d \n", buffer, ntohs(userbl.umxmem), (int)userbl.utask_ord);
-				}
-#endif
+              stringvaddr = readvaddr(arun, pmem, mainargv + i * 4);
+              if (!stringvaddr)
+                break;
+                
+              stringpaddr = va2pa(arun, pmem, stringvaddr);
+              lseek(pmem, stringpaddr, 0);
+              read(pmem, cmdarg, remain);
+              cmdarg[remain] = 0;
+              strcat(cmdline, cmdarg);
+              strcat(cmdline, " ");
+              remain -= strlen(cmdarg);
+              if (remain <= 0)
+                break;
+            }
+          }
+          
+          lseek(pmem, rc, SEEK_SET);
+        }
 			}
 
-			/* total stats */
 			pcount++;
-			if (atask.tsstat == TRUN) prunning++;
-			if (userbl.uquantum)
-			{
-				putime += ntohl(userbl.utimu);
-				pstime += ntohl(userbl.utims);
-			}
 			for(i=0;i<UNFILS; i++)
       {
 				if (userbl.ufiles[i])
         {
-#if 1
           struct filedes afile;
 					struct fdn afdn;
           char *kind;
@@ -893,89 +738,15 @@ while(1)
 									break;
 						}
       
-            printf("%s %s %s %s\033[K\n", cmdline, pentry->pw_name, kind, filepath);
+            cmdline[16] = '\0';
+            printf("%-16s%8d%10s%6s%10d %s\033[K\n", cmdline, ntohs(atask.tstid), pentry->pw_name, kind, ntohl(afile.position), filepath);
           }
-#endif
 
 					openfd++;
         }
       }
 		}
 	}
-
-  /* show open files */
-
-
-#ifdef USE_STTY
-    /* quit? */
-	{
-	    gtty(fileno(stdin), &term_settings);
-		if (term_settings.sg_speed & INCHR)
-		{
-			rc = (int)read(fileno(stdin), buffer, 1);
-			if (rc == 1)
-			{
-				if (buffer[0] == 'q')
-				{
-					stty(fileno(stdin), &orig_term_settings);
-					exit(0);
-				}
-				if (buffer[0] == ' ')
-				{
-					displaymode ^= 1;
-				}
-			}
-		}
-	}
-#endif
-
-	printf("\033[2K");
-	printf("\033[1;1H");
-	printf("proc: %d total, %d running fd:%d utime:%d/%d   ", pcount,prunning, openfd, putime, pstime);
-
-	timestamp = nowstamp - bootstamp;
-	printf("uptime: %2.2d:%2.2d:%2.2d \n", (timestamp/3600), (timestamp%3600) / 60, (timestamp%3600) % 60);
-
-	printf("system_calls: %d ", readkint32(system_calls, pmem));
-	printf("freemem: %dk ", readkint16(corcnt, pmem) * 4);
-	printf("physmem: %dk\n", readkint32(memsize, pmem) / 1024);
-	
-	printf("mempages: %d ", readkint32(mempages, pmem));
-	printf("lbolt %d ", readkint16(lbolt, pmem)>>8);
-	printf("disk ops:%d ", readkint32(stadsk, pmem));
-	printf("block ops:%d\n", readkint32(stablk, pmem));
-
-#ifndef __clang__
-{
-unsigned char dbuffer[2048];
-int dbufferlen,nde_size,ncount;
-netdev *ptr;
-
-  dbufferlen = ldiddle("ndevsw"); 			/* buffer len */
-  rdiddle("nde_size", &nde_size, sizeof(nde_size));	/* ndev struct size */
-  ncount  = dbufferlen / nde_size;
-  ptr = rdiddle("ndevsw", dbuffer, dbufferlen);		/* buffer data */
-
-  ptr = dbuffer;
-  while (ncount-- > 0)
-  {
-  	if (ptr->nd_flags & F_N_ONLINE)
-  	{
-    	printf("network %s: recv: %d xmit: %d\n", 
-		  ptr->nd_name, ptr->nd_stat.sb_rcnt, ptr->nd_stat.sb_xcnt);
-	}
-    ptr++;
-  }
-}
-#endif
-
-	sleep(2);
-	
-	/* used for %CPU */
-	totalcpu = putime + pstime;
-	framenum++;
-	
-}
 
 	close(pmem);
 
