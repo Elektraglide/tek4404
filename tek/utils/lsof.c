@@ -446,7 +446,6 @@ char **argv;
 {
 	int i, j, len, rc, pmem;
 	char bootfile[256];
-	char *needle;
 	char *symbols;
 	int symbolsize;
 	unsigned char buffer[256];
@@ -455,24 +454,14 @@ char **argv;
 	struct userbl userbl;
 	struct passwd *pentry;
 	int lastuid;
-	time_t bootstamp,timestamp,beginstamp,nowstamp;
-	int cpu_pers,dsk_pers,tty_pers,pip_pers;
-	int system_calls,usedmem,memsize,mempages,corcnt,lbolt,stadsk,stablk;
+	time_t bootstamp;
 
-  char mode[64];
   char *status;
-  char *priority;
-  int tname,swapsize;
-  unsigned int personality;
+  int swapsize;
   
   short devnum;
 	int pcount;
-	int prunning;
-	int putime;
-	int pstime;
  	int openfd;
-	int framenum = 0;
-	short displaymode = 0;
   char cmdline[64];
   
 #ifdef __clang__
@@ -489,7 +478,7 @@ char **argv;
   fd_sir = open(DISKNAME, O_RDONLY);
 
 #ifdef __clang__
-	pmem = open("/Users/adambillyard/projects/tek4404/development/mirror2.0_net2.1/tek/dump_pmem/allmem.bin", O_RDWR);
+	pmem = open("/Users/adambillyard/projects/tek4404/development/uniflexsnap/allmem.bin", O_RDWR);
 #else
 	pmem = open("/dev/pmem", O_RDWR);
 #endif
@@ -515,7 +504,7 @@ char **argv;
 	pcount = 0;
 	openfd = 0;
 	
-	printf("COMMAND.....PID......USER........ TYPE.......SIZE......NAME\n");
+	printf("COMMAND..............PID......USER..TYPE....OFFSET.NAME\n");
 
 	rc = lseek(pmem, tsktab, SEEK_SET);
 	if (rc < 0)
@@ -645,8 +634,6 @@ char **argv;
           /* if we failed to get to TOS, skip cmdline parsing */
           if (!sp)
           {
-            unsigned int datapage;
-            int datapageindex = -1;
             char cmdarg[32];
             
             /* skip */
@@ -706,26 +693,36 @@ char **argv;
 					/* disk file */
 					if (ntohs(afdn.device_key) == 4)
 					{
+            char extra[16];
 						char filepath[256];
 						struct inode afilenode;
-
+            long val;
+            
 						getfilename(ntohs(afdn.inode_key), filepath, &afilenode);
+            extra[0] = '\0';
 						switch(afilenode.fd_mod & S_IFMT)
 						{
 							case S_IFREG:
 									kind = "FILE";
+                  _l4tol(&val, afilenode.fd_siz, 1);
+                  sprintf(extra,"%d", val);
 									break;
 							case S_IFDIR:
 									kind = "DIR ";
+                  _l4tol(&val, afilenode.fd_siz, 1);
+                  sprintf(extra,"%d", val);
 									break;
 							case S_IFCHR:
 									kind = "CDEV";
+                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFBLK:
 									kind = "BDEV";
+                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFPTY:
 									kind = "PTY ";
+                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFPIPE:
 									kind = "PIPE";
@@ -737,9 +734,12 @@ char **argv;
 									kind = "??? ";
 									break;
 						}
-      
+
+            /* truncate */
             cmdline[16] = '\0';
-            printf("%-16s%8d%10s%6s%10d %s\033[K\n", cmdline, ntohs(atask.tstid), pentry->pw_name, kind, ntohl(afile.position), filepath);
+
+            printf("%-16s%8d%10s%6s%6s%10d %s\n", cmdline, ntohs(atask.tstid), pentry->pw_name, kind, extra, ntohl(afile.position), filepath);
+
           }
 
 					openfd++;
