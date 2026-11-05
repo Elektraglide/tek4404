@@ -3,6 +3,8 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/fcntl.h>
+#include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <pwd.h>
 #include "ph.h"
 #include "kernutils.h"
@@ -259,7 +261,9 @@ printf("\033[2J");
 totalcpu = 100000000;
 while(1)
 {
-	nowstamp = time(NULL);
+  char cmdline[64];
+
+  nowstamp = time(NULL);
 #ifdef __clang__
 	/* we want time from kernel image */
 	nowstamp = bootstamp + (getkint32(symbols, symbolsize, "stimh", pmem) / 100 );
@@ -441,13 +445,12 @@ while(1)
 					{
 						/* pid1 is launched differently so fake its argvee */
 						/* fwiw, it shows as being called tty_wait */
-						printf("/etc/init");						
+            strcpy(cmdline, "/etc/init");
 					}
 					else
 					if (userbl.usizes)
 					{
 						struct mt *arun;
-						char cmdline[32];
 						int remain;
 
 						unsigned int sp;
@@ -478,7 +481,8 @@ while(1)
 						{
 							unsigned int datapage;
 							int datapageindex = -1;
-							
+							char cmdarg[32];
+              
 							/* skip */
 							lseek(pmem, 4, SEEK_CUR);
 			
@@ -491,6 +495,7 @@ while(1)
 							mainenvp = ntohl(args[2]);
 							
 							remain = 22;
+              cmdline[0] = '\0';
 							for (i=0; i<mainargc; i++)
 							{
 								unsigned int stringvaddr;
@@ -502,10 +507,11 @@ while(1)
 									
 								stringpaddr = va2pa(arun, pmem, stringvaddr);
 								lseek(pmem, stringpaddr, 0);
-								read(pmem, cmdline, remain);
-								cmdline[remain] = 0;
-								printf("%s ", cmdline);
-								remain -= strlen(cmdline);
+								read(pmem, cmdarg, remain);
+								cmdarg[remain] = 0;
+                strcat(cmdline, cmdarg);
+                strcat(cmdline, " ");
+								remain -= strlen(cmdarg);
 								if (remain <= 0)
 									break;
 							}
@@ -514,7 +520,7 @@ while(1)
 						lseek(pmem, rc, SEEK_SET);
 					}
 					/* delete rest of line */
-					printf("\033[K\n");
+					printf("%s\033[K\n", cmdline);
 				}
 				
 #if 0
@@ -565,7 +571,10 @@ while(1)
 		}
 	}
 
-#ifndef __clang__
+  /* show open files */
+
+
+#ifdef USE_STTY
     /* quit? */
 	{
 	    gtty(fileno(stdin), &term_settings);
