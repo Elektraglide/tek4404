@@ -527,202 +527,203 @@ char **argv;
 		if (atask.tsstat == TWAIT) status = "wait";
 		if (atask.tsstat == TTERM) status = "term";
 		if (atask.tsstat == TTRACE) status = "trace";
-		
+
 		/* is it alive? */
 		if (status != NULL)
 		{
+			/* worth skipping if unchanged? */
+			if (lastuid != ntohs(atask.tsuid))
+			{
+				lastuid = ntohs(atask.tsuid);
+				pentry = getpwuid(lastuid);
+			}
 
-		/* worth skipping if unchanged? */
-		if (lastuid != ntohs(atask.tsuid))
-		{
-			lastuid = ntohs(atask.tsuid);
-			pentry = getpwuid(lastuid);
-		}
+			/* controlling tty */
+			if (atask.tstty)
+			{
+				rc = lseek(pmem, 0, SEEK_CUR);
+				/* struct is TTYSIZ (0x2a) */
+				i = offsetof(struct kerntty, t_dev);
+				lseek(pmem, ntohl(atask.tstty) + i, 0);
+				read(pmem, &devnum, 2);
+				lseek(pmem, rc, SEEK_SET);
+				tty[0] = (devnum & 0x100) ? 'p' : 't';  /* PTYs begin at 0x100 */
+				devnum &= 0xff;
+				tty[3] = '0' + (devnum / 10);
+				tty[4] = '0' + (devnum % 10);
+			}
 
-		/* controlling tty */
-		if (atask.tstty)
-		{
+			/* read userblock */
 			rc = lseek(pmem, 0, SEEK_CUR);
-			/* struct is TTYSIZ (0x2a) */
-      i = offsetof(struct kerntty, t_dev);
-			lseek(pmem, ntohl(atask.tstty) + i, 0);
-			read(pmem, &devnum, 2);
-			lseek(pmem, rc, SEEK_SET);
-			tty[0] = (devnum & 0x100) ? 'p' : 't';  /* PTYs begin at 0x100 */
-      devnum &= 0xff;
-			tty[3] = '0' + (devnum / 10);
-			tty[4] = '0' + (devnum % 10);
-		}
+			i = offsetof(struct userbl, utimu);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.utimu, 8);						/* NB reads utimu,utims */
+			i = offsetof(struct userbl, ufiles);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.ufiles, sizeof(userbl.ufiles));
+			i = offsetof(struct userbl, usizet);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.usizet, 6);				/* NB reads usizet,usized,usizes */
+			i = offsetof(struct userbl, ustart);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.ustart, 4);
+			i = offsetof(struct userbl, uregs);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.uregs, 4);					/* NB for getting A7 (stack pointer) */
+			i = offsetof(struct userbl, uquantum);
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, &userbl.uquantum, 10);			/* NB reading uquantum,ucpu,usys_ratio,upersonality*/
 
-		/* read userblock */
-		rc = lseek(pmem, 0, SEEK_CUR);
-		i = offsetof(struct userbl, utimu);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.utimu, 8);						/* NB reads utimu,utims */
-		i = offsetof(struct userbl, ufiles);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.ufiles, sizeof(userbl.ufiles));
-		i = offsetof(struct userbl, usizet);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.usizet, 6);				/* NB reads usizet,usized,usizes */
-		i = offsetof(struct userbl, ustart);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.ustart, 4);
-		i = offsetof(struct userbl, uregs);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.uregs, 4);					/* NB for getting A7 (stack pointer) */
-		i = offsetof(struct userbl, uquantum);
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, &userbl.uquantum, 10);			/* NB reading uquantum,ucpu,usys_ratio,upersonality*/
-
-		i = offsetof(struct userbl, umem) + 2 * MTSIZE;
-		lseek(pmem, ntohl(atask.tsutop) + i, 0);
-		read(pmem, userbl.umem + 2 * MTSIZE, 10);	/* NB just reading stack descriptor (not text & data) */
+			i = offsetof(struct userbl, umem) + 2 * MTSIZE;
+			lseek(pmem, ntohl(atask.tsutop) + i, 0);
+			read(pmem, userbl.umem + 2 * MTSIZE, 10);	/* NB just reading stack descriptor (not text & data) */
 
 #ifndef TEK4404
-		lseek(pmem, ntohl(atask.tsutop), 0);
-		read(pmem, &userbl, sizeof(userbl));
+			lseek(pmem, ntohl(atask.tsutop), 0);
+			read(pmem, &userbl, sizeof(userbl));
 #endif
+			lseek(pmem, rc, SEEK_SET);
 
-		lseek(pmem, rc, SEEK_SET);
+			/* pages are 4k */
+			swapsize = 4 * (ntohs(userbl.usizet) + ntohs(userbl.usized) + ntohs(userbl.usizes));
 
-		/* not sure how to identify a non-task */
-		if (atask.tstid != 0 && swapsize == 0)
-		{
-			continue;
-		}
+			/* not sure how to identify a non-task */
+			if (atask.tstid != 0 && swapsize == 0)
+			{
+				continue;
+			}
 
 			/* if its core.. */
 			if (atask.tsmode & TCORE)
 			{
-        /* find cmdline */
-        if (ntohs(atask.tstid) == 1)
-        {
-          /* pid1 is launched differently so fake its argvee */
-          /* fwiw, it shows as being called tty_wait */
-          strcpy(cmdline, "/etc/init");
-        }
-        else
-        if (userbl.usizes)
-        {
-          struct mt *arun;
-          int remain;
+				/* find cmdline */
+				if (ntohs(atask.tstid) == 1)
+				{
+				  /* pid1 is launched differently so fake its argvee */
+				  /* fwiw, it shows as being called tty_wait */
+				  strcpy(cmdline, "/etc/init");
+				}
+				else
+				if (userbl.usizes)
+				{
+				  struct mt *arun;
+				  int remain;
 
-          unsigned int sp;
-          unsigned int mainargc;
-          unsigned int mainargv;
-          unsigned int mainenvp;
+				  unsigned int sp;
+				  unsigned int mainargc;
+				  unsigned int mainargv;
+				  unsigned int mainenvp;
 
-          int args[3];
-          unsigned int array[16];
+				  int args[3];
+				  unsigned int array[16];
 
-          /* get last known SP */
-          sp = getSP(pmem, &atask, &userbl);
+				  /* get last known SP */
+				  sp = getSP(pmem, &atask, &userbl);
 
-          /* we need to read virtual addresses, so get segment table */
-          arun = (struct mt *)(userbl.umem);
+				  /* we need to read virtual addresses, so get segment table */
+				  arun = (struct mt *)(userbl.umem);
 
-          /* invalidate cached info */
-          lastsegment = -1;
-          
-          /* walk up stack until transfer address (assuming 0x0) */
-          while(sp > ntohl(arun[2].vaddr))
-          {
-            sp = readvaddr(arun, pmem, sp);
-          }
+				  /* invalidate cached info */
+				  lastsegment = -1;
+		  
+				  /* walk up stack until transfer address (assuming 0x0) */
+				  while(sp > ntohl(arun[2].vaddr))
+				  {
+					sp = readvaddr(arun, pmem, sp);
+				  }
 
-          /* if we failed to get to TOS, skip cmdline parsing */
-          if (!sp)
-          {
-            char cmdarg[32];
-            
-            /* skip */
-            lseek(pmem, 4, SEEK_CUR);
-    
-            /* read argc, argv and envp */
-            /* NB assuming same page for argv,envp as last SP */
-            mainargc = 0;
-            read(pmem, args, sizeof(args));
-            mainargc = ntohl(args[0]);
-            mainargv = ntohl(args[1]);
-            mainenvp = ntohl(args[2]);
-            
-            remain = 22;
-            cmdline[0] = '\0';
-            for (i=0; i<mainargc; i++)
-            {
-              unsigned int stringvaddr;
-              unsigned int stringpaddr;
-              
-              stringvaddr = readvaddr(arun, pmem, mainargv + i * 4);
-              if (!stringvaddr)
-                break;
-                
-              stringpaddr = va2pa(arun, pmem, stringvaddr);
-              lseek(pmem, stringpaddr, 0);
-              read(pmem, cmdarg, remain);
-              cmdarg[remain] = 0;
-              strcat(cmdline, cmdarg);
-              strcat(cmdline, " ");
-              remain -= strlen(cmdarg);
-              if (remain <= 0)
-                break;
-            }
-          }
-          
-          lseek(pmem, rc, SEEK_SET);
-        }
+				  /* if we failed to get to TOS, skip cmdline parsing */
+				  if (!sp)
+				  {
+					char cmdarg[32];
+			
+					/* skip */
+					lseek(pmem, 4, SEEK_CUR);
+	
+					/* read argc, argv and envp */
+					/* NB assuming same page for argv,envp as last SP */
+					mainargc = 0;
+					read(pmem, args, sizeof(args));
+					mainargc = ntohl(args[0]);
+					mainargv = ntohl(args[1]);
+					mainenvp = ntohl(args[2]);
+			
+					remain = 22;
+					cmdline[0] = '\0';
+					for (i=0; i<mainargc; i++)
+					{
+					  unsigned int stringvaddr;
+					  unsigned int stringpaddr;
+			  
+					  stringvaddr = readvaddr(arun, pmem, mainargv + i * 4);
+					  if (!stringvaddr)
+						break;
+				
+					  stringpaddr = va2pa(arun, pmem, stringvaddr);
+					  lseek(pmem, stringpaddr, 0);
+					  read(pmem, cmdarg, remain);
+					  cmdarg[remain] = 0;
+					  strcat(cmdline, cmdarg);
+					  strcat(cmdline, " ");
+					  remain -= strlen(cmdarg);
+					  if (remain <= 0)
+						break;
+					}
+				  }
+		  
+				  lseek(pmem, rc, SEEK_SET);
+				}
 			}
 
 			pcount++;
 			for(i=0;i<UNFILS; i++)
-      {
+			{
 				if (userbl.ufiles[i])
-        {
-          struct filedes afile;
+				{
+					struct filedes afile;
 					struct fdn afdn;
-          char *kind;
-          
-          rc = lseek(pmem, 0, SEEK_CUR);
-          lseek(pmem, ntohl(userbl.ufiles[i]), 0);
-          read(pmem, &afile, sizeof(afile));
-          lseek(pmem, ntohl(afile.fdn), 0);
-          read(pmem, &afdn, sizeof(afdn));
-          lseek(pmem, rc, SEEK_SET);
+					char *kind;
+		
+					rc = lseek(pmem, 0, SEEK_CUR);
+					lseek(pmem, ntohl(userbl.ufiles[i]), 0);
+					read(pmem, &afile, sizeof(afile));
+					lseek(pmem, ntohl(afile.fdn), 0);
+					read(pmem, &afdn, sizeof(afdn));
+					lseek(pmem, rc, SEEK_SET);
 
 					/* disk file */
 					if (ntohs(afdn.device_key) == 4)
 					{
-            char extra[16];
+						char extra[16];
 						char filepath[256];
 						struct inode afilenode;
-            long val;
-            
+						long val;
+			
 						getfilename(ntohs(afdn.inode_key), filepath, &afilenode);
-            extra[0] = '\0';
+						extra[0] = '\0';
 						switch(afilenode.fd_mod & S_IFMT)
 						{
 							case S_IFREG:
 									kind = "FILE";
-                  _l4tol(&val, afilenode.fd_siz, 1);
-                  sprintf(extra,"%d", val);
+									_l4tol(&val, afilenode.fd_siz, 1);
+									sprintf(extra,"%d", val);
 									break;
 							case S_IFDIR:
 									kind = "DIR ";
-                  _l4tol(&val, afilenode.fd_siz, 1);
-                  sprintf(extra,"%d", val);
+									_l4tol(&val, afilenode.fd_siz, 1);
+									sprintf(extra,"%d", val);
 									break;
 							case S_IFCHR:
 									kind = "CDEV";
-                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
+									sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFBLK:
 									kind = "BDEV";
-                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
+									sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFPTY:
 									kind = "PTY ";
-                  sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
+									sprintf(extra,"%d.%d", ntohl(afdn.size)>>8, ntohl(afdn.size)&0xff);
 									break;
 							case S_IFPIPE:
 									kind = "PIPE";
@@ -735,16 +736,15 @@ char **argv;
 									break;
 						}
 
-            /* truncate */
-            cmdline[16] = '\0';
+						/* truncate */
+						cmdline[16] = '\0';
 
-            printf("%-16s%8d%10s%6s%6s%10d %s\n", cmdline, ntohs(atask.tstid), pentry->pw_name, kind, extra, ntohl(afile.position), filepath);
+						printf("%-16s%8d%10s%6s%6s%10d %s\n", cmdline, ntohs(atask.tstid), pentry->pw_name, kind, extra, ntohl(afile.position), filepath);
 
-          }
-
+					}
 					openfd++;
-        }
-      }
+				}
+			}
 		}
 	}
 
