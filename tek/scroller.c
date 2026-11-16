@@ -72,7 +72,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 33;
+  frametime += 16;
   framenum++;
 
   signal(sig, sh_timer);
@@ -227,23 +227,51 @@ char *name;
     return tile;
 }
 
-fillcol(x,y,tile)
+#define MAPWIDTH 1024
+#define MAPHEIGHT 30
+unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
+struct FORM* tile[8];
+
+fillcol(x,y,cellx)
 int x,y;
-struct FORM *tile;
+int cellx;
 {
+    register unsigned char *cellcol;
     short i;
 
-    bb.srcform = tile;
     bb.halftoneform = NULL;
     bb.destrect.x = x;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
     bb.rule = bbS;
-    for (i = 0; i < 480; i += 16)
+    cellcol = (unsigned char *)cellmap + cellx;
+    for (i = 0; i < MAPHEIGHT; i++)
     {
+        bb.srcform = tile[(*cellcol) & 7];
         BitBlt(&bb);
         bb.destrect.y += 16;
+        cellcol += MAPWIDTH;
+    }
+}
+
+void fillscreen(pixx,y)
+int pixx,y;
+{
+    int i, pagex, fbx, cellx;
+
+    /* which cell are we starting on */
+    cellx = pixx >> 4;
+
+    /* which framebuffer window are we in? */
+    fbx = pixx / 384;
+
+    /* find scroll window offset */
+    pagex = pixx - (fbx * 384);
+
+    for(i=0; i<40; i++)
+    {
+        fillcol(pagex + (i << 4), y, cellx + i);
     }
 }
 
@@ -252,13 +280,17 @@ char *buffer;
 {
     struct POINT origin;
 
-    origin.x = 250;
+    /* avoid wrapping text */
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = 1024;
+    bb.destrect.h = 1024;
+
+    origin.x = page.x;
     origin.y = page.y + font->maps->baseline;
     StringDraw(buffer, &origin);
 }
 
-
-unsigned char cellmap[32][256];
 
 int *mapped_fpu;
 unsigned int oldwaiting[2];
@@ -266,15 +298,13 @@ main(argc,argv)
 int argc;
 char *argv[];
 {
-    register int ret, i,col, oldleftcol,oldrightcol;
+    register int ret, i, col, oldleftcol,oldrightcol;
     fixed pfx,pfdir;
     struct POINT origin,p2;
     struct RECT r;
     unsigned int currpage,waiting;
     float angle;
-    struct FORM *tile[4];
-    int tilex;
-    char buffer[64];
+    char infoline[64];
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -311,86 +341,104 @@ char *argv[];
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
-   /* some tiles */
-   tile[0] = maketile("0 ");
-   tile[1] = maketile("1 ");
-   tile[2] = maketile("2 ");
-   tile[3] = maketile("3 ");
-   bb.destform = screen;
+    /* some tiles */
+    tile[0] = maketile("  ");
+    tile[1] = maketile("1 ");
+    tile[2] = maketile("2 ");
+    tile[3] = maketile("3 ");
+    tile[4] = maketile("4 ");
+    tile[5] = maketile("5 ");
+    tile[6] = maketile("6 ");
+    tile[7] = maketile("7 ");
+    bb.destform = screen;
 
-   /* playfield start position */
-   pfx = INT2FIX(0);
-   pfdir = 1024;
+    /* random playfield */
+    for (col = 0; col < MAPWIDTH; col += 8)
+    {
+        i = rand()% 25;
+        cellmap[i][col + 0] = col / 8;
+        cellmap[i][col + 1] = col / 8;
+        cellmap[i][col + 2] = col / 8;
+        cellmap[i][col + 3] = col / 8;
+        i++;
+        cellmap[i][col + 0] = col / 8;
+        cellmap[i][col + 1] = rand();
+        cellmap[i][col + 2] = rand();
+        cellmap[i][col + 3] = col / 8;
+        i++;
+        cellmap[i][col + 0] = col / 8;
+        cellmap[i][col + 1] = col / 8;
+        cellmap[i][col + 2] = col / 8;
+        cellmap[i][col + 3] = col / 8;
+    }
 
-   /* animate it */
-   while(1)
-   {
-       int fbx;
+    /* playfield start position */
+    pfx = INT2FIX(0);
+    pfdir = 128;
+
+    /* initial screen fill */
+    fillscreen(FIX2INT(pfx), 0);
+    fillscreen(FIX2INT(pfx), 512);
+
+    /* animate it */
+    while(1)
+    {
+        int fbx, cellx, pixx;
+
+        /* top left coordinate */
+        pixx = FIX2INT(pfx);
 
         /* which cell are we starting on */
-        col = FIX2INT(pfx) >> 4;
+        cellx = pixx >> 4;
 
         /* which framebuffer window are we in? */
-        fbx = FIX2INT(pfx) / 384;
+        fbx = pixx / 384;
 
-        /* position scroll window relative to this framebuffer window */
-        page.x = FIX2INT(pfx) - (fbx * 384);
+        /* find scroll window offset */
+        page.x = pixx - (fbx * 384);
         if (argc == 1) SetViewport(&page);
 
-        sprintf(buffer, "pfx(%d) col(%d) fbx(%d)", FIX2INT(pfx), col, fbx);
+        /* infoline */
+        sprintf(infoline, "pfx(%d) cellx(%d) fbx(%d)", pixx, cellx, fbx);
 
-        /* has leading edge column changed? */
+        /* has leading edge column changed? render a new column */
         col = (page.x + 640) >> 4;
         if (col != oldrightcol)
         {
             oldrightcol = col;
 
             /* fill new right column just out of view */
-            fillcol(col << 4, page.y, tile[0]);
-        }
+            fillcol(col << 4, page.y, cellx + 40);
 
-        /* has trailing column changed? */
-        col = (page.x - 1) >> 4;
-        if (col != oldleftcol && col >= 0)
-        {
-            oldleftcol = col;
+            /* fill on next page too */
+            col = (page.x - 1) >> 4;
+            fillcol(256 + (col << 4), page.y ^ 512, cellx + 40);
 
-            /* backfill new left column on next row */
-            fillcol(256 + (col << 4), page.y ^ 512, tile[0]);
-
-            /* amortised 0-256 */
+            /* the region that overlaps far left and far right scroll window position also needs filling */
             if (col < 16)
             {
-                fillcol((col << 4), page.y ^ 512, tile[3]);
+                fillcol((col << 4), page.y ^ 512, cellx + 24);
             }
         }
 
-        showinfo(buffer);
+        showinfo(infoline);
 
         /* wait for frame flip */
-         waiting = 0;
-         currpage = framenum;
-         while (currpage == framenum)
-             waiting++;
-         currpage = framenum;
-         /* ensure 1 vblank has happened */
-         while (currpage == framenum);
+        waiting = 0;
+        currpage = framenum;
+        while (currpage == framenum)
+            waiting++;
+        currpage = framenum;
+        /* ensure 1 vblank has happened */
+        while (currpage == framenum);
 
-         /* scroll */
-         pfx += pfdir;
+        /* scroll */
+        pfx += pfdir;
 
-         /* do we need to swap to next row? */
-         if (fbx != (FIX2INT(pfx) / 384))
-         {
-             struct FORM *tmp;
-
-             page.y ^= 512;
-
-             tmp = tile[0];
-             tile[0] = tile[1];
-             tile[1] = tile[2];
-             tile[2] = tile[3];
-             tile[3] = tmp;
-         }
-   }
+        /* have we crossed into new framebuffer window and need to flip? */
+        if (fbx != (FIX2INT(pfx) / 384))
+        {
+            page.y ^= 512;
+        }
+    }
 }
