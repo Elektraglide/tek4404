@@ -232,7 +232,7 @@ char *name;
 unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
 struct FORM* tile[8];
 
-fillcol(x,y,cellx)
+void fillcol(x,y,cellx)
 int x,y;
 int cellx;
 {
@@ -244,7 +244,6 @@ int cellx;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
-    bb.rule = bbS;
     cellcol = (unsigned char *)cellmap + cellx;
     for (i = 0; i < MAPHEIGHT; i++)
     {
@@ -253,6 +252,25 @@ int cellx;
         bb.destrect.y += 16;
         cellcol += MAPWIDTH;
     }
+}
+
+void sprite32(x, y, cell)
+int x, y;
+int cell;
+{
+
+    bb.halftoneform = NULL;
+    bb.destrect.x = x;
+    bb.destrect.y = y;
+    bb.destrect.w = 16;
+    bb.destrect.h = 16;
+    BitBlt(&bb);
+    bb.destrect.x += 16;
+    BitBlt(&bb);
+    bb.destrect.y += 16;
+    BitBlt(&bb);
+    bb.destrect.x -= 16;
+    BitBlt(&bb);
 }
 
 void fillscreen(pixx,y)
@@ -269,6 +287,7 @@ int pixx,y;
     /* find scroll window offset */
     pagex = pixx - (fbx * 384);
 
+    bb.rule = bbS;
     for(i=0; i<40; i++)
     {
         fillcol(pagex + (i << 4), y, cellx + i);
@@ -374,11 +393,12 @@ char *argv[];
 
     /* playfield start position */
     pfx = INT2FIX(0);
-    pfdir = 128;
+    pfdir = 256;
 
     /* initial screen fill */
     fillscreen(FIX2INT(pfx), 0);
     fillscreen(FIX2INT(pfx), 512);
+    oldrightcol = 0;
 
     /* animate it */
     while(1)
@@ -408,18 +428,27 @@ char *argv[];
             oldrightcol = col;
 
             /* fill new right column just out of view */
+            bb.rule = bbS;
             fillcol(col << 4, page.y, cellx + 40);
 
             /* fill on next page too */
             col = (page.x - 1) >> 4;
-            fillcol(256 + (col << 4), page.y ^ 512, cellx + 40);
-
-            /* the region that overlaps far left and far right scroll window position also needs filling */
-            if (col < 16)
+            if (col >= 0)
             {
-                fillcol((col << 4), page.y ^ 512, cellx + 24);
+                /* cellx is for x==0, we are 1 cell before */
+                fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 - 1);
+
+                /* the region that overlaps far left and far right scroll window position also needs filling */
+                if (col < 16)
+                {
+                    fillcol((col << 4), page.y ^ 512, cellx + 24 - 1);
+                }
             }
         }
+
+        /* animated sprites*/
+        sprite32(64, 64, rand() & 7);
+        sprite32(128, 64, rand() & 7);
 
         showinfo(infoline);
 
