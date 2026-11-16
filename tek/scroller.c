@@ -219,17 +219,17 @@ char *name;
     StringDrawX(name, &origin, &bb, font);
 
     bb.halftoneform = &BlackMask;
-    r.x = r.y = 0;
-    r.w = tile->w - 1;
-    r.h = tile->h - 1;
+    r.x = r.y = 1;
+    r.w = tile->w - 2;
+    r.h = tile->h - 2;
     RectBoxDrawX(&r, 1, &bb);
 
     return tile;
 }
 
 #define MAPWIDTH 1024
-#define MAPHEIGHT 30
-unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
+#define MAPHEIGHT 28
+unsigned char cellmap[MAPHEIGHT][MAPWID TH];
 struct FORM* tile[8];
 
 void fillcol(x,y,cellx)
@@ -247,8 +247,20 @@ int cellx;
     cellcol = (unsigned char *)cellmap + cellx;
     for (i = 0; i < MAPHEIGHT; i++)
     {
-        bb.srcform = tile[(*cellcol) & 7];
-        BitBlt(&bb);
+        /* fastpath for blank */
+        if (*cellcol == 0)
+        {
+            /* FIXME: have a ready-to-use bb */
+            bb.rule = bbZero;
+            bb.srcform = NULL;
+            BitBlt(&bb);
+            bb.rule = bbS;
+        }
+        else
+        {
+            bb.srcform = tile[(*cellcol) & 7];
+            BitBlt(&bb);
+        }
         bb.destrect.y += 16;
         cellcol += MAPWIDTH;
     }
@@ -264,6 +276,7 @@ int cell;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
+    bb.srcform = tile[cell];
     BitBlt(&bb);
     bb.destrect.x += 16;
     BitBlt(&bb);
@@ -306,7 +319,7 @@ char *buffer;
     bb.destrect.h = 1024;
 
     origin.x = page.x;
-    origin.y = page.y + font->maps->baseline;
+    origin.y = page.y + 480 - 4;
     StringDraw(buffer, &origin);
 }
 
@@ -361,7 +374,7 @@ char *argv[];
     bb.cliprect.h = 1024;
 
     /* some tiles */
-    tile[0] = maketile("  ");
+    tile[0] = maketile("0 ");
     tile[1] = maketile("1 ");
     tile[2] = maketile("2 ");
     tile[3] = maketile("3 ");
@@ -421,36 +434,78 @@ char *argv[];
         /* infoline */
         sprintf(infoline, "pfx(%d) cellx(%d) fbx(%d)", pixx, cellx, fbx);
 
-        /* has leading edge column changed? render a new column */
-        col = (page.x + 640) >> 4;
-        if (col != oldrightcol)
+        if (pfdir >= 0)
         {
-            oldrightcol = col;
-
-            /* fill new right column just out of view */
-            bb.rule = bbS;
-            fillcol(col << 4, page.y, cellx + 40);
-
-            /* fill on next page too */
-            col = (page.x - 1) >> 4;
-            if (col >= 0)
+            /* has leading edge column changed? render a new column */
+            col = (page.x + 640) >> 4;
+            if (col != oldrightcol)
             {
-                /* cellx is for x==0, we are 1 cell before */
-                fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 - 1);
+                oldrightcol = col;
 
-                /* the region that overlaps far left and far right scroll window position also needs filling */
-                if (col < 16)
+                /* fill new right column just out of view */
+                bb.rule = bbS;
+                fillcol(col << 4, page.y, cellx + 40);
+
+                /* fill on next page too */
+                col = (page.x - 1) >> 4;
+                if (col >= 0)
                 {
-                    fillcol((col << 4), page.y ^ 512, cellx + 24 - 1);
+                    /* cellx is for x==0, we are 1 cell before */
+                    fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 - 1);
+
+                    /* the region that overlaps far left and far right scroll window position also needs filling */
+                    if (col < 16)
+                    {
+                        fillcol((col << 4), page.y ^ 512, cellx + 24 - 1);
+                    }
+                }
+            }
+        }
+        else /* reverse direction */
+        {
+            /* has leading edge column changed? render a new column */
+            col = (page.x - 1) >> 4;
+            if (col != oldrightcol)
+            {
+                oldrightcol = col;
+
+                /* fill new right column just out of view */
+                bb.rule = bbS;
+                fillcol(col << 4, page.y, cellx - 1);
+
+                /* fill on next page too */
+                col = (page.x + 40) >> 4;
+                if (col >= 0)
+                {
+                    /* cellx is for x==0, we are 1 cell before */
+                    fillcol(((16 + col) << 4), page.y ^ 512, cellx + 40 - 1);
+
+                    /* the region that overlaps far left and far right scroll window position also needs filling */
+                    if (col < 16)
+                    {
+                        fillcol((col << 4), page.y ^ 512, cellx + 24 - 1);
+                    }
                 }
             }
         }
 
-        /* animated sprites*/
-        sprite32(64, 64, rand() & 7);
-        sprite32(128, 64, rand() & 7);
+        /* animated sprites at 7.5Hz */
+        if ((framenum & 7) == 0)
+        {
+            /* TODO: need a way of culling animated sprites based on current view window */
+            if (pixx < 100)
+            {
+                sprite32(64, page.y + 64, rand() & 7);
+                sprite32(128, page.y + 64, rand() & 7);
+            }
+            if (pixx < 300)
+            {
+                sprite32(192, page.y + 64, rand() & 7);
+                sprite32(224, page.y + 128, rand() & 7);
+            }
+        }
 
-        showinfo(infoline);
+        /* showinfo(infoline); */
 
         /* wait for frame flip */
         waiting = 0;
