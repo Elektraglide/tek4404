@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <fcntl.h>
 #include <font.h>
 #include <graphics.h>
 #include <signal.h>
@@ -24,6 +25,14 @@ typedef struct
   struct FORM *back[2];
   int oldx[2],oldy[2];
 } sprite;
+
+typedef struct
+{
+    unsigned char identsize, cmaptype, imagetype;
+    unsigned char cmapstart[2], cmaplen[2], cmapbits;
+    unsigned char xstart[2], ystart[2], width[2], height[2];
+    unsigned char bits, desc;
+} tgaheader;
 
 struct FontHeader *font;
 struct FORM *screen;
@@ -72,7 +81,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 16;
+  frametime += 32;
   framenum++;
 
   signal(sig, sh_timer);
@@ -96,94 +105,6 @@ sprite *asprite;
 
 }
 
-struct FORM *makeform()
-{
-  struct POINT origin,p1,p2;
-  struct RECT r;
-  struct FORM *form;
-  int i;
-     
-   form = FormCreate(256,128);
-   
-   if (font && form)
-   {
-     /* NB text is formatted WRT the destrect, so make it large */
-     bb.destform = form;
-     bb.destrect.x = 0;
-     bb.destrect.y = 0;
-     bb.destrect.w = 1024;
-     bb.destrect.h = 1024;
-     bb.rule = bbSorD;
-     bb.halftoneform = NULL;
-     bb.cliprect.x = 0;
-     bb.cliprect.y = 0;
-     bb.cliprect.w = form->w;
-     bb.cliprect.h = form->h;
-
-     i = 16;
-     while(--i >= 0)
-     {
-       if (i == 0) bb.rule = bbSnandD;
-       
-       origin.x = 0 + i;
-       origin.y = font->maps->line + i;
-       StringDrawX("Tektronix\n  4404", &origin, &bb, font);
-     }
-
-
-     bb.rule = bbSorD;
-     bb.halftoneform = &GrayMask;
-     bb.srcform = NULL;
-     r.x = r.y = 4;
-     r.w = 252-8;
-     r.h = 124-8;
-     RectBoxDrawX(&r,4, &bb);
-   }
-
-   return form;
-}
-
-void movesprite(asprite)
-sprite *asprite;
-{
-    asprite->x += asprite->dx;
-    if (asprite->x < INT2FIX(page.x)) 
-    {
-      asprite->x = INT2FIX(page.x); asprite->dx = -asprite->dx;
-    }
-    if (asprite->x > INT2FIX(page.x+640-256)) 
-    {
-      asprite->x = INT2FIX(page.x+640-256); asprite->dx = -asprite->dx;
-    }
-
-    asprite->y += asprite->dy;
-    if (asprite->y > INT2FIX(480-128)) 
-    {
-      asprite->y = INT2FIX(480-128);
-      asprite->dy = -asprite->dy;
-    }
-
-    /* gravity */
-    asprite->dy += 8000; 
-    if (asprite->dy > INT2FIX(50)) asprite->dy = INT2FIX(50);
-
-}
-
-void makesprite(asprite, dx, dy)
-sprite* asprite;
-fixed dx, dy;
-{
-    asprite->form = makeform();
-    asprite->x = INT2FIX(20);
-    asprite->y = INT2FIX(10);
-    asprite->oldx[0] = asprite->oldx[1] = -1000;
-
-    asprite->back[0] = FormCreate(256+32, 128);
-    asprite->back[1] = FormCreate(256+32, 128);
-    asprite->dx = dx;
-    asprite->dy = dy;
-}
-
 void sh_int(sig)
 int sig;
 {
@@ -195,6 +116,91 @@ int sig;
 
   exit(2);
 }
+
+struct FORM* readtga(filename, w, h)
+char* filename;
+int* w, * h;
+{
+    int fd, len;
+    tgaheader header;
+    struct FORM* form = NULL;
+
+    fd = open(filename, O_RDONLY);
+    if (fd > 0)
+    {
+        read(fd, &header, sizeof(header));
+
+        *w = header.width[0] + header.width[1] * 256;
+        *h = header.height[0] + header.height[1] * 256;
+
+        /* uncompressed b&w */
+        if (header.imagetype != 3)
+        {
+            fprintf(stderr, "FormCreate: imagetype: %d\n", header.imagetype);
+        }
+
+        if (header.desc & 32)
+        {
+            fprintf(stderr, "FormCreate: origin: upper left\n");
+        }
+
+        form = FormCreate(*w, *h);
+        if (form)
+        {
+            char *dst;
+            int i,stride;
+
+            dst = form->addr;
+            stride = ((*w + 15) & -16) >> 3;
+
+            printf("atlas: %d %d  stride: %d\n", *w, *h, stride);
+
+            for(i=0; i<*h; i++)
+            {
+                read(fd, dst, ((*w + 7) >> 3));
+                dst += stride;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "FormCreate: %s\n", strerror(errno));
+        }
+
+        close(fd);
+    }
+    else
+    {
+        fprintf(stderr, "FAILED TO OPEN\n");
+    }
+
+    return form;
+}
+
+struct FORM* copytile(atlas, x, y)
+struct FORM *atlas;
+int x,y;
+{
+    struct FORM* tile;
+
+    tile = FormCreate(16, 16);
+    if (tile)
+    {
+        bb.destform = tile;
+        bb.destrect.x = 0;
+        bb.destrect.y = 0;
+        bb.destrect.w = 16;
+        bb.destrect.h = 16;
+        bb.rule = bbS;
+        bb.halftoneform = NULL;
+        bb.srcform = atlas;
+        bb.srcpoint.x = x;
+        bb.srcpoint.y = y;
+        BitBlt(&bb);
+    }
+
+    return tile;
+}
+
 
 struct FORM *maketile(name)
 char *name;
@@ -229,8 +235,8 @@ char *name;
 
 #define MAPWIDTH 1024
 #define MAPHEIGHT 28
-unsigned char cellmap[MAPHEIGHT][MAPWID TH];
-struct FORM* tile[8];
+unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
+struct FORM* tile[32];
 
 void fillcol(x,y,cellx)
 int x,y;
@@ -310,6 +316,7 @@ int pixx,y;
 void showinfo(buffer)
 char *buffer;
 {
+#if 0
     struct POINT origin;
 
     /* avoid wrapping text */
@@ -321,6 +328,9 @@ char *buffer;
     origin.x = page.x;
     origin.y = page.y + 480 - 4;
     StringDraw(buffer, &origin);
+#else
+    printf("\033[30H%s\n",buffer);
+#endif
 }
 
 
@@ -337,6 +347,8 @@ char *argv[];
     unsigned int currpage,waiting;
     float angle;
     char infoline[64];
+    struct FORM *atlas;
+    int aw,ah;
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -373,8 +385,7 @@ char *argv[];
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
-    /* some tiles */
-    tile[0] = maketile("0 ");
+    tile[0] = maketile("00");
     tile[1] = maketile("1 ");
     tile[2] = maketile("2 ");
     tile[3] = maketile("3 ");
@@ -382,6 +393,32 @@ char *argv[];
     tile[5] = maketile("5 ");
     tile[6] = maketile("6 ");
     tile[7] = maketile("7 ");
+
+#if 1
+    /* read sprite atlas */
+    atlas = readtga("sprites.tga", &aw, &ah);
+    if (atlas)
+    {
+        /* extract sprites */
+        for(i=0;i<16; i++)
+        {
+            tile[i] = copytile(atlas, 2+i*20, 302);
+        }
+        for (i = 0; i < 5; i++)
+        {
+            tile[16+i] = copytile(atlas, 2 + i * 20, 320);
+        }
+
+        bb.srcpoint.x = 0;
+        bb.srcpoint.y = 0;
+
+        /* delete atlas */
+        FormDestroy(atlas);
+        atlas = NULL;
+    }
+#endif
+
+    /* some tiles */
     bb.destform = screen;
 
     /* random playfield */
@@ -403,14 +440,20 @@ char *argv[];
         cellmap[i][col + 2] = col / 8;
         cellmap[i][col + 3] = col / 8;
     }
+    for(i=0; i<64; i++)
+    {
+        cellmap[0][i] = i;
+    }
 
     /* playfield start position */
     pfx = INT2FIX(0);
     pfdir = 256;
 
+#if 1
     /* initial screen fill */
     fillscreen(FIX2INT(pfx), 0);
     fillscreen(FIX2INT(pfx), 512);
+#endif
     oldrightcol = 0;
 
     /* animate it */
@@ -429,10 +472,14 @@ char *argv[];
 
         /* find scroll window offset */
         page.x = pixx - (fbx * 384);
+
+        /* decide which page based on even/odd framebuffer window */
+        page.y = fbx & 1 ? 512 : 0;
+
         if (argc == 1) SetViewport(&page);
 
         /* infoline */
-        sprintf(infoline, "pfx(%d) cellx(%d) fbx(%d)", pixx, cellx, fbx);
+        sprintf(infoline, "framenum(%4.4x) %c pfx(%d) cellx(%d) fbx(%d)", framenum, ((framenum & 15) == 0) ? '*' : ' ', pixx, cellx, fbx);
 
         if (pfdir >= 0)
         {
@@ -489,8 +536,8 @@ char *argv[];
             }
         }
 
-        /* animated sprites at 7.5Hz */
-        if ((framenum & 7) == 0)
+        /* animated sprites at 3.25Hz */
+        if ((framenum & 15) == 0)
         {
             /* TODO: need a way of culling animated sprites based on current view window */
             if (pixx < 100)
@@ -505,7 +552,7 @@ char *argv[];
             }
         }
 
-        /* showinfo(infoline); */
+        showinfo(infoline);
 
         /* wait for frame flip */
         waiting = 0;
@@ -513,16 +560,8 @@ char *argv[];
         while (currpage == framenum)
             waiting++;
         currpage = framenum;
-        /* ensure 1 vblank has happened */
-        while (currpage == framenum);
 
         /* scroll */
         pfx += pfdir;
-
-        /* have we crossed into new framebuffer window and need to flip? */
-        if (fbx != (FIX2INT(pfx) / 384))
-        {
-            page.y ^= 512;
-        }
     }
 }
