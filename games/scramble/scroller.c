@@ -22,8 +22,9 @@ typedef struct
   fixed x,y;
   fixed dx,dy;
 
-  struct FORM *back[2];
-  int oldx[2],oldy[2];
+  struct FORM *orig_pf;
+  struct FORM* composed_pf;
+  int oldx,oldy;
 } sprite;
 
 typedef struct
@@ -43,40 +44,6 @@ struct POINT page;
 unsigned long frametime;
 unsigned int framenum;
 
-sprite thesprite;
-sprite thesprite2;
-
-waitbutton(msg)
-char *msg;
-{
-  struct POINT origin;
-  char buffer[64];
-
-     origin.x = 250;
-     origin.y = 48;
-     sprintf(buffer, "%s: page(%d) dst(%d,%d)", msg, pindex,bb.destrect.x,bb.destrect.y);
-     StringDraw(buffer, &origin);
-
-     while (GetButtons() == 0);
-     while (GetButtons());
-}
-
-void flip()
-{
-
-  SetViewport(&page);
-
-  page.y ^= 512;
-  pindex ^= 1;
-
-
-#if 1
-  /* horizontal scrolling */
-  page.x += scrolldir;
-  if (page.x < 1 || page.x > 384) scrolldir = -scrolldir;
-#endif
-}
-
 void sh_timer(sig)
 int sig;
 {
@@ -92,7 +59,7 @@ void drawsprite(asprite)
 sprite *asprite;
 {
     /* draw over */
-    bb.srcform = asprite->form;
+    bb.srcform = asprite->composed_pf;
     bb.srcpoint.x = 0;
     bb.srcpoint.y = 0;
     bb.destform = screen;
@@ -102,7 +69,6 @@ sprite *asprite;
     bb.destrect.h = asprite->form->h;
  	bb.rule = bbSorD;
 	BitBlt(&bb);
-
 }
 
 void sh_int(sig)
@@ -136,12 +102,12 @@ int* w, * h;
         /* uncompressed b&w */
         if (header.imagetype != 3)
         {
-            fprintf(stderr, "FormCreate: imagetype: %d\n", header.imagetype);
+            fprintf(stderr, "FormCreate: not supported: imagetype: %d\n", header.imagetype);
         }
 
-        if (header.desc & 32)
+        if ((header.desc & 32) == 0)
         {
-            fprintf(stderr, "FormCreate: origin: upper left\n");
+            fprintf(stderr, "FormCreate: origin: lower left\n");
         }
 
         form = FormCreate(*w, *h);
@@ -152,8 +118,14 @@ int* w, * h;
 
             dst = form->addr;
             stride = ((*w + 15) & -16) >> 3;
-
             printf("atlas: %d %d  stride: %d\n", *w, *h, stride);
+
+            /* needs flipping */
+            if ((header.desc & 32) == 0)
+            {
+                dst += stride * (*h - 1);
+                stride = -stride;
+            }
 
             for(i=0; i<*h; i++)
             {
@@ -236,7 +208,7 @@ char *name;
 #define MAPWIDTH 1024
 #define MAPHEIGHT 28
 unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
-struct FORM* tile[32];
+struct FORM* tile[96];
 
 void fillcol(x,y,cellx)
 int x,y;
@@ -250,6 +222,7 @@ int cellx;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
+
     cellcol = (unsigned char *)cellmap + cellx;
     for (i = 0; i < MAPHEIGHT; i++)
     {
@@ -264,7 +237,7 @@ int cellx;
         }
         else
         {
-            bb.srcform = tile[(*cellcol) & 7];
+            bb.srcform = tile[(*cellcol) & 127];
             BitBlt(&bb);
         }
         bb.destrect.y += 16;
@@ -272,7 +245,7 @@ int cellx;
     }
 }
 
-void sprite32(x, y, cell)
+void animated_pf(x, y, cell)
 int x, y;
 int cell;
 {
@@ -316,7 +289,6 @@ int pixx,y;
 void showinfo(buffer)
 char *buffer;
 {
-#if 0
     struct POINT origin;
 
     /* avoid wrapping text */
@@ -327,10 +299,7 @@ char *buffer;
 
     origin.x = page.x;
     origin.y = page.y + 480 - 4;
-    StringDraw(buffer, &origin);
-#else
-    printf("\033[30H%s\n",buffer);
-#endif
+    StringDrawX(buffer, &origin, &bb, font);
 }
 
 
@@ -340,7 +309,7 @@ main(argc,argv)
 int argc;
 char *argv[];
 {
-    register int ret, i, col, oldleftcol,oldrightcol;
+    register int ret, i, col;
     fixed pfx,pfdir;
     struct POINT origin,p2;
     struct RECT r;
@@ -348,12 +317,29 @@ char *argv[];
     float angle;
     char infoline[64];
     struct FORM *atlas;
-    int aw,ah;
+    int aw,ah, oldleftcol, oldrightcol, pmem_fd;
+
+    unsigned short nop_instr = 0x4e71;
+    unsigned int shared_page1 = 0x708;
+    unsigned int kernelmem = 0x0078a000;
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
 
-    screen = InitGraphics(TRUE);
+    /* map kernel variables into our space */
+    pmem_fd = open("/dev/pmem", O_RDWR);
+
+  /* overwrite BEQ with NOP so we can do phys(3) */
+    lseek(pmem_fd, 0x000fe04, SEEK_SET);
+    write(pmem_fd, &nop_instr, 2);
+
+    /* phys(3) gets address to map from shared_page1 */
+    lseek(pmem_fd, shared_page1, SEEK_SET);
+    write(pmem_fd, &kernelmem, 4);
+
+
+
+    screen = InitGraphics(FALSE);
 
     font = FontOpen("/fonts/PellucidaSans-Serif10.font");
     fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
@@ -394,19 +380,30 @@ char *argv[];
     tile[6] = maketile("6 ");
     tile[7] = maketile("7 ");
 
-#if 1
     /* read sprite atlas */
-    atlas = readtga("sprites.tga", &aw, &ah);
+    atlas = readtga("scramble_tiles.tga", &aw, &ah);
     if (atlas)
     {
-        /* extract sprites */
-        for(i=0;i<16; i++)
+        /* show it */
+        bb.destform = screen;
+        bb.destrect.x = 64;
+        bb.destrect.y = 64;
+        bb.destrect.w = 448;
+        bb.destrect.h = 160;
+        bb.rule = bbS;
+        bb.halftoneform = NULL;
+        bb.srcform = atlas;
+        bb.srcpoint.x = 0;
+        bb.srcpoint.y = 0;
+        BitBlt(&bb);
+
+        /* extract into sprites */
+        for(i=0; i<3; i++)
         {
-            tile[i] = copytile(atlas, 2+i*20, 302);
-        }
-        for (i = 0; i < 5; i++)
-        {
-            tile[16+i] = copytile(atlas, 2 + i * 20, 320);
+            for(col=0;col<28; col++)
+            {
+                tile[i*28+col] = copytile(atlas, col * 16, i * 16);
+            }
         }
 
         bb.srcpoint.x = 0;
@@ -416,7 +413,6 @@ char *argv[];
         FormDestroy(atlas);
         atlas = NULL;
     }
-#endif
 
     /* some tiles */
     bb.destform = screen;
@@ -424,7 +420,7 @@ char *argv[];
     /* random playfield */
     for (col = 0; col < MAPWIDTH; col += 8)
     {
-        i = rand()% 25;
+        i = rand() % 25;
         cellmap[i][col + 0] = col / 8;
         cellmap[i][col + 1] = col / 8;
         cellmap[i][col + 2] = col / 8;
@@ -449,18 +445,20 @@ char *argv[];
     pfx = INT2FIX(0);
     pfdir = 256;
 
-#if 1
-    /* initial screen fill */
-    fillscreen(FIX2INT(pfx), 0);
-    fillscreen(FIX2INT(pfx), 512);
-#endif
+    if (argc == 1)
+    {
+        /* initial screen fill */
+        fillscreen(FIX2INT(pfx), 0);
+        fillscreen(FIX2INT(pfx), 512);
+    }
+
     oldrightcol = 0;
 
     /* animate it */
     while(1)
     {
         int fbx, cellx, pixx;
-
+ 
         /* top left coordinate */
         pixx = FIX2INT(pfx);
 
@@ -477,6 +475,13 @@ char *argv[];
         page.y = fbx & 1 ? 512 : 0;
 
         if (argc == 1) SetViewport(&page);
+
+        /* wait for frame flip */
+        waiting = 0;
+        currpage = framenum;
+        while (currpage == framenum)
+            waiting++;
+        currpage = framenum;
 
         /* infoline */
         sprintf(infoline, "framenum(%4.4x) %c pfx(%d) cellx(%d) fbx(%d)", framenum, ((framenum & 15) == 0) ? '*' : ' ', pixx, cellx, fbx);
@@ -536,30 +541,32 @@ char *argv[];
             }
         }
 
-        /* animated sprites at 3.25Hz */
+        /* animated playfield at 3.25Hz */
         if ((framenum & 15) == 0)
         {
             /* TODO: need a way of culling animated sprites based on current view window */
             if (pixx < 100)
             {
-                sprite32(64, page.y + 64, rand() & 7);
-                sprite32(128, page.y + 64, rand() & 7);
+                animated_pf(64, page.y + 64, rand() & 7);
+                animated_pf(128, page.y + 64, rand() & 7);
             }
             if (pixx < 300)
             {
-                sprite32(192, page.y + 64, rand() & 7);
-                sprite32(224, page.y + 128, rand() & 7);
+                animated_pf(192, page.y + 64, rand() & 7);
+                animated_pf(224, page.y + 128, rand() & 7);
             }
         }
 
-        showinfo(infoline);
+        /* animated sprite */
+        /*
+            needs to copy playfield cells to offscreen
+            make a copy of it
+            compose sprite form on top
+            copy composed to playfield        
+        */
 
-        /* wait for frame flip */
-        waiting = 0;
-        currpage = framenum;
-        while (currpage == framenum)
-            waiting++;
-        currpage = framenum;
+
+        showinfo(infoline);
 
         /* scroll */
         pfx += pfdir;
