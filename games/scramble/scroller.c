@@ -11,6 +11,13 @@
 #tstmp
 #endif
 
+/*
+Skip setting srcpoint.xy since its rarely is not 0,0
+
+
+*/
+
+
 #define INT2FIX(A)  ((A)<<8)
 #define FIX2INT(A)  ((A)>>8)
 
@@ -22,7 +29,6 @@ typedef struct
   fixed x,y;
   fixed dx,dy;
 
-  struct FORM *orig_pf;
   struct FORM* composed_pf;
   int oldx,oldy;
 } sprite;
@@ -35,6 +41,9 @@ typedef struct
     unsigned char bits, desc;
 } tgaheader;
 
+extern unsigned char landdat[];
+extern unsigned char landdat2[];
+
 struct FontHeader *font;
 struct FORM *screen;
 struct BBCOM bb;
@@ -44,43 +53,38 @@ struct POINT page;
 unsigned long frametime;
 unsigned int framenum;
 
+#define MAPWIDTH 1024
+#define MAPHEIGHT 29
+unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
+struct FORM* tile[256];
+#define EMPTY 16
+#define FILLED 60
+
+sprite ship;
+int shipx = 64+8;
+int shipy = 64+8;
+
 void sh_timer(sig)
 int sig;
 {
 
-  frametime += 32;
+  frametime += 33;
   framenum++;
 
   signal(sig, sh_timer);
   ESetAlarm(frametime);
 }
 
-void drawsprite(asprite)
-sprite *asprite;
-{
-    /* draw over */
-    bb.srcform = asprite->composed_pf;
-    bb.srcpoint.x = 0;
-    bb.srcpoint.y = 0;
-    bb.destform = screen;
-	bb.destrect.x = FIX2INT(asprite->x);
-    bb.destrect.y = FIX2INT(asprite->y) + (page.y);
-	bb.destrect.w = asprite->form->w;
-    bb.destrect.h = asprite->form->h;
- 	bb.rule = bbSorD;
-	BitBlt(&bb);
-}
-
 void sh_int(sig)
 int sig;
 {
-  struct POINT p;
-  p.x = p.y = 0;
-  SetViewport(&p);
-  ExitGraphics();
-  FontClose(font);
+    struct POINT p;
+    p.x = p.y = 0;
+    SetViewport(&p);
+    ExitGraphics();
+    FontClose(font);
 
-  exit(2);
+    exit(2);
 }
 
 struct FORM* readtga(filename, w, h)
@@ -113,8 +117,8 @@ int* w, * h;
         form = FormCreate(*w, *h);
         if (form)
         {
-            char *dst;
-            int i,stride;
+            char* dst;
+            int i, stride;
 
             dst = form->addr;
             stride = ((*w + 15) & -16) >> 3;
@@ -127,7 +131,7 @@ int* w, * h;
                 stride = -stride;
             }
 
-            for(i=0; i<*h; i++)
+            for (i = 0; i < *h; i++)
             {
                 read(fd, dst, ((*w + 7) >> 3));
                 dst += stride;
@@ -142,37 +146,166 @@ int* w, * h;
     }
     else
     {
-        fprintf(stderr, "FAILED TO OPEN\n");
+        fprintf(stderr, "FAILED TO OPEN: %s\n", filename);
     }
 
     return form;
 }
 
-struct FORM* copytile(atlas, x, y)
-struct FORM *atlas;
-int x,y;
+void draw_bounds(w, h)
+int w, h;
+{
+    struct RECT r;
+
+    bb.rule = bbS;
+    bb.srcform = NULL;
+    bb.halftoneform = &BlackMask;
+    r.x = 1;
+    r.y = 1;
+    r.w = w - 2;
+    r.h = h - 2;
+    RectBoxDrawX(&r, 1, &bb);
+}
+
+void drawform(aform, x, y)
+struct FORM* aform;
+int x, y;
+{
+    struct RECT r;
+
+    /* show it */
+    bb.rule = bbS;
+    bb.srcform = aform;
+    bb.destform = screen;
+    bb.destrect.x = x;
+    bb.destrect.y = y;
+    bb.destrect.w = aform->w;
+    bb.destrect.h = aform->h;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+    draw_bounds(aform->w, aform->h);
+}
+
+void draw_tile(x, y, tileid)
+int x, y;
+int tileid;
+{
+
+    bb.srcform = tile[tileid];
+    bb.destrect.x = x;
+    bb.destrect.y = y;
+    bb.destrect.w = 16;
+    bb.destrect.h = 16;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+}
+
+struct FORM* cache_tile(atlas, x, y)
+struct FORM* atlas;
+int x, y;
 {
     struct FORM* tile;
 
     tile = FormCreate(16, 16);
     if (tile)
     {
+        bb.rule = bbS;
+        bb.srcform = atlas;
+        bb.srcpoint.x = x;
+        bb.srcpoint.y = y;
         bb.destform = tile;
         bb.destrect.x = 0;
         bb.destrect.y = 0;
         bb.destrect.w = 16;
         bb.destrect.h = 16;
-        bb.rule = bbS;
         bb.halftoneform = NULL;
-        bb.srcform = atlas;
-        bb.srcpoint.x = x;
-        bb.srcpoint.y = y;
         BitBlt(&bb);
     }
 
     return tile;
 }
 
+
+void drawsprite(asprite)
+sprite *asprite;
+{
+    /* draw over */
+    bb.rule = bbSorD;
+    bb.srcform = asprite->composed_pf;
+    bb.destform = screen;
+	bb.destrect.x = FIX2INT(asprite->x);
+    bb.destrect.y = FIX2INT(asprite->y) + (page.y);
+	bb.destrect.w = asprite->form->w;
+    bb.destrect.h = asprite->form->h;
+	BitBlt(&bb);
+}
+
+void makeship(asprite,w,h)
+sprite* asprite;
+int w,h;
+{
+    struct POINT origin;
+    struct RECT r;
+    int cw,ch;
+
+    asprite->form = FormCreate(w,h);
+
+    /* make some shape to show */
+    bb.rule = bbS;
+    bb.srcform = NULL;
+    bb.destform = asprite->form;
+    bb.destrect.x = 0;
+    bb.destrect.y = 0;
+    bb.destrect.w = w;
+    bb.destrect.h = h;
+    bb.halftoneform = &WhiteMask;
+    r.x = r.y = 0;
+    r.w = w;
+    r.h = h;
+    RectDrawX(&r, &bb);
+
+    draw_tile(0, 0, 10);
+    draw_tile(16, 0, 11);
+
+    draw_bounds(w, h);
+
+    /* we need to be larger enough to include the cells behind */
+    cw = 16 + ((w + 15) & -16);
+    ch = 16 + ((h + 15) & -16);
+    asprite->composed_pf = FormCreate(cw,ch);
+    printf("compose_pf: %d %d\n", cw, ch);
+
+    asprite->oldx = asprite->oldy = -1;
+}
+
+void draw_cell(x, y, cellx, celly)
+int x, y;
+int cellx,celly;
+{
+    short tileid = cellmap[celly][cellx];
+
+    bb.destrect.x = x;
+    bb.destrect.y = y;
+    bb.destrect.w = 16;
+    bb.destrect.h = 16;
+    bb.halftoneform = NULL;
+
+    /* fastpath for blank */
+    if (tileid == EMPTY)
+    {
+        /* FIXME: have a ready-to-use bb */
+        bb.rule = bbZero;
+        bb.srcform = NULL;
+        BitBlt(&bb);
+        bb.rule = bbS;
+    }
+    else
+    {
+        bb.srcform = tile[tileid];
+        BitBlt(&bb);
+    }
+}
 
 struct FORM *maketile(name)
 char *name;
@@ -181,34 +314,24 @@ char *name;
   struct POINT origin;
   struct RECT r;
 
+    bb.rule = bbS;
     tile = FormCreate(16, 16);
     bb.destform = tile;
-    bb.rule = bbS;
     bb.halftoneform = &WhiteMask;
     r.x = r.y = 0;
     r.w = tile->w;
     r.h = tile->h;
     RectDrawX(&r, &bb);
 
-    bb.rule = bbS;
     bb.halftoneform = NULL;
     origin.x = 0;
     origin.y = font->maps->baseline;
     StringDrawX(name, &origin, &bb, font);
 
-    bb.halftoneform = &BlackMask;
-    r.x = r.y = 1;
-    r.w = tile->w - 2;
-    r.h = tile->h - 2;
-    RectBoxDrawX(&r, 1, &bb);
+    draw_bounds(tile->w, tile->h);
 
     return tile;
 }
-
-#define MAPWIDTH 1024
-#define MAPHEIGHT 28
-unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
-struct FORM* tile[96];
 
 void fillcol(x,y,cellx)
 int x,y;
@@ -217,17 +340,17 @@ int cellx;
     register unsigned char *cellcol;
     short i;
 
-    bb.halftoneform = NULL;
     bb.destrect.x = x;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
+    bb.halftoneform = NULL;
 
     cellcol = (unsigned char *)cellmap + cellx;
     for (i = 0; i < MAPHEIGHT; i++)
     {
         /* fastpath for blank */
-        if (*cellcol == 0)
+        if (*cellcol == EMPTY)
         {
             /* FIXME: have a ready-to-use bb */
             bb.rule = bbZero;
@@ -237,10 +360,12 @@ int cellx;
         }
         else
         {
-            bb.srcform = tile[(*cellcol) & 127];
+            bb.srcform = tile[(*cellcol)];
             BitBlt(&bb);
         }
         bb.destrect.y += 16;
+
+        /* stride to next row */
         cellcol += MAPWIDTH;
     }
 }
@@ -250,12 +375,12 @@ int x, y;
 int cell;
 {
 
-    bb.halftoneform = NULL;
+    bb.srcform = tile[cell];
     bb.destrect.x = x;
     bb.destrect.y = y;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
-    bb.srcform = tile[cell];
+    bb.halftoneform = NULL;
     BitBlt(&bb);
     bb.destrect.x += 16;
     BitBlt(&bb);
@@ -291,6 +416,8 @@ char *buffer;
 {
     struct POINT origin;
 
+    return;
+
     /* avoid wrapping text */
     bb.destrect.x = 0;
     bb.destrect.y = 0;
@@ -302,6 +429,125 @@ char *buffer;
     StringDrawX(buffer, &origin, &bb, font);
 }
 
+struct groundslice
+{
+    unsigned char dist0, tile0;
+    unsigned char dist1, tile1;
+    unsigned char hasceiling;
+    unsigned char objectid;
+};
+
+/* struct padding means its simpler to just cast to a different struct */
+struct ceilingslice
+{
+    unsigned char dist0, tile0;
+    unsigned char dist1, tile1;
+    unsigned char dist2, tile2;
+    unsigned char dist3, tile3;
+};
+
+/* distances include topline scoreline etc */
+#define DIST2CELL(A)  ((A>>3) - 2)
+
+decode(ptr, endptr)
+struct groundslice* ptr;
+char* endptr;
+{
+    int i,h,y0,y1,objid;
+
+    /* lowest */
+    for (i = 0; i < 30; i++)
+    {
+        cellmap[MAPHEIGHT - 7][i] = 55;
+        cellmap[MAPHEIGHT - 6][i] = FILLED;
+        cellmap[MAPHEIGHT - 5][i] = FILLED;
+        cellmap[MAPHEIGHT - 4][i] = FILLED;
+        cellmap[MAPHEIGHT - 3][i] = FILLED;
+        cellmap[MAPHEIGHT - 2][i] = FILLED;
+        cellmap[MAPHEIGHT - 1][i] = FILLED;
+    }
+
+    while (ptr < endptr)
+    {
+        /* ground level */
+        h = DIST2CELL(ptr->dist0);
+
+        if (h > MAPHEIGHT)
+        {
+            printf("too high: %d\n", h);
+        }
+
+        /* surface objects */
+        objid = ptr->objectid;
+        if (objid && !ptr->hasceiling)
+        {
+            switch (objid)
+            {
+            case 1:
+                cellmap[h - 1][i + 1] = 113;
+                cellmap[h - 2][i + 1] = 112;
+                cellmap[h - 1][i] = 115;
+                cellmap[h - 2][i] = 114;
+                break;
+            case 2:
+                cellmap[h - 1][i] = 67;
+                cellmap[h - 2][i] = 66;
+                cellmap[h - 1][i + 1] = 65;
+                cellmap[h - 2][i + 1] = 64;
+                break;
+            case 4:
+                cellmap[h - 1][i + 1] = 125;
+                cellmap[h - 2][i + 1] = 124;
+                cellmap[h - 1][i] = 127;
+                cellmap[h - 2][i] = 126;
+                break;
+            default:
+                cellmap[h - 1][i + 1] = 206;
+                cellmap[h - 2][i + 1] = 207;
+                cellmap[h - 1][i] = 204;
+                cellmap[h - 2][i] = 205;
+                break;
+            }
+        }
+
+        cellmap[h][i] = ptr->tile0;
+        while (++h < MAPHEIGHT) {
+            cellmap[h][i] = FILLED;
+        };
+
+        h = DIST2CELL(ptr->dist1);
+        cellmap[h][i + 1] = ptr->tile1;
+        while (++h < MAPHEIGHT) {
+            cellmap[h][i + 1] = FILLED;
+        };
+
+        if (ptr->hasceiling)
+        {
+            struct ceilingslice *ceiling = (struct ceilingslice *)ptr;
+
+            h = DIST2CELL(ceiling->dist2);
+            cellmap[h][i] = ceiling->tile2;
+            while (--h > 0) {
+                cellmap[h][i] = FILLED;
+            };
+            h = DIST2CELL(ceiling->dist3);
+            cellmap[h][i + 1] = ceiling->tile3;
+            while (--h > 0) {
+                cellmap[h][i + 1] = FILLED;
+            };
+
+            /* struct padding makes this 10 bytes.. */
+            ptr = (struct groundslice*)((char *)ceiling + 9);
+        }
+        else
+        {
+            ptr++;
+        }
+
+        /* 2 cells per slice */
+        i += 2;
+    }
+}
 
 int *mapped_fpu;
 unsigned int oldwaiting[2];
@@ -337,9 +583,7 @@ char *argv[];
     lseek(pmem_fd, shared_page1, SEEK_SET);
     write(pmem_fd, &kernelmem, 4);
 
-
-
-    screen = InitGraphics(FALSE);
+    screen = InitGraphics(argc == 1 ? TRUE : FALSE);
 
     font = FontOpen("/fonts/PellucidaSans-Serif10.font");
     fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
@@ -352,6 +596,7 @@ char *argv[];
     frametime = EGetTime() + 500;
     framenum = 0;
     ESetAlarm(frametime);
+    printf("ESetAlarm(%d)\n", frametime);
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -371,41 +616,19 @@ char *argv[];
     bb.cliprect.w = 1024;
     bb.cliprect.h = 1024;
 
-    tile[0] = maketile("00");
-    tile[1] = maketile("1 ");
-    tile[2] = maketile("2 ");
-    tile[3] = maketile("3 ");
-    tile[4] = maketile("4 ");
-    tile[5] = maketile("5 ");
-    tile[6] = maketile("6 ");
-    tile[7] = maketile("7 ");
-
     /* read sprite atlas */
     atlas = readtga("scramble_tiles.tga", &aw, &ah);
     if (atlas)
     {
-        /* show it */
-        bb.destform = screen;
-        bb.destrect.x = 64;
-        bb.destrect.y = 64;
-        bb.destrect.w = 448;
-        bb.destrect.h = 160;
-        bb.rule = bbS;
-        bb.halftoneform = NULL;
-        bb.srcform = atlas;
-        bb.srcpoint.x = 0;
-        bb.srcpoint.y = 0;
-        BitBlt(&bb);
-
         /* extract into sprites */
-        for(i=0; i<3; i++)
+        for(i=0; i<9; i++)
         {
             for(col=0;col<28; col++)
             {
-                tile[i*28+col] = copytile(atlas, col * 16, i * 16);
+                tile[i*28+col] = cache_tile(atlas, col * 16, i * 16);
             }
         }
-
+        /* reset to 0,0 so we dont need to set it in general use */
         bb.srcpoint.x = 0;
         bb.srcpoint.y = 0;
 
@@ -413,43 +636,45 @@ char *argv[];
         FormDestroy(atlas);
         atlas = NULL;
     }
-
-    /* some tiles */
-    bb.destform = screen;
-
-    /* random playfield */
-    for (col = 0; col < MAPWIDTH; col += 8)
+    else
     {
-        i = rand() % 25;
-        cellmap[i][col + 0] = col / 8;
-        cellmap[i][col + 1] = col / 8;
-        cellmap[i][col + 2] = col / 8;
-        cellmap[i][col + 3] = col / 8;
-        i++;
-        cellmap[i][col + 0] = col / 8;
-        cellmap[i][col + 1] = rand();
-        cellmap[i][col + 2] = rand();
-        cellmap[i][col + 3] = col / 8;
-        i++;
-        cellmap[i][col + 0] = col / 8;
-        cellmap[i][col + 1] = col / 8;
-        cellmap[i][col + 2] = col / 8;
-        cellmap[i][col + 3] = col / 8;
+        fprintf(stderr, "cannot create atlas\n");
+        exit(-1);
     }
-    for(i=0; i<64; i++)
-    {
-        cellmap[0][i] = i;
-    }
+
+
+#if 1
+    /* make ship */
+    shipx = 20 * 16;
+    shipy = 23 * 16;
+    makeship(&ship, 32, 32);
+
+    drawform(ship.form, 0, 0);
+#endif
+
+    /* some landscape */
+    memset(cellmap, EMPTY, sizeof(cellmap));
+    decode((struct groundslice *)landdat, landdat2 - 10);
+
+#if 0
+    /* 82ms per call! */
+    for (i = 0; i < 30; i++)
+        printf("ms = %d\n", EGetTime());
+#endif
 
     /* playfield start position */
     pfx = INT2FIX(0);
-    pfdir = 256;
+    pfdir = INT2FIX(2);
 
     if (argc == 1)
     {
         /* initial screen fill */
         fillscreen(FIX2INT(pfx), 0);
         fillscreen(FIX2INT(pfx), 512);
+    }
+    else
+    {
+        pfdir = 0;
     }
 
     oldrightcol = 0;
@@ -499,16 +724,15 @@ char *argv[];
                 fillcol(col << 4, page.y, cellx + 40);
 
                 /* fill on next page too */
-                col = (page.x - 1) >> 4;
+                col = (page.x ) >> 4;
                 if (col >= 0)
                 {
-                    /* cellx is for x==0, we are 1 cell before */
-                    fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 - 1);
+                    fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 );
 
                     /* the region that overlaps far left and far right scroll window position also needs filling */
                     if (col < 16)
                     {
-                        fillcol((col << 4), page.y ^ 512, cellx + 24 - 1);
+                        fillcol((col << 4), page.y ^ 512, cellx + 24 );
                     }
                 }
             }
@@ -541,6 +765,7 @@ char *argv[];
             }
         }
 
+#if 0
         /* animated playfield at 3.25Hz */
         if ((framenum & 15) == 0)
         {
@@ -550,20 +775,104 @@ char *argv[];
                 animated_pf(64, page.y + 64, rand() & 7);
                 animated_pf(128, page.y + 64, rand() & 7);
             }
+            else
             if (pixx < 300)
             {
                 animated_pf(192, page.y + 64, rand() & 7);
                 animated_pf(224, page.y + 128, rand() & 7);
             }
         }
-
+#endif
         /* animated sprite */
         /*
-            needs to copy playfield cells to offscreen
+            needs to copy playfield cells to offscreen (could use cellmap)
             make a copy of it
             compose sprite form on top
             copy composed to playfield        
         */
+
+#if 1
+        {
+            int cx, cy;
+            struct POINT p;
+
+            GetMPosition(&p);
+            p.x &= -2;
+            if (GetButtons() & M_LEFT)
+            {
+                shipx = p.x - page.x ;
+                shipy = p.y - page.y ;
+            }
+
+            /* restore old playfield */
+            if (ship.oldx >= 0)
+            {
+                bb.rule = bbS;
+                bb.srcform = ship.composed_pf;
+                bb.destform = screen;
+                bb.destrect.x = ship.oldx;
+                bb.destrect.y = ship.oldy;
+                bb.destrect.w = ship.composed_pf->w;
+                bb.destrect.h = ship.composed_pf->h;
+                bb.halftoneform = NULL;
+                BitBlt(&bb);
+
+                bb.destrect.x = 0;
+                bb.destrect.y = 0;
+                BitBlt(&bb);
+
+
+                ship.oldx = -1;
+                ship.oldy = -1;
+            }
+
+
+            /* build background */
+            bb.destform = ship.composed_pf;
+            bb.rule = bbS;
+            cx = cellx + ((shipx) >> 4);
+            cy = ((shipy) >> 4);
+
+            draw_cell(0, 0,  cx,   cy);
+            draw_cell(16, 0, cx+1, cy);
+            draw_cell(32, 0, cx+2, cy);
+            draw_cell(0, 16,  cx,   cy+1);
+            draw_cell(16, 16, cx+1, cy+1);
+            draw_cell(32, 16, cx+2, cy+1);
+            draw_cell(0, 32,  cx,     cy+2);
+            draw_cell(16, 32, cx + 1, cy+2);
+            draw_cell(32, 32, cx + 2, cy+2);
+
+            /* compose ship */
+            bb.rule = bbSorD;
+            bb.srcform = ship.form;
+            bb.destform = ship.composed_pf;
+            bb.destrect.x = shipx & 15;
+            bb.destrect.y = shipy & 15;
+            bb.destrect.w = ship.form->w;
+            bb.destrect.h = ship.form->h;
+            bb.halftoneform = NULL;
+            BitBlt(&bb);
+
+            /* show bounds */
+            draw_bounds(ship.composed_pf->w, ship.composed_pf->h);
+
+            /* copy to active display */
+            bb.rule = bbS;
+            bb.srcform = ship.composed_pf;
+            ship.oldx = page.x + (shipx & -16);
+            ship.oldy = page.y + (shipy & -16);
+            bb.destform = screen;
+            bb.destrect.x = ship.oldx;
+            bb.destrect.y = ship.oldy;
+            bb.destrect.w = ship.composed_pf->w;
+            bb.destrect.h = ship.composed_pf->h;
+            bb.halftoneform = NULL;
+/*            BitBlt(&bb);
+*/
+
+        }
+#endif
 
 
         showinfo(infoline);
