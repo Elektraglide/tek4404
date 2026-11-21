@@ -17,6 +17,7 @@ Skip setting srcpoint.xy since its rarely is not 0,0
 
 */
 
+#define PIX2CELL(A) ((A)>>4)
 
 #define INT2FIX(A)  ((A)<<8)
 #define FIX2INT(A)  ((A)>>8)
@@ -29,6 +30,7 @@ typedef struct
   fixed x,y;
   fixed dx,dy;
 
+  struct FORM* cached_pf;
   struct FORM* composed_pf;
   int oldx,oldy;
 } sprite;
@@ -273,6 +275,7 @@ int w,h;
     /* we need to be larger enough to include the cells behind */
     cw = 16 + ((w + 15) & -16);
     ch = 16 + ((h + 15) & -16);
+    asprite->cached_pf = FormCreate(cw, ch);
     asprite->composed_pf = FormCreate(cw,ch);
     printf("compose_pf: %d %d\n", cw, ch);
 
@@ -396,7 +399,7 @@ int pixx,y;
     int i, pagex, fbx, cellx;
 
     /* which cell are we starting on */
-    cellx = pixx >> 4;
+    cellx = PIX2CELL(pixx);
 
     /* which framebuffer window are we in? */
     fbx = pixx / 384;
@@ -410,6 +413,86 @@ int pixx,y;
         fillcol(pagex + (i << 4), y, cellx + i);
     }
 }
+
+/* cache playfield behind */
+void compose_sprite(asprite, cellx)
+sprite* asprite;
+int cellx;
+{
+    int cx, cy;
+
+    /* restore old playfield */
+    if (asprite->oldx >= 0)
+    {
+        bb.rule = bbS;
+        bb.srcform = asprite->cached_pf;
+        bb.destform = screen;
+        bb.destrect.x = asprite->oldx;
+        bb.destrect.y = asprite->oldy;
+        bb.destrect.w = asprite->cached_pf->w;
+        bb.destrect.h = asprite->cached_pf->h;
+        bb.halftoneform = NULL;
+        BitBlt(&bb);
+
+        bb.destrect.x = 0;
+        bb.destrect.y = 0;
+        BitBlt(&bb);
+
+        asprite->oldx = -1;
+        asprite->oldy = -1;
+    }
+
+
+    /* build background from playfield we're over */
+    bb.destform = asprite->cached_pf;
+    bb.rule = bbS;
+    cx = cellx + (PIX2CELL(shipx));
+    cy = PIX2CELL(shipy);
+
+    draw_cell(0, 0, cx, cy);
+    draw_cell(16, 0, cx + 1, cy);
+    draw_cell(32, 0, cx + 2, cy);
+    draw_cell(0, 16, cx, cy + 1);
+    draw_cell(16, 16, cx + 1, cy + 1);
+    draw_cell(32, 16, cx + 2, cy + 1);
+#if 1
+    draw_cell(0, 32, cx, cy + 2);
+    draw_cell(16, 32, cx + 1, cy + 2);
+    draw_cell(32, 32, cx + 2, cy + 2);
+#endif
+
+    /* fast copy bits */
+    memcpy(asprite->composed_pf->addr, asprite->cached_pf->addr, asprite->cached_pf->w * asprite->cached_pf->h >> 3);
+
+    /* compose ship */
+    bb.rule = bbSorD;
+    bb.srcform = asprite->form;
+    bb.destform = asprite->composed_pf;
+    bb.destrect.x = shipx & 15;
+    bb.destrect.y = shipy & 15;
+    bb.destrect.w = asprite->form->w;
+    bb.destrect.h = asprite->form->h;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+
+    /* show bounds */
+    draw_bounds(asprite->composed_pf->w, asprite->composed_pf->h);
+
+    /* copy to active display */
+    bb.rule = bbS;
+    bb.srcform = asprite->composed_pf;
+    asprite->oldx = page.x + (shipx & -16);
+    asprite->oldy = page.y + (shipy & -16);
+    bb.destform = screen;
+    bb.destrect.x = asprite->oldx;
+    bb.destrect.y = asprite->oldy;
+    bb.destrect.w = asprite->composed_pf->w;
+    bb.destrect.h = asprite->composed_pf->h;
+    bb.halftoneform = NULL;
+    BitBlt(&bb);
+}
+
+
 
 void showinfo(buffer)
 char *buffer;
@@ -501,6 +584,7 @@ char* endptr;
                 cellmap[h - 1][i] = 127;
                 cellmap[h - 2][i] = 126;
                 break;
+            case 8:
             default:
                 cellmap[h - 1][i + 1] = 206;
                 cellmap[h - 2][i + 1] = 207;
@@ -645,8 +729,8 @@ char *argv[];
 
 #if 1
     /* make ship */
-    shipx = 20 * 16;
-    shipy = 23 * 16;
+    shipx = 200;
+    shipy = 128;
     makeship(&ship, 32, 32);
 
     drawform(ship.form, 0, 0);
@@ -655,12 +739,6 @@ char *argv[];
     /* some landscape */
     memset(cellmap, EMPTY, sizeof(cellmap));
     decode((struct groundslice *)landdat, landdat2 - 10);
-
-#if 0
-    /* 82ms per call! */
-    for (i = 0; i < 30; i++)
-        printf("ms = %d\n", EGetTime());
-#endif
 
     /* playfield start position */
     pfx = INT2FIX(0);
@@ -672,10 +750,12 @@ char *argv[];
         fillscreen(FIX2INT(pfx), 0);
         fillscreen(FIX2INT(pfx), 512);
     }
+#if 0
     else
     {
         pfdir = 0;
     }
+#endif
 
     oldrightcol = 0;
 
@@ -688,7 +768,7 @@ char *argv[];
         pixx = FIX2INT(pfx);
 
         /* which cell are we starting on */
-        cellx = pixx >> 4;
+        cellx = PIX2CELL(pixx);
 
         /* which framebuffer window are we in? */
         fbx = pixx / 384;
@@ -708,13 +788,15 @@ char *argv[];
             waiting++;
         currpage = framenum;
 
+#ifdef DEBUG
         /* infoline */
         sprintf(infoline, "framenum(%4.4x) %c pfx(%d) cellx(%d) fbx(%d)", framenum, ((framenum & 15) == 0) ? '*' : ' ', pixx, cellx, fbx);
+#endif
 
         if (pfdir >= 0)
         {
             /* has leading edge column changed? render a new column */
-            col = (page.x + 640) >> 4;
+            col = PIX2CELL(page.x + 640);
             if (col != oldrightcol)
             {
                 oldrightcol = col;
@@ -724,7 +806,7 @@ char *argv[];
                 fillcol(col << 4, page.y, cellx + 40);
 
                 /* fill on next page too */
-                col = (page.x ) >> 4;
+                col = PIX2CELL(page.x);
                 if (col >= 0)
                 {
                     fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 );
@@ -740,7 +822,7 @@ char *argv[];
         else /* reverse direction */
         {
             /* has leading edge column changed? render a new column */
-            col = (page.x - 1) >> 4;
+            col = PIX2CELL(page.x);
             if (col != oldrightcol)
             {
                 oldrightcol = col;
@@ -750,7 +832,7 @@ char *argv[];
                 fillcol(col << 4, page.y, cellx - 1);
 
                 /* fill on next page too */
-                col = (page.x + 40) >> 4;
+                col = PIX2CELL(page.x + 40);
                 if (col >= 0)
                 {
                     /* cellx is for x==0, we are 1 cell before */
@@ -783,100 +865,29 @@ char *argv[];
             }
         }
 #endif
-        /* animated sprite */
-        /*
-            needs to copy playfield cells to offscreen (could use cellmap)
-            make a copy of it
-            compose sprite form on top
-            copy composed to playfield        
-        */
 
-#if 1
         {
-            int cx, cy;
             struct POINT p;
 
             GetMPosition(&p);
             p.x &= -2;
+            p.x -= page.x;
+            p.y -= page.y;
             if (GetButtons() & M_LEFT)
             {
-                shipx = p.x - page.x ;
-                shipy = p.y - page.y ;
+                if (shipx != p.x || shipy != p.y)
+                {
+                    shipx = p.x;
+                    shipy = p.y;
+                }
             }
-
-            /* restore old playfield */
-            if (ship.oldx >= 0)
-            {
-                bb.rule = bbS;
-                bb.srcform = ship.composed_pf;
-                bb.destform = screen;
-                bb.destrect.x = ship.oldx;
-                bb.destrect.y = ship.oldy;
-                bb.destrect.w = ship.composed_pf->w;
-                bb.destrect.h = ship.composed_pf->h;
-                bb.halftoneform = NULL;
-                BitBlt(&bb);
-
-                bb.destrect.x = 0;
-                bb.destrect.y = 0;
-                BitBlt(&bb);
-
-
-                ship.oldx = -1;
-                ship.oldy = -1;
-            }
-
-
-            /* build background */
-            bb.destform = ship.composed_pf;
-            bb.rule = bbS;
-            cx = cellx + ((shipx) >> 4);
-            cy = ((shipy) >> 4);
-
-            draw_cell(0, 0,  cx,   cy);
-            draw_cell(16, 0, cx+1, cy);
-            draw_cell(32, 0, cx+2, cy);
-            draw_cell(0, 16,  cx,   cy+1);
-            draw_cell(16, 16, cx+1, cy+1);
-            draw_cell(32, 16, cx+2, cy+1);
-            draw_cell(0, 32,  cx,     cy+2);
-            draw_cell(16, 32, cx + 1, cy+2);
-            draw_cell(32, 32, cx + 2, cy+2);
-
-            /* compose ship */
-            bb.rule = bbSorD;
-            bb.srcform = ship.form;
-            bb.destform = ship.composed_pf;
-            bb.destrect.x = shipx & 15;
-            bb.destrect.y = shipy & 15;
-            bb.destrect.w = ship.form->w;
-            bb.destrect.h = ship.form->h;
-            bb.halftoneform = NULL;
-            BitBlt(&bb);
-
-            /* show bounds */
-            draw_bounds(ship.composed_pf->w, ship.composed_pf->h);
-
-            /* copy to active display */
-            bb.rule = bbS;
-            bb.srcform = ship.composed_pf;
-            ship.oldx = page.x + (shipx & -16);
-            ship.oldy = page.y + (shipy & -16);
-            bb.destform = screen;
-            bb.destrect.x = ship.oldx;
-            bb.destrect.y = ship.oldy;
-            bb.destrect.w = ship.composed_pf->w;
-            bb.destrect.h = ship.composed_pf->h;
-            bb.halftoneform = NULL;
-/*            BitBlt(&bb);
-*/
-
         }
-#endif
-
+#if 0
+        /* animated sprite */
+        compose_sprite(&ship, cellx);
 
         showinfo(infoline);
-
+#endif
         /* scroll */
         pfx += pfdir;
     }
