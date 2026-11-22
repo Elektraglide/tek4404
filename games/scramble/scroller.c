@@ -30,6 +30,7 @@ typedef struct
   fixed x,y;
   fixed dx,dy;
 
+  short cx, cy;
   struct FORM* cached_pf;
   struct FORM* composed_pf;
   int oldx,oldy;
@@ -70,7 +71,7 @@ void sh_timer(sig)
 int sig;
 {
 
-  frametime += 33;
+  frametime += 17;
   framenum++;
 
   signal(sig, sh_timer);
@@ -419,10 +420,13 @@ void compose_sprite(asprite, cellx)
 sprite* asprite;
 int cellx;
 {
-    int cx, cy;
+    int cx, cy, rule;
 
-    /* restore old playfield */
-    if (asprite->oldx >= 0)
+    cx = cellx + (PIX2CELL(shipx));
+    cy = PIX2CELL(shipy);
+
+    /* restore old playfield if we've moved */
+    if (PIX2CELL(asprite->oldx) != cx || PIX2CELL(asprite->oldy) != cy)
     {
         bb.rule = bbS;
         bb.srcform = asprite->cached_pf;
@@ -442,30 +446,33 @@ int cellx;
         asprite->oldy = -1;
     }
 
+    /* build background from playfield we're over if we dont have it */
+    rule = bbSorD;
+    if (asprite->cx != cx || asprite->cy != cy)
+    {
+        bb.destform = asprite->cached_pf;
+        bb.rule = bbS;
 
-    /* build background from playfield we're over */
-    bb.destform = asprite->cached_pf;
-    bb.rule = bbS;
-    cx = cellx + (PIX2CELL(shipx));
-    cy = PIX2CELL(shipy);
+        draw_cell(0, 0, cx, cy);
+        draw_cell(16, 0, cx + 1, cy);
+        draw_cell(32, 0, cx + 2, cy);
+        draw_cell(0, 16, cx, cy + 1);
+        draw_cell(16, 16, cx + 1, cy + 1);
+        draw_cell(32, 16, cx + 2, cy + 1);
+        draw_cell(0, 32, cx, cy + 2);
+        draw_cell(16, 32, cx + 1, cy + 2);
+        draw_cell(32, 32, cx + 2, cy + 2);
 
-    draw_cell(0, 0, cx, cy);
-    draw_cell(16, 0, cx + 1, cy);
-    draw_cell(32, 0, cx + 2, cy);
-    draw_cell(0, 16, cx, cy + 1);
-    draw_cell(16, 16, cx + 1, cy + 1);
-    draw_cell(32, 16, cx + 2, cy + 1);
-#if 1
-    draw_cell(0, 32, cx, cy + 2);
-    draw_cell(16, 32, cx + 1, cy + 2);
-    draw_cell(32, 32, cx + 2, cy + 2);
-#endif
+        asprite->cx = cx;
+        asprite->cy = cy;
+        rule = bbSnorD;
+    }
 
     /* fast copy bits */
     memcpy(asprite->composed_pf->addr, asprite->cached_pf->addr, asprite->cached_pf->w * asprite->cached_pf->h >> 3);
 
     /* compose ship */
-    bb.rule = bbSorD;
+    bb.rule = rule;
     bb.srcform = asprite->form;
     bb.destform = asprite->composed_pf;
     bb.destrect.x = shipx & 15;
@@ -750,7 +757,7 @@ char *argv[];
         fillscreen(FIX2INT(pfx), 0);
         fillscreen(FIX2INT(pfx), 512);
     }
-#if 0
+#if 1
     else
     {
         pfdir = 0;
@@ -882,12 +889,14 @@ char *argv[];
                 }
             }
         }
-#if 0
+
         /* animated sprite */
         compose_sprite(&ship, cellx);
 
+#ifdef DEBUBG
         showinfo(infoline);
 #endif
+
         /* scroll */
         pfx += pfdir;
     }
