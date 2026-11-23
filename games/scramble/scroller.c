@@ -704,7 +704,7 @@ char *argv[];
     signal(SIGMILLI, sh_timer);
 
     /* 120 second watchdog armed */
-    signal(SIGALRM, sh_timer);
+    signal(SIGALRM, sh_int);
     alarm(120);
 
     /* map kernel variables into our space */
