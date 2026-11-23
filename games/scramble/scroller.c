@@ -826,7 +826,7 @@ char *argv[];
     oldrightcol = 0;
 
     /* animate it */
-    while(pfx < INT2FIX(MAPWIDTH << 4)))
+    while(1)
     {
         int fbx, cellx, pixx;
  
