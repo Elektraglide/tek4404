@@ -62,6 +62,8 @@ unsigned char* tenthptr;
 #define MAPWIDTH 1024
 #define MAPHEIGHT 29
 unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
+#define DRAWHEIGHT 24
+unsigned char* drawmap;  /* offset to bottom of map to reduce draw time */
 struct FORM* tile[256];
 #define EMPTY 16
 #define FILLED 60
@@ -382,8 +384,8 @@ int cellx;
     bb.destrect.h = 16;
     bb.halftoneform = NULL;
 
-    cellcol = (unsigned char *)cellmap + cellx;
-    for (i = 0; i < MAPHEIGHT; i++)
+    cellcol = (unsigned char *)drawmap + cellx;
+    for (i = 0; i < DRAWHEIGHT; i++)
     {
         /* fastpath for blank */
         if (*cellcol == EMPTY)
@@ -469,11 +471,11 @@ int cellx;
         bb.destrect.h = asprite->cached_pf->h;
         bb.halftoneform = NULL;
         BitBlt(&bb);
-
+#ifdef DEBUG
         bb.destrect.x = 0;
         bb.destrect.y = 0;
         BitBlt(&bb);
-
+#endif
         asprite->oldx = -1;
         asprite->oldy = -1;
     }
@@ -482,8 +484,8 @@ int cellx;
     rule = bbSorD;
     if (asprite->cx != cx || asprite->cy != cy)
     {
-        bb.destform = asprite->cached_pf;
         bb.rule = bbS;
+        bb.destform = asprite->cached_pf;
 
         draw_cell(0, 0, cx, cy);
         draw_cell(16, 0, cx + 1, cy);
@@ -520,10 +522,10 @@ int cellx;
     draw_bounds(asprite->composed_pf->w, asprite->composed_pf->h);
 
     /* copy to active display */
-    bb.rule = bbS;
-    bb.srcform = asprite->composed_pf;
     asprite->oldx = page.x + (shipx & -16);
     asprite->oldy = page.y + (shipy & -16);
+    bb.rule = bbS;
+    bb.srcform = asprite->composed_pf;
     bb.destform = screen;
     bb.destrect.x = asprite->oldx;
     bb.destrect.y = asprite->oldy;
@@ -789,6 +791,9 @@ char *argv[];
     memset(cellmap, EMPTY, sizeof(cellmap));
     decode((struct groundslice *)landdat, landdat2 - 10);
 
+    /* dont draw full MAPHEIGHT, cache from where we draw map */
+    drawmap = cellmap + (MAPHEIGHT - DRAWHEIGHT) * MAPWIDTH;
+
     /* playfield start position */
     pfx = INT2FIX(0);
     pfdir = INT2FIX(2);
@@ -916,8 +921,6 @@ char *argv[];
 
             GetMPosition(&p);
             p.x &= -2;
-            p.x -= page.x;
-            p.y -= page.y;
             if (GetButtons() & M_LEFT)
             {
                 if (shipx != p.x || shipy != p.y)
