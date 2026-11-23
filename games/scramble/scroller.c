@@ -55,6 +55,9 @@ int scrolldir = 1;
 struct POINT page;
 unsigned long frametime;
 unsigned int framenum;
+unsigned char* kernelptr;
+unsigned char* displaystateptr;
+unsigned char* tenthptr;
 
 #define MAPWIDTH 1024
 #define MAPHEIGHT 29
@@ -67,11 +70,33 @@ sprite ship;
 int shipx = 64+8;
 int shipy = 64+8;
 
+unsigned int times[32];
+unsigned int tindex = 0;
+
+void wait_vblank()
+{
+    register unsigned char* ptr = tenthptr;
+    unsigned char old;
+    unsigned int currpage, waiting;
+
+    /* COARSE: wait for SIGMILLI at 33ms (early for a 33.3ms framerate) */
+    waiting = 0;
+    currpage = framenum;
+    while (currpage == framenum)
+        waiting++;
+
+    /* FINE: wait for a vblank to tick over tenthsec counter */
+    old = *ptr;
+    while (old == *ptr);
+
+    /* store last timings for reporting */
+    times[++tindex & 31] = EGetTime();
+}
+
 void sh_timer(sig)
 int sig;
 {
-
-  frametime += 17;
+  frametime = EGetTime() + 33;
   framenum++;
 
   signal(sig, sh_timer);
@@ -82,10 +107,15 @@ void sh_int(sig)
 int sig;
 {
     struct POINT p;
+    int i;
+
     p.x = p.y = 0;
     SetViewport(&p);
     ExitGraphics();
     FontClose(font);
+
+    for (i = 1; i < 32; i++)
+        printf("[%2d]: %d\n", i, times[i] - times[i-1]);
 
     exit(2);
 }
@@ -654,7 +684,6 @@ char *argv[];
     fixed pfx,pfdir;
     struct POINT origin,p2;
     struct RECT r;
-    unsigned int currpage,waiting;
     float angle;
     char infoline[64];
     struct FORM *atlas;
@@ -662,7 +691,7 @@ char *argv[];
 
     unsigned short nop_instr = 0x4e71;
     unsigned int shared_page1 = 0x708;
-    unsigned int kernelmem = 0x0078a000;
+    unsigned int kerneladdr = 0x001000;
 
     signal(SIGINT, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -676,7 +705,16 @@ char *argv[];
 
     /* phys(3) gets address to map from shared_page1 */
     lseek(pmem_fd, shared_page1, SEEK_SET);
-    write(pmem_fd, &kernelmem, 4);
+    write(pmem_fd, &kerneladdr, 4);
+
+    /* Map this so we can inspect DisplayState+0x18 which is the kernel-managed 0.1s counter (6 vblanks) used for event delivery */
+    /* Checking whether it has changed indicates whether a VBL has occurred */
+    kernelptr = phys(3);
+    displaystateptr = kernelptr + 0xbe4;
+    tenthptr = displaystateptr + 0x018;
+
+    /* want lots of attention */
+    nice(-20);
 
     screen = InitGraphics(argc == 1 ? TRUE : FALSE);
 
@@ -792,12 +830,8 @@ char *argv[];
 
         if (argc == 1) SetViewport(&page);
 
-        /* wait for frame flip */
-        waiting = 0;
-        currpage = framenum;
-        while (currpage == framenum)
-            waiting++;
-        currpage = framenum;
+        /* wait for vblank so we know viewport has been applied */
+        wait_vblank();
 
 #ifdef DEBUG
         /* infoline */
