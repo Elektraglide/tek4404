@@ -47,6 +47,7 @@ typedef struct
 extern unsigned char landdat[];
 extern unsigned char landdat2[];
 
+struct DISPSTATE ds;
 struct FontHeader *font;
 struct FORM *screen;
 struct BBCOM bb;
@@ -61,9 +62,9 @@ unsigned char* tenthptr;
 
 #define MAPWIDTH 1024
 #define MAPHEIGHT 29
+#define DRAWHEIGHT 25
 unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
-#define DRAWHEIGHT 24
-unsigned char* drawmap;  /* offset to bottom of map to reduce draw time */
+unsigned char* drawmap;
 struct FORM* tile[256];
 #define EMPTY 16
 #define FILLED 60
@@ -115,9 +116,10 @@ int sig;
     SetViewport(&p);
     ExitGraphics();
     FontClose(font);
+    RestoreDisplayState(&ds);
 
     for (i = 1; i < 32; i++)
-        printf("[%2d]: %d\n", i, times[i] - times[i-1]);
+        printf("framedelta[%2d]: %dms\n", i, times[i] - times[i-1]);
 
     exit(2);
 }
@@ -155,7 +157,7 @@ int* w, * h;
             char* dst;
             int i, stride;
 
-            dst = form->addr;
+            dst = (char *)form->addr;
             stride = ((*w + 15) & -16) >> 3;
             printf("atlas: %d %d  stride: %d\n", *w, *h, stride);
 
@@ -302,8 +304,9 @@ int w,h;
 
     draw_tile(0, 0, 10);
     draw_tile(16, 0, 11);
-
+#ifdef DEBUG
     draw_bounds(w, h);
+#endif
 
     /* we need to be larger enough to include the cells behind */
     cw = 16 + ((w + 15) & -16);
@@ -321,7 +324,7 @@ void draw_cell(x, y, cellx, celly)
 int x, y;
 int cellx,celly;
 {
-    short tileid = cellmap[celly][cellx];
+    short tileid = drawmap[(celly * MAPWIDTH) + cellx];
 
     bb.destrect.x = x;
     bb.destrect.y = y;
@@ -368,7 +371,6 @@ char *name;
 
     draw_bounds(tile->w, tile->h);
 
-    return tile;
 }
 
 void fillcol(x,y,cellx)
@@ -518,8 +520,10 @@ int cellx;
     bb.halftoneform = NULL;
     BitBlt(&bb);
 
+#ifdef DEBUG
     /* show bounds */
     draw_bounds(asprite->composed_pf->w, asprite->composed_pf->h);
+#endif
 
     /* copy to active display */
     asprite->oldx = page.x + (shipx & -16);
@@ -577,7 +581,7 @@ struct ceilingslice
 
 decode(ptr, endptr)
 struct groundslice* ptr;
-char* endptr;
+struct groundslice* endptr;
 {
     int i,h,y0,y1,objid;
 
@@ -696,7 +700,12 @@ char *argv[];
     unsigned int kerneladdr = 0x001000;
 
     signal(SIGINT, sh_int);
+    signal(SIGTERM, sh_int);
     signal(SIGMILLI, sh_timer);
+
+    /* 120 second watchdog armed */
+    signal(SIGALRM, sh_timer);
+    alarm(120);
 
     /* map kernel variables into our space */
     pmem_fd = open("/dev/pmem", O_RDWR);
@@ -718,9 +727,12 @@ char *argv[];
     /* want lots of attention */
     nice(-20);
 
-    screen = InitGraphics(argc == 1 ? TRUE : FALSE);
+    SaveDisplayState(&ds);
 
-    font = FontOpen("/fonts/PellucidaSans-Serif10.font");
+    screen = InitGraphics(argc == 1 ? TRUE : FALSE);
+    VideoNormal(0);
+
+    font = (struct FontHeader *)FontOpen("/fonts/PellucidaSans-Serif10.font");
     fprintf(stderr, "fixed: %d width:%d height:%d baseline:%d\n", 
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
@@ -728,7 +740,7 @@ char *argv[];
     ESetSignal();
     page.x = page.y = 0;
     pindex = 0;
-    frametime = EGetTime() + 500;
+    frametime = EGetTime() + 250;
     framenum = 0;
     ESetAlarm(frametime);
     printf("ESetAlarm(%d)\n", frametime);
@@ -789,10 +801,10 @@ char *argv[];
 
     /* some landscape */
     memset(cellmap, EMPTY, sizeof(cellmap));
-    decode((struct groundslice *)landdat, landdat2 - 10);
+    decode((struct groundslice *)landdat, (struct groundslice*)landdat2 - 2);
 
-    /* dont draw full MAPHEIGHT, cache from where we draw map */
-    drawmap = cellmap + (MAPHEIGHT - DRAWHEIGHT) * MAPWIDTH;
+    /* calc an offset from which we will draw */
+    drawmap = (char *)cellmap + (MAPHEIGHT - DRAWHEIGHT) * MAPWIDTH;
 
     /* playfield start position */
     pfx = INT2FIX(0);
@@ -814,7 +826,7 @@ char *argv[];
     oldrightcol = 0;
 
     /* animate it */
-    while(1)
+    while(pfx < INT2FIX(MAPWIDTH << 4)))
     {
         int fbx, cellx, pixx;
  
