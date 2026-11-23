@@ -54,25 +54,33 @@ struct BBCOM bb;
 int pindex;
 int scrolldir = 1;
 struct POINT page;
-unsigned long frametime;
+
+/* frame timing using SIGMILLI, so we use a fixedpoint to be able to advance by 33.3ms each frame */
+#define ALARMFRAC 4
+unsigned long alarmtime;
 unsigned int framenum;
+
 unsigned char* kernelptr;
 unsigned char* displaystateptr;
 unsigned char* tenthptr;
 
 #define MAPWIDTH 1024
 #define MAPHEIGHT 29
-#define DRAWHEIGHT 25
+#define DRAWHEIGHT 29
 unsigned char cellmap[MAPHEIGHT][MAPWIDTH];
 unsigned char* drawmap;
 struct FORM* tile[256];
 #define EMPTY 16
 #define FILLED 60
 
+/* screen-relative ship */
 sprite ship;
-int shipx = 64+8;
-int shipy = 64+8;
+int shipx;
+int shipy;
 
+unsigned int alarmtimes[32];
+unsigned int rendertimes[32];
+unsigned int pretimes[32];
 unsigned int times[32];
 unsigned int tindex = 0;
 
@@ -82,28 +90,41 @@ void wait_vblank()
     unsigned char old;
     unsigned int currpage, waiting;
 
-    /* COARSE: wait for SIGMILLI at 33ms (early for a 33.3ms framerate) */
-    waiting = 0;
-    currpage = framenum;
-    while (currpage == framenum)
-        waiting++;
+    /* record absolute SetAlarm time */
+    alarmtimes[tindex] = alarmtime >> ALARMFRAC;
 
-    /* FINE: wait for a vblank to tick over tenthsec counter */
-    old = *ptr;
-    while (old == *ptr);
+    /* start of busy wait */
+    pretimes[tindex] = EGetTime();
 
-    /* store last timings for reporting */
-    times[++tindex & 31] = EGetTime();
+    /* only if we're early as expected */
+    if (pretimes[tindex] < alarmtimes[tindex])
+    {
+        /* COARSE: wait for SIGMILLI at 33ms (early for a 33.3ms framerate) */
+        waiting = 0;
+        currpage = framenum;
+        while (currpage == framenum)
+            waiting++;
+
+        /* FINE: wait for a vblank to tick over tenthsec counter */
+        old = *ptr;
+        while (old == *ptr);
+    }
+
+    /* end of busy wait / end of frame */
+    times[tindex] = EGetTime();
+
+    tindex++;
+    tindex &= 31;
 }
 
 void sh_timer(sig)
 int sig;
 {
-  frametime = EGetTime() + 33;
+  alarmtime += 533; /* 33.3125 ms */
   framenum++;
 
   signal(sig, sh_timer);
-  ESetAlarm(frametime);
+  ESetAlarm((alarmtime >> ALARMFRAC) & 0x7fffffff);
 }
 
 void sh_int(sig)
@@ -118,8 +139,10 @@ int sig;
     FontClose(font);
     RestoreDisplayState(&ds);
 
-    for (i = 1; i < 32; i++)
-        printf("framedelta[%2d]: %dms\n", i, times[i] - times[i-1]);
+#ifdef TIMING
+    for (i = 1; i < 16; i++)
+        printf("frame[%2d]: render(%d) busywait(%d) frametime(%d) alarmtime(%d)\n", i, pretimes[i] - rendertimes[i], times[i] - pretimes[i], times[i] - times[i-1], alarmtimes[i]);
+#endif
 
     exit(2);
 }
@@ -221,7 +244,14 @@ int x, y;
     bb.halftoneform = NULL;
     BitBlt(&bb);
 
-    draw_bounds(aform->w, aform->h);
+    bb.rule = bbS;
+    bb.srcform = NULL;
+    bb.halftoneform = &BlackMask;
+    r.x = x + 1;
+    r.y = y + 1;
+    r.w = aform->w - 2;
+    r.h = aform->h - 2;
+    RectBoxDrawX(&r, 1, &bb);
 }
 
 void draw_tile(x, y, tileid)
@@ -348,31 +378,6 @@ int cellx,celly;
     }
 }
 
-struct FORM *maketile(name)
-char *name;
-{
-  struct FORM *tile;
-  struct POINT origin;
-  struct RECT r;
-
-    bb.rule = bbS;
-    tile = FormCreate(16, 16);
-    bb.destform = tile;
-    bb.halftoneform = &WhiteMask;
-    r.x = r.y = 0;
-    r.w = tile->w;
-    r.h = tile->h;
-    RectDrawX(&r, &bb);
-
-    bb.halftoneform = NULL;
-    origin.x = 0;
-    origin.y = font->maps->baseline;
-    StringDrawX(name, &origin, &bb, font);
-
-    draw_bounds(tile->w, tile->h);
-
-}
-
 void fillcol(x,y,cellx)
 int x,y;
 int cellx;
@@ -445,6 +450,7 @@ int pixx,y;
     pagex = pixx - (fbx * 384);
 
     bb.rule = bbS;
+    bb.destform = screen;
     for(i=0; i<40; i++)
     {
         fillcol(pagex + (i << 4), y, cellx + i);
@@ -452,38 +458,39 @@ int pixx,y;
 }
 
 /* cache playfield behind */
-void compose_sprite(asprite, cellx)
+void compose_sprite(asprite, pixx)
 sprite* asprite;
-int cellx;
+int pixx;
 {
     int cx, cy, rule;
 
-    cx = cellx + (PIX2CELL(shipx));
-    cy = PIX2CELL(shipy);
+    cx = PIX2CELL(page.x + shipx);
+    cy = PIX2CELL(page.y + shipy);
 
     /* restore old playfield if we've moved */
-    if (PIX2CELL(asprite->oldx) != cx || PIX2CELL(asprite->oldy) != cy)
+    if (asprite->oldx > 0)
     {
-        bb.rule = bbS;
-        bb.srcform = asprite->cached_pf;
-        bb.destform = screen;
-        bb.destrect.x = asprite->oldx;
-        bb.destrect.y = asprite->oldy;
-        bb.destrect.w = asprite->cached_pf->w;
-        bb.destrect.h = asprite->cached_pf->h;
-        bb.halftoneform = NULL;
-        BitBlt(&bb);
-#ifdef DEBUG
-        bb.destrect.x = 0;
-        bb.destrect.y = 0;
-        BitBlt(&bb);
-#endif
-        asprite->oldx = -1;
-        asprite->oldy = -1;
+        if (PIX2CELL(asprite->oldx) != cx || PIX2CELL(asprite->oldy) != cy)
+        {
+            bb.rule = bbS;
+            bb.srcform = asprite->cached_pf;
+            bb.destform = screen;
+            bb.destrect.x = asprite->oldx;
+            bb.destrect.y = asprite->oldy;
+            bb.destrect.w = asprite->cached_pf->w;
+            bb.destrect.h = asprite->cached_pf->h;
+            bb.halftoneform = NULL;
+            BitBlt(&bb);
+
+            asprite->oldx = -1;
+            asprite->oldy = -1;
+        }
     }
 
     /* build background from playfield we're over if we dont have it */
     rule = bbSorD;
+    cx = PIX2CELL(pixx + shipx);
+    cy = PIX2CELL(shipy);
     if (asprite->cx != cx || asprite->cy != cy)
     {
         bb.rule = bbS;
@@ -513,8 +520,8 @@ int cellx;
     bb.rule = rule;
     bb.srcform = asprite->form;
     bb.destform = asprite->composed_pf;
-    bb.destrect.x = shipx & 15;
-    bb.destrect.y = shipy & 15;
+    bb.destrect.x = (pixx + shipx) & 15;
+    bb.destrect.y = (       shipy) & 15;
     bb.destrect.w = asprite->form->w;
     bb.destrect.h = asprite->form->h;
     bb.halftoneform = NULL;
@@ -703,9 +710,9 @@ char *argv[];
     signal(SIGTERM, sh_int);
     signal(SIGMILLI, sh_timer);
 
-    /* 120 second watchdog armed */
+    /* 180 second watchdog armed */
     signal(SIGALRM, sh_int);
-    alarm(120);
+    alarm(180);
 
     /* map kernel variables into our space */
     pmem_fd = open("/dev/pmem", O_RDWR);
@@ -737,13 +744,9 @@ char *argv[];
       font->maps->fixed,font->maps->maxw, 
       font->maps->line, font->maps->baseline);
 
-    ESetSignal();
     page.x = page.y = 0;
     pindex = 0;
-    frametime = EGetTime() + 250;
     framenum = 0;
-    ESetAlarm(frametime);
-    printf("ESetAlarm(%d)\n", frametime);
 
     /* for controlling clipping etc */
     BbcomDefault(&bb);
@@ -790,14 +793,10 @@ char *argv[];
     }
 
 
-#if 1
-    /* make ship */
+    /* make ship with screen-relative coordinates */
     shipx = 200;
-    shipy = 128;
+    shipy = 144;
     makeship(&ship, 32, 32);
-
-    drawform(ship.form, 0, 0);
-#endif
 
     /* some landscape */
     memset(cellmap, EMPTY, sizeof(cellmap));
@@ -808,7 +807,8 @@ char *argv[];
 
     /* playfield start position */
     pfx = INT2FIX(0);
-    pfdir = INT2FIX(2);
+    /* haltoning on 2x2 grid means minimum scroll disatnce is 2 */
+    pfdir = INT2FIX(4);
 
     if (argc == 1)
     {
@@ -825,11 +825,17 @@ char *argv[];
 
     oldrightcol = 0;
 
+    ESetSignal();
+    alarmtime = (EGetTime() + 250) << ALARMFRAC;
+    ESetAlarm((alarmtime >> ALARMFRAC) & 0x7fffffff);
+
     /* animate it */
     while(1)
     {
         int fbx, cellx, pixx;
  
+        rendertimes[tindex] = EGetTime();
+
         /* top left coordinate */
         pixx = FIX2INT(pfx);
 
@@ -844,11 +850,6 @@ char *argv[];
 
         /* decide which page based on even/odd framebuffer window */
         page.y = fbx & 1 ? 512 : 0;
-
-        if (argc == 1) SetViewport(&page);
-
-        /* wait for vblank so we know viewport has been applied */
-        wait_vblank();
 
 #ifdef DEBUG
         /* infoline */
@@ -928,6 +929,7 @@ char *argv[];
         }
 #endif
 
+        if (0)
         {
             struct POINT p;
 
@@ -944,13 +946,26 @@ char *argv[];
         }
 
         /* animated sprite */
-        compose_sprite(&ship, cellx);
+        compose_sprite(&ship, pixx);
 
-#ifdef DEBUBG
+#ifdef DEBUG
         showinfo(infoline);
 #endif
 
+        if (argc == 1) SetViewport(&page);
+        /* wait for vblank so we know viewport has been applied */
+        wait_vblank();
+
         /* scroll */
         pfx += pfdir;
+
+
+        drawform(ship.cached_pf, page.x+64, page.y);
+        drawform(ship.composed_pf, page.x+64+48, page.y);
+
+        while ((GetButtons() & M_LEFT) == 0);
+        while ((GetButtons() & M_LEFT));
+
+
     }
 }
