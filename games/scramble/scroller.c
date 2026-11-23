@@ -30,7 +30,7 @@ typedef struct
   fixed x,y;
   fixed dx,dy;
 
-  short cx, cy;
+  short cx, cy, len;
   struct FORM* cached_pf;
   struct FORM* composed_pf;
   int oldx,oldy;
@@ -278,6 +278,8 @@ int w,h;
     ch = 16 + ((h + 15) & -16);
     asprite->cached_pf = FormCreate(cw, ch);
     asprite->composed_pf = FormCreate(cw,ch);
+    /* cache number of bytes for bitmap */
+    asprite->len = asprite->cached_pf->w * asprite->cached_pf->h >> 3;
     printf("compose_pf: %d %d\n", cw, ch);
 
     asprite->oldx = asprite->oldy = -1;
@@ -465,11 +467,13 @@ int cellx;
 
         asprite->cx = cx;
         asprite->cy = cy;
+#ifdef DEBUG
         rule = bbSnorD;
+#endif
     }
 
     /* fast copy bits */
-    memcpy(asprite->composed_pf->addr, asprite->cached_pf->addr, asprite->cached_pf->w * asprite->cached_pf->h >> 3);
+    memcpy(asprite->composed_pf->addr, asprite->cached_pf->addr, asprite->len);
 
     /* compose ship */
     bb.rule = rule;
