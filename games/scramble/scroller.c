@@ -464,13 +464,14 @@ int pixx;
 {
     int cx, cy, rule;
 
-    cx = PIX2CELL(page.x + shipx);
-    cy = PIX2CELL(page.y + shipy);
+    /* display relative coordinates */
+    cx = (page.x + shipx) & -16;
+    cy = (page.y + shipy) & -16;
 
     /* restore old playfield if we've moved */
     if (asprite->oldx > 0)
     {
-        if (PIX2CELL(asprite->oldx) != cx || PIX2CELL(asprite->oldy) != cy)
+        if (asprite->oldx != cx || asprite->oldy != cy)
         {
             bb.rule = bbS;
             bb.srcform = asprite->cached_pf;
@@ -533,8 +534,8 @@ int pixx;
 #endif
 
     /* copy to active display */
-    asprite->oldx = page.x + (shipx & -16);
-    asprite->oldy = page.y + (shipy & -16);
+    asprite->oldx = (page.x + shipx) & -16;
+    asprite->oldy = (page.y + shipy) & -16;
     bb.rule = bbS;
     bb.srcform = asprite->composed_pf;
     bb.destform = screen;
