@@ -105,10 +105,9 @@ void wait_vblank()
     if (pretimes[tindex] < alarmtimes[tindex])
     {
         /* COARSE: wait for SIGMILLI at 33ms (early for a 33.3ms framerate) */
-        waiting = 0;
-        currpage = framenum;
-        while (currpage == framenum)
-            waiting++;
+
+        /* wait for a signal */
+        pause();
 
         /* FINE: wait for a vblank to tick over tenthsec counter */
         old = *ptr;
@@ -125,7 +124,7 @@ void wait_vblank()
 void sh_timer(sig)
 int sig;
 {
-  alarmtime += 533; /* 33.3125 ms */
+    alarmtime += 533; /* 33.3125 ms */
   framenum++;
 
   signal(sig, sh_timer);
@@ -517,7 +516,8 @@ int pixx;
 
         asprite->cx = cx;
         asprite->cy = cy;
-#ifdef DEBUG
+#ifdef SHOW_REFRESH
+        /* indicate when we rebuilt cell cache */
         rule = bbSnorD;
 #endif
     }
