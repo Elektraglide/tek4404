@@ -4,6 +4,7 @@
 #include <font.h>
 #include <graphics.h>
 #include <signal.h>
+#include <sys/sgtty.h>
 
 #ifndef unix
 #info scrolldemo
@@ -46,6 +47,10 @@ typedef struct
 
 extern unsigned char landdat[];
 extern unsigned char landdat2[];
+
+int fdtty;
+struct sgttyb orig_term_settings;
+struct sgttyb new_term_settings;
 
 struct DISPSTATE ds;
 struct FontHeader *font;
@@ -133,16 +138,19 @@ int sig;
     struct POINT p;
     int i;
 
+    if (sig == SIGALRM)
+        printf("*** Watchdog ***\n");
+
     p.x = p.y = 0;
     SetViewport(&p);
     ExitGraphics();
     FontClose(font);
     RestoreDisplayState(&ds);
 
-#ifdef TIMING
+    stty(fdtty, &orig_term_settings);
+
     for (i = 1; i < 16; i++)
         printf("frame[%2d]: render(%d) busywait(%d) frametime(%d) alarmtime(%d)\n", i, pretimes[i] - rendertimes[i], times[i] - pretimes[i], times[i] - times[i-1], alarmtimes[i]);
-#endif
 
     exit(2);
 }
@@ -707,6 +715,13 @@ char *argv[];
     unsigned int shared_page1 = 0x708;
     unsigned int kerneladdr = 0x001000;
 
+    /* read keyboard */
+    fdtty = open(ttyname(fileno(stdin)), O_RDWR);
+    ret = gtty(fdtty, &orig_term_settings);
+    new_term_settings = orig_term_settings;
+    new_term_settings.sg_flag |= CBREAK | RAW;
+    stty(fdtty, &new_term_settings);
+
     signal(SIGINT, sh_int);
     signal(SIGTERM, sh_int);
     signal(SIGMILLI, sh_timer);
@@ -790,7 +805,7 @@ char *argv[];
     else
     {
         fprintf(stderr, "cannot create atlas\n");
-        exit(-1);
+        sh_int(-1);
     }
 
 
@@ -809,7 +824,7 @@ char *argv[];
     /* playfield start position */
     pfx = INT2FIX(0);
     /* haltoning on 2x2 grid means minimum scroll disatnce is 2 */
-    pfdir = INT2FIX(4);
+    pfdir = INT2FIX(2);
 
     if (argc == 1)
     {
@@ -817,12 +832,6 @@ char *argv[];
         fillscreen(FIX2INT(pfx), 0);
         fillscreen(FIX2INT(pfx), 512);
     }
-#if 1
-    else
-    {
-        pfdir = 0;
-    }
-#endif
 
     oldrightcol = 0;
 
@@ -835,6 +844,28 @@ char *argv[];
     {
         int fbx, cellx, pixx;
  
+        gtty(fdtty, &new_term_settings);
+        if (new_term_settings.sg_speed & INCHR)
+        {
+            char inputbuffer[8];
+            ret = read(fdtty, inputbuffer, sizeof(inputbuffer));
+            if (ret > 0)
+            {
+                if (inputbuffer[0] <= 0x1b)
+                    sh_int(-5);
+
+                if (inputbuffer[0] == 'w')
+                    shipy -= 4;
+                if (inputbuffer[0] == 'a')
+                    shipx -= 4;
+                if (inputbuffer[0] == 's')
+                    shipy += 4;
+                if (inputbuffer[0] == 'd')
+                    shipx += 4;
+            }
+        }
+
+        /* mark start of rendering */
         rendertimes[tindex] = EGetTime();
 
         /* top left coordinate */
@@ -953,20 +984,36 @@ char *argv[];
         showinfo(infoline);
 #endif
 
-        if (argc == 1) SetViewport(&page);
+        if (argc == 1)
+        {
+            /* move display viewport */
+            SetViewport(&page);
+        }
+        else
+        {
+            /* show where viewport *would* be */
+            bb.rule = bbS;
+            bb.srcform = NULL;
+            bb.halftoneform = &GrayMask;
+            r.x = page.x + 4;
+            r.y = page.y + 4;
+            r.w = 640 - 8;
+            r.h = 480 - 8;
+            RectBoxDrawX(&r, 4, &bb);
+        }
+
         /* wait for vblank so we know viewport has been applied */
         wait_vblank();
 
         /* scroll */
         pfx += pfdir;
-
-
+         
+#if 0
         drawform(ship.cached_pf, page.x+64, page.y);
         drawform(ship.composed_pf, page.x+64+48, page.y);
 
         while ((GetButtons() & M_LEFT) == 0);
-        while ((GetButtons() & M_LEFT));
-
+#endif
 
     }
 }
