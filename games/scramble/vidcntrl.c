@@ -12,7 +12,7 @@ selftest_errlog(testid, val,count)
 int testid;
 int val,count;
 {
-    printf("Self Test Error-%s [%02d %04X] loop=%d\n", "Display Control", testid, val, count);
+    printf("Self Test Error-%s [%02d, %04X] loop=%d\n", "Display Control", testid, val, count);
 }
 
 fill_video_rect(fb, minx, maxx, miny, maxy, val)
@@ -56,14 +56,46 @@ char **argv;
 
     /* map into our space */
     videocntrlptr = (unsigned char *)phys(3);
-    origval = *videocntrlptr;
+    origval = (*videocntrlptr & 0x07) | 0x40 | 0x20 | 0x10;
 
     /* video ram too */
     fb = (unsigned short*)phys(1);
 
-    /* test 7 */
+    /* test 6
+
+      During display area, if VideoData off, read again and expect on
+    */
     count = 0x20000;
-    *videocntrlptr = 0x20;
+
+    /* fills framebuffer with 0xffff */
+    fill_video_rect(fb, 0, 1024, 0, 1024, 0xffff);
+
+    *videocntrlptr = 0x0;
+    while (--count)
+    {
+        val = *videocntrlptr;
+
+        /* skip if vblank */
+        if (val & 0x20)
+            continue;
+
+        /* skip if NOT hblank */
+        if ((val & 0x40))
+            continue;
+
+        if ((val & 0x80) == 0)
+            continue;
+    }
+    if (count)
+        selftest_errlog(6, val, count);
+
+
+    /* test 7
+    
+      During display area, if VideoData off, read again and expect on
+    */
+    count = 0x20000;
+    *videocntrlptr = 0x20;  /* ScreenEnable */
     while (--count)
     {
         val = *videocntrlptr;
@@ -79,7 +111,7 @@ char **argv;
         if (val & 0x80)
             continue;
 
-        /* re-read videocntrl */
+        /* re-read videocntrl IFF previous VideoData==0 */
         val = *videocntrlptr;
         if ((val & 0x80) == 0)
             break;
@@ -88,9 +120,12 @@ char **argv;
         selftest_errlog(7, val, count);
 
 
-    /* test 8 */
+    /* test 8 
+    
+      During hblank, expect VideoData
+    */
     count = 0x20000;
-    *videocntrlptr = 0x30;
+    *videocntrlptr = 0x30;  /* ScreenEnable ScreenInverse */
     while (--count)
     {
         val = *videocntrlptr;
@@ -110,7 +145,10 @@ char **argv;
         selftest_errlog(8, val, count);
 
 
-    /* test 9 */
+    /* test 9 
+    
+      During display area, if VideoData off, read again and expect on
+    */
     count = 0x20000;
 
     /* fills framebuffer with 0 */
@@ -139,7 +177,10 @@ char **argv;
     if (count)
         selftest_errlog(9, val, count);
 
-    /* test 10 */
+    /* test 10 
+    
+     Panning bits read/write
+    */
     for (i = 0; i < 8; i++)
     {
         *videocntrlptr = i;
@@ -153,10 +194,10 @@ char **argv;
 
     /* test 11 
     
-     During display area, ASSERT(bit#7 == 0)
+     During display area, ASSERT(VideoData == 0) when setting VideoPan > 34751
     */
     count = 0x20000;
-    *videocntrlptr = 0x20;
+    *videocntrlptr = 0x20;  /* Screen Enable */
     while(--count)
     {
         val = *videocntrlptr;
@@ -182,13 +223,10 @@ char **argv;
     if (argc == 1)
         exit(0);
 
-    samplecount = 64;
-#if 0
     /* how many samples */
     samplecount = atoi(argv[1]);
     if (samplecount < 16) samplecount = 16;
     if (samplecount > 512) samplecount = 512;
-#endif
 
     dst = t;
     start = EGetTime();
