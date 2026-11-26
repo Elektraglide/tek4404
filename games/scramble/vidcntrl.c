@@ -40,7 +40,7 @@ char **argv;
     register unsigned char *dst;
     register unsigned short* fb;
     unsigned char val, t[512];
-    register unsigned short i;
+    register short i;
     int pmem_fd,start,stop, count, origval, samplecount;
 
     /* map kernel variables into our space */
@@ -230,8 +230,11 @@ char **argv;
 
     dst = t;
     start = EGetTime();
-    for(i=0; i<samplecount; i++)
+    i = samplecount;
+    while(--i >= 0)  /* for gcc1.42 faster loop; but no dbra... */
+    {
         *dst++ = *videocntrlptr;
+    }
     stop = EGetTime();
     
     /* just show when reading differs from previous */
