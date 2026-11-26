@@ -357,6 +357,27 @@ int w,h;
     asprite->oldx = asprite->oldy = -1;
 }
 
+#define BITBLT16 myBitBlt
+
+void myBitBlt(bb)
+struct BBCOM *bb;
+{
+    register unsigned short* dst, * src;
+    register short h = bb->srcform->h;
+    register int inc = bb->destform->inc;
+
+    if (bb->srcform->w == 16)
+    {
+        src = bb->srcform->addr;
+        dst = ((char*)bb->destform->addr) + (bb->destrect.y * inc) + (bb->destrect.x >> 3);
+        do
+        {
+            *dst = *src++;
+            (char *)dst += inc;
+        } while (--h > 0);
+    }
+}
+
 void draw_cell(x, y, cellx, celly)
 int x, y;
 int cellx,celly;
@@ -381,7 +402,7 @@ int cellx,celly;
     else
     {
         bb.srcform = tile[tileid];
-        BitBlt(&bb);
+        BITBLT16(&bb);
     }
 }
 
@@ -413,7 +434,7 @@ int cellx;
         else
         {
             bb.srcform = tile[(*cellcol)];
-            BitBlt(&bb);
+            BITBLT16(&bb);
         }
         bb.destrect.y += 16;
 
@@ -433,13 +454,13 @@ int cell;
     bb.destrect.w = 16;
     bb.destrect.h = 16;
     bb.halftoneform = NULL;
-    BitBlt(&bb);
+    BITBLT16(&bb);
     bb.destrect.x += 16;
-    BitBlt(&bb);
+    BITBLT16(&bb);
     bb.destrect.y += 16;
-    BitBlt(&bb);
+    BITBLT16(&bb);
     bb.destrect.x -= 16;
-    BitBlt(&bb);
+    BITBLT16(&bb);
 }
 
 void fillscreen(pixx,y)
