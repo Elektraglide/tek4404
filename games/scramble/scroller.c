@@ -85,7 +85,7 @@ int shipy;
 
 unsigned int alarmtimes[32];
 unsigned int rendertimes[32];
-unsigned int pretimes[32];
+unsigned int busywaitstart[32];
 unsigned int times[32];
 unsigned int tindex = 0;
 
@@ -99,10 +99,10 @@ void wait_vblank()
     alarmtimes[tindex] = alarmtime >> ALARMFRAC;
 
     /* start of busy wait */
-    pretimes[tindex] = EGetTime();
+    busywaitstart[tindex] = EGetTime();
 
-    /* only if we're early as expected */
-    if (pretimes[tindex] < alarmtimes[tindex])
+    /* only if we're earlier than expected */
+    if (busywaitstart[tindex] < alarmtimes[tindex])
     {
         /* COARSE: wait for SIGMILLI at 33ms (early for a 33.3ms framerate) */
 
@@ -149,7 +149,7 @@ int sig;
     stty(fdtty, &orig_term_settings);
 
     for (i = 1; i < 16; i++)
-        printf("frame[%2d]: render(%d) busywait(%d) frametime(%d) alarmtime(%d)\n", i, pretimes[i] - rendertimes[i], times[i] - pretimes[i], times[i] - times[i-1], alarmtimes[i]);
+        printf("frame[%2d]: render(%d) busywait(%d) frametime(%d) alarmtime(%d)\n", i, busywaitstart[i] - rendertimes[i], times[i] - busywaitstart[i], times[i] - times[i-1], alarmtimes[i]);
 
     exit(2);
 }
@@ -370,11 +370,11 @@ struct BBCOM *bb;
     {
         src = bb->srcform->addr;
         dst = ((char*)bb->destform->addr) + (bb->destrect.y * inc) + (bb->destrect.x >> 3);
-        do
+        while(--h >= 0)
         {
             *dst = *src++;
             (char *)dst += inc;
-        } while (--h > 0);
+        }
     }
 }
 
@@ -576,7 +576,60 @@ int pixx;
     BitBlt(&bb);
 }
 
+typedef struct
+{
+    short cx, cy;
+    unsigned char state;
+} star;
 
+star thestars[32];
+
+void twinklies(cellx)
+short cellx;
+{
+    short i;
+    star* starptr = thestars;
+
+    i = 32;
+    while (--i >= 0)
+    {
+        if (starptr->state == 2)
+        {
+            cellmap[starptr->cy][starptr->cx] = EMPTY;
+
+// FIXME need to draw
+
+            starptr->state++;
+        }
+        else
+        if (starptr->state == 1)
+        {
+            cellmap[starptr->cy][starptr->cx] = 12;
+            starptr->state++;
+        }
+        else
+        if (starptr->state++ > 128)
+        {
+            static unsigned char x, y, z, a = 1;
+
+            unsigned char t;
+            
+            t = x ^ (x << 4); x = y; y = z; z = a; a = z ^ t ^ (z >> 1) ^ (t << 1);
+            starptr->cx = cellx + (a & 31);
+            t = x ^ (x << 4); x = y; y = z; z = a; a = z ^ t ^ (z >> 1) ^ (t << 1);
+            starptr->cy = a & 31;
+            if (a < MAPHEIGHT && cellmap[starptr->cy][starptr->cx] == EMPTY)
+            {
+                printf("pos = %d, %d\n", starptr->cx, starptr->cy);
+
+                cellmap[starptr->cy][starptr->cx] = 27;
+                starptr->state = 1;
+            }
+        }
+
+        starptr++;
+    }
+}
 
 void showinfo(buffer)
 char *buffer;
@@ -616,7 +669,7 @@ struct ceilingslice
 /* distances include topline scoreline etc */
 #define DIST2CELL(A)  ((A>>3) - 2)
 
-decode(ptr, endptr)
+void decode(ptr, endptr)
 struct groundslice* ptr;
 struct groundslice* endptr;
 {
@@ -730,7 +783,7 @@ char *argv[];
     float angle;
     char infoline[64];
     struct FORM *atlas;
-    int aw,ah, oldleftcol, oldrightcol, pmem_fd;
+    int aw,ah, remaining_work, oldrightcol, pmem_fd;
 
     unsigned short nop_instr = 0x4e71;
     unsigned int shared_page1 = 0x708;
@@ -855,6 +908,7 @@ char *argv[];
     }
 
     oldrightcol = 0;
+    remaining_work = 0;
 
     ESetSignal();
     alarmtime = (EGetTime() + 250) << ALARMFRAC;
@@ -863,7 +917,7 @@ char *argv[];
     /* animate it */
     while(1)
     {
-        int fbx, cellx, pixx;
+        short fbx, cellx, pixx;
  
         gtty(fdtty, &new_term_settings);
         if (new_term_settings.sg_speed & INCHR)
@@ -921,6 +975,14 @@ char *argv[];
                 bb.rule = bbS;
                 fillcol(col << 4, page.y, cellx + 40);
 
+                /* stagger work across frames */
+                remaining_work = 2;
+            }
+            else
+            if (remaining_work)
+            {
+                remaining_work = 0;
+
                 /* fill on next page too */
                 col = PIX2CELL(page.x);
                 if (col >= 0)
@@ -946,6 +1008,14 @@ char *argv[];
                 /* fill new right column just out of view */
                 bb.rule = bbS;
                 fillcol(col << 4, page.y, cellx - 1);
+
+                /* stagger work across frames */
+                remaining_work = 2;
+            }
+            else
+            if (remaining_work)
+            {
+                remaining_work = 0;
 
                 /* fill on next page too */
                 col = PIX2CELL(page.x + 40);
@@ -1000,6 +1070,9 @@ char *argv[];
 
         /* animated sprite */
         compose_sprite(&ship, pixx);
+
+        /* do some twinklies */
+        twinklies(cellx);
 
 #ifdef DEBUG
         showinfo(infoline);
