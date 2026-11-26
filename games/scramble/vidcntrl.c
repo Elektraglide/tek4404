@@ -231,10 +231,11 @@ char **argv;
     dst = t;
     start = EGetTime();
     i = samplecount;
-    while(--i >= 0)  /* for gcc1.42 faster loop; but no dbra... */
+    do    /* NB constructed to get a dbra loop */
     {
         *dst++ = *videocntrlptr;
-    }
+    } while (--i != -1);
+
     stop = EGetTime();
     
     /* just show when reading differs from previous */
