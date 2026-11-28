@@ -793,7 +793,8 @@ char *argv[];
     fdtty = open(ttyname(fileno(stdin)), O_RDWR);
     ret = gtty(fdtty, &orig_term_settings);
     new_term_settings = orig_term_settings;
-    new_term_settings.sg_flag |= CBREAK | RAW;
+    new_term_settings.sg_flag |= CBREAK;
+    new_term_settings.sg_flag &= ~ECHO;
     stty(fdtty, &new_term_settings);
 
     signal(SIGINT, sh_int);
