@@ -789,6 +789,9 @@ char *argv[];
     unsigned int shared_page1 = 0x708;
     unsigned int kerneladdr = 0x001000;
 
+    /* we need this to resolve symbols in /lib/cmathlib */
+    pffinit();
+
     /* read keyboard */
     fdtty = open(ttyname(fileno(stdin)), O_RDWR);
     ret = gtty(fdtty, &orig_term_settings);
@@ -818,7 +821,7 @@ char *argv[];
 
     /* Map this so we can inspect DisplayState+0x18 which is the kernel-managed 0.1s counter (6 vblanks) used for event delivery */
     /* Checking whether it has changed indicates whether a VBL has occurred */
-    kernelptr = phys(3);
+    kernelptr = (unsigned char *)phys(3);
     displaystateptr = kernelptr + 0xbe4;
     tenthptr = displaystateptr + 0x018;
 
