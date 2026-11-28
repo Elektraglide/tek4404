@@ -980,7 +980,19 @@ char *argv[];
                 remaining_work = 2;
             }
             else
-            if (remaining_work)
+            if (remaining_work == 2)
+            {
+                remaining_work = 1;
+
+                /* fill on next page too */
+                col = PIX2CELL(page.x);
+                if (col >= 0)
+                {
+                    fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 );
+                }
+            }
+            else
+            if (remaining_work == 1)
             {
                 remaining_work = 0;
 
@@ -988,12 +1000,10 @@ char *argv[];
                 col = PIX2CELL(page.x);
                 if (col >= 0)
                 {
-                    fillcol(((16+col) << 4), page.y ^ 512, cellx + 40 );
-
                     /* the region that overlaps far left and far right scroll window position also needs filling */
                     if (col < 16)
                     {
-                        fillcol((col << 4), page.y ^ 512, cellx + 24 );
+                        fillcol((col << 4), page.y ^ 512, cellx + 24);
                     }
                 }
             }
