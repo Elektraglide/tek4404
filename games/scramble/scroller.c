@@ -363,18 +363,18 @@ void myBitBlt(bb)
 struct BBCOM *bb;
 {
     register unsigned short* dst, * src;
-    register short h = bb->srcform->h;
+    register short h = bb->srcform->h - 1;
     register int inc = bb->destform->inc;
 
     if (bb->srcform->w == 16)
     {
-        src = bb->srcform->addr;
-        dst = ((char*)bb->destform->addr) + (bb->destrect.y * inc) + (bb->destrect.x >> 3);
-        while(--h >= 0)
+        src = (unsigned short *)bb->srcform->addr;
+        dst = (unsigned short*)(((char*)bb->destform->addr) + (bb->destrect.y * inc) + (bb->destrect.x >> 3));
+        do
         {
             *dst = *src++;
             (char *)dst += inc;
-        }
+        } while (--h != -1);
     }
 }
 
