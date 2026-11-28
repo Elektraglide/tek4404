@@ -930,9 +930,6 @@ char *argv[];
             ret = read(fdtty, inputbuffer, sizeof(inputbuffer));
             if (ret > 0)
             {
-                if (inputbuffer[0] <= 0x1b)
-                    sh_int(-5);
-
                 if (inputbuffer[0] == 'w')
                     shipy -= 4;
                 if (inputbuffer[0] == 'a')
